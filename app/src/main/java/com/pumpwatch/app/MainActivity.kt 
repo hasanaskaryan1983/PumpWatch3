@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -51,7 +55,11 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.BacktestEngine
+import com.pumpwatch.app.data.BacktestResult
+import com.pumpwatch.app.data.ChartClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.SimulatedTrade
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -91,6 +99,15 @@ enum class Tab(val title: String, val emoji: String) {
     ALERTS("هشدارها", "🔔"),
     BACKTEST("بک‌تست", "🧪")
 }
+
+private val backtestCoins = listOf(
+    "bitcoin" to "بیت‌کوین",
+    "ethereum" to "اتریوم",
+    "solana" to "سولانا",
+    "dogecoin" to "دوج",
+    "ripple" to "ریپل",
+    "tron" to "ترون"
+)
 
 // ---------- اکتیویتی ----------
 
@@ -193,7 +210,7 @@ fun MainApp() {
                 when (selectedTab) {
                     Tab.MARKET -> MarketScreen()
                     Tab.ALERTS -> AlertsScreen()
-                    Tab.BACKTEST -> PlaceholderScreen("🧪", "بک‌تست", "شبیه‌ساز استراتژی — قدم چهارم")
+                    Tab.BACKTEST -> BacktestScreen()
                 }
             }
         }
@@ -445,6 +462,187 @@ fun AlertCard(coin: CoinMarket) {
     }
 }
 
+// ---------- صفحه بک‌تست ----------
+
+@Composable
+fun BacktestScreen() {
+    var coinId by remember { mutableStateOf("bitcoin") }
+    var days by remember { mutableStateOf(30) }
+    var buyDrop by remember { mutableStateOf(10.0) }
+    var sellRise by remember { mutableStateOf(10.0) }
+    var loading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var result by remember { mutableStateOf<BacktestResult?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun run() {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
+                val chart = ChartClient.api.getMarketChart(coinId, days = days)
+                val series = chart.prices.map { p -> p[0].toLong() to p[1] }
+                result = BacktestEngine.run(series, buyDrop, sellRise)
+            } catch (e: Exception) {
+                errorMsg = "خطا: ${e.message}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            "شبیه‌ساز بک‌تست",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            backtestCoins.forEach { (id, label) ->
+                FilterChip(
+                    selected = coinId == id,
+                    onClick = { coinId = id },
+                    label = { Text(label) }
+                )
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(7, 30, 90).forEach { d ->
+                FilterChip(
+                    selected = days == d,
+                    onClick = { days = d },
+                    label = { Text("$d روز") }
+                )
+            }
+        }
+
+        Text("خرید پس از ریزش:", fontSize = 13.sp, color = TextSecondary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(5.0, 10.0, 15.0).forEach { t ->
+                FilterChip(
+                    selected = buyDrop == t,
+                    onClick = { buyDrop = t },
+                    label = { Text("${t.toInt()}٪") }
+                )
+            }
+        }
+
+        Text("فروش پس از رشد / افت:", fontSize = 13.sp, color = TextSecondary)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(5.0, 10.0, 15.0).forEach { t ->
+                FilterChip(
+                    selected = sellRise == t,
+                    onClick = { sellRise = t },
+                    label = { Text("${t.toInt()}٪") }
+                )
+            }
+        }
+
+        Button(
+            onClick = { run() },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading
+        ) {
+            Text(if (loading) "در حال اجرا..." else "اجرای بک‌تست 🚀")
+        }
+
+        if (loading) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentGreen)
+            }
+        }
+
+        if (errorMsg != null) {
+            Text(errorMsg ?: "", color = AccentRed, textAlign = TextAlign.Center)
+        }
+
+        result?.let { r ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatCard("معاملات", r.totalTrades.toString(), TextPrimary)
+                StatCard(
+                    "وین‌ریت",
+                    String.format(Locale.US, "%.0f%%", r.winRatePercent),
+                    if (r.winRatePercent >= 50) AccentGreen else AccentRed
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatCard(
+                    "سود خالص",
+                    String.format(Locale.US, "%+.1f%%", r.netPnlPercent),
+                    if (r.netPnlPercent >= 0) AccentGreen else AccentRed
+                )
+                StatCard(
+                    "بیشترین افت",
+                    String.format(Locale.US, "%.1f%%", r.maxDrawdownPercent),
+                    AccentRed
+                )
+            }
+
+            Text("آخرین معاملات:", fontSize = 13.sp, color = TextSecondary)
+            r.trades.takeLast(10).reversed().forEach { t -> TradeRow(t) }
+        }
+    }
+}
+
+@Composable
+fun StatCard(title: String, value: String, color: Color) {
+    Surface(
+        color = DarkCard,
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.weight(1f)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(title, fontSize = 11.sp, color = TextSecondary)
+            Text(value, color = color, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+fun TradeRow(t: SimulatedTrade) {
+    Surface(color = DarkCard, shape = RoundedCornerShape(12.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("خرید: ${formatPrice(t.entryPrice)}", fontSize = 12.sp)
+                Text(
+                    "فروش: ${formatPrice(t.exitPrice)}",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+            Text(
+                String.format(Locale.US, "%+.2f%%", t.pnlPercent),
+                color = if (t.pnlPercent >= 0) AccentGreen else AccentRed,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
 // ---------- عمومی ----------
 
 fun formatPrice(price: Double): String {
@@ -452,33 +650,5 @@ fun formatPrice(price: Double): String {
         String.format(Locale.US, "$%,.2f", price)
     } else {
         String.format(Locale.US, "$%.6f", price)
-    }
-}
-
-@Composable
-fun PlaceholderScreen(emoji: String, title: String, subtitle: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Surface(color = DarkCard, shape = RoundedCornerShape(24.dp)) {
-            Column(
-                modifier = Modifier.padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(emoji, fontSize = 56.sp)
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(subtitle, color = TextSecondary, textAlign = TextAlign.Center)
-            }
-        }
     }
 }
