@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -53,6 +54,7 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.abs
 
 // ---------- رنگ‌های تم ----------
 
@@ -190,7 +192,7 @@ fun MainApp() {
             ) {
                 when (selectedTab) {
                     Tab.MARKET -> MarketScreen()
-                    Tab.ALERTS -> PlaceholderScreen("🔔", "هشدارها", "هشدار پامپ و دامپ — قدم سوم")
+                    Tab.ALERTS -> AlertsScreen()
                     Tab.BACKTEST -> PlaceholderScreen("🧪", "بک‌تست", "شبیه‌ساز استراتژی — قدم چهارم")
                 }
             }
@@ -305,6 +307,145 @@ fun CoinCard(coin: CoinMarket) {
         }
     }
 }
+
+// ---------- صفحه هشدارها ----------
+
+@Composable
+fun AlertsScreen() {
+    var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var threshold by remember { mutableStateOf(5.0) }
+    val scope = rememberCoroutineScope()
+
+    fun load() {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
+                coins = ApiClient.api.getMarkets(perPage = 100)
+            } catch (e: Exception) {
+                errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    val alerts = coins
+        .filter { abs(it.price_change_percentage_24h ?: 0.0) >= threshold }
+        .sortedByDescending { abs(it.price_change_percentage_24h ?: 0.0) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "هشدار پامپ / دامپ",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { load() }) { Text("بروزرسانی") }
+        }
+
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(3.0, 5.0, 10.0).forEach { t ->
+                FilterChip(
+                    selected = threshold == t,
+                    onClick = { threshold = t },
+                    label = { Text("${t.toInt()}٪") }
+                )
+            }
+        }
+
+        when {
+            loading -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentGreen)
+            }
+
+            errorMsg != null -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    errorMsg ?: "",
+                    color = AccentRed,
+                    modifier = Modifier.padding(16.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            alerts.isEmpty() -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "😴 هنوز هشداری نیست — بازار آرومه",
+                    color = TextSecondary,
+                    modifier = Modifier.padding(16.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(alerts) { coin -> AlertCard(coin) }
+            }
+        }
+    }
+}
+
+@Composable
+fun AlertCard(coin: CoinMarket) {
+    val change = coin.price_change_percentage_24h ?: 0.0
+    val isPump = change >= 0
+    Surface(color = DarkCard, shape = RoundedCornerShape(16.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(if (isPump) "🚀" else "🩸", fontSize = 28.sp)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "${coin.symbol.uppercase(Locale.US)} ${if (isPump) "پامپ" else "دامپ"}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = if (isPump) AccentGreen else AccentRed
+                )
+                Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    String.format(Locale.US, "%+.2f%%", change),
+                    color = if (isPump) AccentGreen else AccentRed,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+                Text(formatPrice(coin.current_price), fontSize = 12.sp, color = TextSecondary)
+            }
+        }
+    }
+}
+
+// ---------- عمومی ----------
 
 fun formatPrice(price: Double): String {
     return if (price >= 1) {
