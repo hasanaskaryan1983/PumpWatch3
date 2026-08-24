@@ -3,6 +3,7 @@ package com.pumpwatch.app
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -124,11 +125,31 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // ---------- ثبت‌کننده کرش ----------
+        val crashFile = java.io.File(filesDir, "crash.log")
+        if (crashFile.exists()) {
+            val logText = crashFile.readText()
+            setContentView(
+                TextView(this).apply {
+                    text = "CRASH LOG:\n$logText"
+                    textSize = 9f
+                    setPadding(24, 24, 24, 24)
+                }
+            )
+            return
+        }
+        Thread.setDefaultUncaughtExceptionHandler { _, e ->
+            try {
+                crashFile.writeText(e.stackTraceToString())
+            } catch (_: Exception) { }
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+        // ---------- پایان ثبت‌کننده ----------
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        // هشدارهای پس‌زمینه: هر ۱۵ دقیقه بازار چک می‌شه
         val request = PeriodicWorkRequestBuilder<MonitoringWorker>(15, TimeUnit.MINUTES)
             .setBackoffCriteria(BackoffPolicy.LINEAR, 5, TimeUnit.MINUTES)
             .build()
