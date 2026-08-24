@@ -169,7 +169,7 @@ fun MainApp() {
                     Text("🚀", fontSize = 26.sp)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "پامپ‌واچ",
+                        "PumpDump",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                         color = AccentGreen
