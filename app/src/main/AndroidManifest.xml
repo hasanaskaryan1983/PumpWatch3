@@ -6,7 +6,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="PumpWatch"
+        android:label="PumpDump"
         android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
