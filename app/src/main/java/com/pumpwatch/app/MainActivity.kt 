@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,6 +53,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.work.BackoffPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BacktestEngine
 import com.pumpwatch.app.data.BacktestResult
@@ -62,6 +65,7 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.SimulatedTrade
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 // ---------- رنگ‌های تم ----------
@@ -123,6 +127,16 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+
+        // هشدارهای پس‌زمینه: هر ۱۵ دقیقه بازار چک می‌شه
+        val request = PeriodicWorkRequestBuilder<MonitoringWorker>(15, TimeUnit.MINUTES)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 5, TimeUnit.MINUTES)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "pump_monitoring",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
 
         setContent {
             PumpWatchTheme {
@@ -329,10 +343,14 @@ fun CoinCard(coin: CoinMarket) {
 
 @Composable
 fun AlertsScreen() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
     var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
-    var threshold by remember { mutableStateOf(5.0) }
+    var threshold by remember {
+        mutableStateOf(prefs.getFloat("alert_threshold", 5f).toDouble())
+    }
     val scope = rememberCoroutineScope()
 
     fun load() {
@@ -378,7 +396,10 @@ fun AlertsScreen() {
             listOf(3.0, 5.0, 10.0).forEach { t ->
                 FilterChip(
                     selected = threshold == t,
-                    onClick = { threshold = t },
+                    onClick = {
+                        threshold = t
+                        prefs.edit().putFloat("alert_threshold", t.toFloat()).apply()
+                    },
                     label = { Text("${t.toInt()}٪") }
                 )
             }
