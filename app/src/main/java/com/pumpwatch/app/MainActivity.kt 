@@ -133,25 +133,48 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        // ---------- تست مرحله‌ای ----------
+        val tv = android.widget.TextView(this)
+        tv.textSize = 18f
+        tv.setPadding(48, 48, 48, 48)
+        tv.text = "TEST 1 OK\nاکتیویتی سالمه ✅\n\nروی صفحه ضربه بزن ➡️ تست بعدی"
+        var step = 1
 
-        try {
-            setContent {
-                PumpWatchTheme {
-                    MainApp()
+        tv.setOnClickListener {
+            step++
+            when (step) {
+                2 -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(
+                                Manifest.permission.POST_NOTIFICATIONS
+                            )
+                        }
+                        tv.text = "TEST 2 OK\nدرخواست پرمیشن ✅\n\nضربه بعدی = رابط کاربری"
+                    } catch (e: Throwable) {
+                        tv.text = "CRASH TEST 2:\n${e.stackTraceToString()}"
+                    }
+                }
+                else -> {
+                    try {
+                        setContent {
+                            PumpWatchTheme {
+                                MainApp()
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        setContentView(
+                            android.widget.TextView(this).apply {
+                                text = "CRASH TEST 3:\n${e.stackTraceToString()}"
+                                textSize = 9f
+                                setPadding(24, 24, 24, 24)
+                            }
+                        )
+                    }
                 }
             }
-        } catch (e: Throwable) {
-            setContentView(
-                android.widget.TextView(this).apply {
-                    text = "SETCONTENT CRASH:\n${e.stackTraceToString()}"
-                    textSize = 9f
-                    setPadding(24, 24, 24, 24)
-                }
-            )
         }
+        setContentView(tv)
     }
 }
 
