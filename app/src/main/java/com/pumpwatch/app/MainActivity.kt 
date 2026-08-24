@@ -119,20 +119,38 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // پاک کردن لاگ کرش قبلی (اگه بوده)
+        // ---------- نمایش لاگ کرش ----------
         val crashFile = java.io.File(filesDir, "crash.log")
         if (crashFile.exists()) {
-            try { crashFile.delete() } catch (_: Exception) {}
+            val logText = try { crashFile.readText() } catch (_: Exception) { "no log" }
+            setContentView(
+                android.widget.TextView(this).apply {
+                    text = "CRASH LOG:\n$logText"
+                    textSize = 9f
+                    setPadding(24, 24, 24, 24)
+                }
+            )
+            return
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        setContent {
-            PumpWatchTheme {
-                MainApp()
+        try {
+            setContent {
+                PumpWatchTheme {
+                    MainApp()
+                }
             }
+        } catch (e: Throwable) {
+            setContentView(
+                android.widget.TextView(this).apply {
+                    text = "SETCONTENT CRASH:\n${e.stackTraceToString()}"
+                    textSize = 9f
+                    setPadding(24, 24, 24, 24)
+                }
+            )
         }
     }
 }
