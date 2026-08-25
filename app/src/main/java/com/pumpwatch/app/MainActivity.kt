@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,6 +47,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -137,6 +141,15 @@ fun MainApp() {
         mutableStateOf(prefs.getString("mode", "SPOT") == "FUTURES")
     }
     var selectedTab by remember { mutableStateOf(Tab.MARKET) }
+    var selectedCoin by remember { mutableStateOf<CoinMarket?>(null) }
+
+    if (selectedCoin != null) {
+        CoinDetailScreen(
+            coin = selectedCoin!!,
+            onBack = { selectedCoin = null }
+        )
+        return
+    }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(
@@ -203,8 +216,8 @@ fun MainApp() {
                     .padding(padding)
             ) {
                 when (selectedTab) {
-                    Tab.MARKET -> MarketScreen()
-                    Tab.ALERTS -> AlertsScreen()
+                    Tab.MARKET -> MarketScreen(onCoinClick = { selectedCoin = it })
+                    Tab.ALERTS -> AlertsScreen(onCoinClick = { selectedCoin = it })
                     Tab.BACKTEST -> BacktestScreen()
                 }
             }
@@ -214,7 +227,7 @@ fun MainApp() {
 
 // ---------- صفحه بازار ----------
 @Composable
-fun MarketScreen() {
+fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
     var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
@@ -280,18 +293,26 @@ fun MarketScreen() {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(coins) { coin -> CoinCard(coin) }
+                items(coins) { coin ->
+                    CoinCard(coin = coin, onClick = { onCoinClick(coin) })
+                }
             }
         }
     }
 }
 
 @Composable
-fun CoinCard(coin: CoinMarket) {
+fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
     val change = coin.price_change_percentage_24h ?: 0.0
     val isUp = change >= 0
     val rank = coin.market_cap_rank ?: 0
-    Surface(color = DarkCard, shape = RoundedCornerShape(16.dp)) {
+    Surface(
+        color = DarkCard,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -305,6 +326,11 @@ fun CoinCard(coin: CoinMarket) {
                     fontSize = 16.sp
                 )
                 Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+                Text(
+                    "کپ: ${formatMarketCap(coin.market_cap)}",
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
@@ -325,7 +351,7 @@ fun CoinCard(coin: CoinMarket) {
 
 // ---------- صفحه هشدارها ----------
 @Composable
-fun AlertsScreen() {
+fun AlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
     var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
@@ -426,18 +452,26 @@ fun AlertsScreen() {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(alerts) { coin -> AlertCard(coin) }
+                items(alerts) { coin ->
+                    AlertCard(coin = coin, onClick = { onCoinClick(coin) })
+                }
             }
         }
     }
 }
 
 @Composable
-fun AlertCard(coin: CoinMarket) {
+fun AlertCard(coin: CoinMarket, onClick: () -> Unit) {
     val change = coin.price_change_percentage_24h ?: 0.0
     val isPump = change >= 0
     val rank = coin.market_cap_rank ?: 0
-    Surface(color = DarkCard, shape = RoundedCornerShape(16.dp)) {
+    Surface(
+        color = DarkCard,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -454,6 +488,11 @@ fun AlertCard(coin: CoinMarket) {
                     color = if (isPump) AccentGreen else AccentRed
                 )
                 Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+                Text(
+                    "کپ: ${formatMarketCap(coin.market_cap)}",
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
@@ -464,6 +503,236 @@ fun AlertCard(coin: CoinMarket) {
                 )
                 Text(formatPrice(coin.current_price), fontSize = 12.sp, color = TextSecondary)
             }
+        }
+    }
+}
+
+// ---------- صفحه جزئیات کوین + نمودار ----------
+@Composable
+fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
+    var ohlcData by remember { mutableStateOf<List<List<Double>>>(emptyList()) }
+    var selectedTimeframe by remember { mutableStateOf("1h") }
+    var loading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    val timeframes = listOf(
+        "1m" to "1", "5m" to "1", "15m" to "1", "1h" to "1",
+        "4h" to "7", "8h" to "7", "12h" to "7",
+        "1d" to "1", "1w" to "7", "1M" to "30", "1y" to "365", "ALL" to "max"
+    )
+
+    fun loadChart(days: String) {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
+                ohlcData = ApiClient.api.getOhlc(coin.id, days = days)
+            } catch (e: Exception) {
+                errorMsg = "خطا در دریافت نمودار: ${e.message}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    LaunchedEffect(selectedTimeframe) {
+        val days = timeframes.find { it.first == selectedTimeframe }?.second ?: "1"
+        loadChart(days)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        // بالا: دکمه بازگشت
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onBack) {
+                Text("← بازگشت", color = AccentGreen, fontSize = 16.sp)
+            }
+        }
+
+        // اطلاعات کوین
+        val change = coin.price_change_percentage_24h ?: 0.0
+        Text(
+            "#${coin.market_cap_rank ?: 0} ${coin.symbol.uppercase(Locale.US)}",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        Text(
+            coin.name,
+            color = TextSecondary,
+            fontSize = 16.sp,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                formatPrice(coin.current_price),
+                fontSize = 32.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                String.format(Locale.US, "%+.2f%%", change),
+                color = if (change >= 0) AccentGreen else AccentRed,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        // آمار
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            StatCard("مارکت کپ", formatMarketCap(coin.market_cap), TextPrimary)
+            StatCard("حجم ۲۴h", formatMarketCap(coin.total_volume), TextPrimary)
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // دکمه‌های تایم‌فریم
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            timeframes.forEach { (label, _) ->
+                FilterChip(
+                    selected = selectedTimeframe == label,
+                    onClick = { selectedTimeframe = label },
+                    label = { Text(label, fontSize = 12.sp) }
+                )
+            }
+        }
+
+        // نمودار
+        when {
+            loading -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentGreen)
+            }
+
+            errorMsg != null -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(errorMsg ?: "", color = AccentRed, textAlign = TextAlign.Center)
+            }
+
+            ohlcData.size < 2 -> Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("داده کافی برای نمایش نمودار نیست", color = TextSecondary)
+            }
+
+            else -> CandlestickChart(
+                ohlcData = ohlcData,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .padding(12.dp)
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+// ---------- نمودار کندل استیک ----------
+@Composable
+fun CandlestickChart(ohlcData: List<List<Double>>, modifier: Modifier = Modifier) {
+    val greenColor = AccentGreen
+    val redColor = AccentRed
+    val gridColor = Color(0xFF2A3441)
+
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val padding = 8f
+
+        val chartHeight = height - 2 * padding
+        val chartWidth = width - 2 * padding
+
+        val highs = ohlcData.map { it[2] }
+        val lows = ohlcData.map { it[3] }
+        val maxPrice = highs.maxOrNull() ?: return@Canvas
+        val minPrice = lows.minOrNull() ?: return@Canvas
+        val priceRange = maxPrice - minPrice
+
+        if (priceRange == 0.0) return@Canvas
+
+        val spacing = chartWidth / ohlcData.size
+        val candleWidth = spacing * 0.65f
+
+        // خطوط افقی راهنما
+        for (i in 0..4) {
+            val y = padding + (chartHeight / 4) * i
+            drawLine(
+                color = gridColor,
+                start = Offset(padding, y),
+                end = Offset(width - padding, y),
+                strokeWidth = 1f
+            )
+        }
+
+        ohlcData.forEachIndexed { index, candle ->
+            val open = candle[1]
+            val high = candle[2]
+            val low = candle[3]
+            val close = candle[4]
+
+            val x = padding + index * spacing + spacing / 2
+
+            val yHigh = padding + chartHeight - ((high - minPrice) / priceRange * chartHeight).toFloat()
+            val yLow = padding + chartHeight - ((low - minPrice) / priceRange * chartHeight).toFloat()
+            val yOpen = padding + chartHeight - ((open - minPrice) / priceRange * chartHeight).toFloat()
+            val yClose = padding + chartHeight - ((close - minPrice) / priceRange * chartHeight).toFloat()
+
+            val color = if (close >= open) greenColor else redColor
+
+            // شدو (wick)
+            drawLine(
+                color = color,
+                start = Offset(x, yHigh),
+                end = Offset(x, yLow),
+                strokeWidth = 1.5f
+            )
+
+            // بدنه کندل
+            val bodyTop = minOf(yOpen, yClose)
+            val bodyBottom = maxOf(yOpen, yClose)
+            val bodyHeight = maxOf(bodyBottom - bodyTop, 2f)
+
+            drawRect(
+                color = color,
+                topLeft = Offset(x - candleWidth / 2, bodyTop),
+                size = Size(candleWidth, bodyHeight)
+            )
         }
     }
 }
@@ -653,11 +922,20 @@ fun TradeRow(t: SimulatedTrade) {
     }
 }
 
-// ---------- عمومی ----------
+// ---------- توابع کمکی ----------
 fun formatPrice(price: Double): String {
     return if (price >= 1) {
         String.format(Locale.US, "$%,.2f", price)
     } else {
         String.format(Locale.US, "$%.6f", price)
+    }
+}
+
+fun formatMarketCap(marketCap: Double): String {
+    return when {
+        marketCap >= 1_000_000_000_000 -> String.format(Locale.US, "$%.1fT", marketCap / 1_000_000_000_000)
+        marketCap >= 1_000_000_000 -> String.format(Locale.US, "$%.1fB", marketCap / 1_000_000_000)
+        marketCap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", marketCap / 1_000_000)
+        else -> String.format(Locale.US, "$%,.0f", marketCap)
     }
 }
