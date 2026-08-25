@@ -63,6 +63,7 @@ import com.pumpwatch.app.data.BacktestResult
 import com.pumpwatch.app.data.ChartClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.SimulatedTrade
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -507,12 +508,13 @@ fun AlertCard(coin: CoinMarket, onClick: () -> Unit) {
     }
 }
 
-// ---------- صفحه جزئیات کوین + نمودار ----------
+// ---------- صفحه جزئیات کوین + نمودار (با کش و آپدیت خودکار) ----------
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
-    var ohlcData by remember { mutableStateOf<List<List<Double>>>(emptyList()) }
+    // کش داده‌ها: کلید = تایم‌فریم، مقدار = داده OHLC
+    var ohlcCache by remember { mutableStateOf<Map<String, List<List<Double>>>>(emptyMap()) }
     var selectedTimeframe by remember { mutableStateOf("1h") }
-    var loading by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -522,23 +524,46 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
         "1d" to "1", "1w" to "7", "1M" to "30", "1y" to "365", "ALL" to "max"
     )
 
-    fun loadChart(days: String) {
+    // داده فعلی از کش
+    val currentData = ohlcCache[selectedTimeframe] ?: emptyList()
+
+    fun loadChart(days: String, tf: String, force: Boolean = false) {
+        // اگه توی کش هست و force نیست، نیازی به درخواست نیست
+        if (!force && ohlcCache.containsKey(tf)) {
+            errorMsg = null
+            return
+        }
         scope.launch {
-            loading = true
+            isLoading = true
             errorMsg = null
             try {
-                ohlcData = ApiClient.api.getOhlc(coin.id, days = days)
+                val data = ApiClient.api.getOhlc(coin.id, days = days)
+                ohlcCache = ohlcCache.toMutableMap().apply { put(tf, data) }
             } catch (e: Exception) {
-                errorMsg = "خطا در دریافت نمودار: ${e.message}"
+                val msg = e.message ?: ""
+                errorMsg = when {
+                    msg.contains("429") -> "⏳ تعداد درخواست زیاد بود. لطفاً چند ثانیه صبر کنید."
+                    else -> "خطا: $msg"
+                }
             } finally {
-                loading = false
+                isLoading = false
             }
         }
     }
 
+    // لود اولیه + آپدیت خودکار هر ۳۰ ثانیه
     LaunchedEffect(selectedTimeframe) {
         val days = timeframes.find { it.first == selectedTimeframe }?.second ?: "1"
-        loadChart(days)
+        loadChart(days, selectedTimeframe)
+        // آپدیت خودکار در پس‌زمینه
+        while (true) {
+            delay(30000)
+            val d = timeframes.find { it.first == selectedTimeframe }?.second ?: "1"
+            try {
+                val data = ApiClient.api.getOhlc(coin.id, days = d)
+                ohlcCache = ohlcCache.toMutableMap().apply { put(selectedTimeframe, data) }
+            } catch (_: Exception) { }
+        }
     }
 
     Column(
@@ -623,7 +648,8 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
         // نمودار
         when {
-            loading -> Box(
+            // لودینگ و هیچ داده قبلی نداریم
+            isLoading && currentData.isEmpty() -> Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(300.dp),
@@ -632,16 +658,27 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 CircularProgressIndicator(color = AccentGreen)
             }
 
-            errorMsg != null -> Box(
+            // خطا و هیچ داده قبلی نداریم
+            errorMsg != null && currentData.isEmpty() -> Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(300.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(errorMsg ?: "", color = AccentRed, textAlign = TextAlign.Center)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(errorMsg!!, color = AccentRed, textAlign = TextAlign.Center, modifier = Modifier.padding(16.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = {
+                        val d = timeframes.find { it.first == selectedTimeframe }?.second ?: "1"
+                        loadChart(d, selectedTimeframe, force = true)
+                    }) {
+                        Text("تلاش مجدد 🔄")
+                    }
+                }
             }
 
-            ohlcData.size < 2 -> Box(
+            // داده کافی نیست
+            currentData.size < 2 -> Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(300.dp),
@@ -650,13 +687,24 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 Text("داده کافی برای نمایش نمودار نیست", color = TextSecondary)
             }
 
-            else -> CandlestickChart(
-                ohlcData = ohlcData,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(320.dp)
-                    .padding(12.dp)
-            )
+            // نمایش نمودار (حتی اگه لودینگ باشه ولی داده قبلی داریم)
+            else -> Column {
+                if (isLoading) {
+                    Text(
+                        "🔄 در حال بروزرسانی...",
+                        color = AccentGreen,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+                CandlestickChart(
+                    ohlcData = currentData,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp)
+                        .padding(12.dp)
+                )
+            }
         }
 
         Spacer(Modifier.height(16.dp))
