@@ -2,15 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:name=".PumpWatchApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="PumpDump"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PumpWatch">
+        android:theme="@android:style/Theme.Material.NoActionBar">
         
         <activity
             android:name=".MainActivity"
