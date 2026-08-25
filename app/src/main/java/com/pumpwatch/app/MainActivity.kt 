@@ -65,6 +65,7 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.SimulatedTrade
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 // ---------- رنگ‌های تم ----------
