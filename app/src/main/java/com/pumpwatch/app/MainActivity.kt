@@ -215,6 +215,8 @@ fun MainApp() {
 // ---------- صفحه بازار ----------
 @Composable
 fun MarketScreen() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
     var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
@@ -225,7 +227,8 @@ fun MarketScreen() {
             loading = true
             errorMsg = null
             try {
-                coins = ApiClient.getTop1000Coins()
+                val mode = prefs.getString("mode", "SPOT")
+                coins = if (mode == "FUTURES") ApiClient.getTop100Coins() else ApiClient.getTop1000Coins()
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -338,7 +341,8 @@ fun AlertsScreen() {
             loading = true
             errorMsg = null
             try {
-                coins = ApiClient.getTop1000Coins()
+                val mode = prefs.getString("mode", "SPOT")
+                coins = if (mode == "FUTURES") ApiClient.getTop100Coins() else ApiClient.getTop1000Coins()
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
