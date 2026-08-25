@@ -59,11 +59,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
-import com.pumpwatch.app.data.BacktestEngine
-import com.pumpwatch.app.data.BacktestResult
-import com.pumpwatch.app.data.ChartClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.SimulatedTrade
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
