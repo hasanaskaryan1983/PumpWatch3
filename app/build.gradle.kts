@@ -36,9 +36,10 @@ android {
         compose = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "2.0.0"
-    }
+    // ❌ این بلوک کاملاً حذف شد — نیازی نیست چون plugin compose بالا هست
+    // composeOptions {
+    //     kotlinCompilerExtensionVersion = "2.0.0"
+    // }
 
     packaging {
         resources {
