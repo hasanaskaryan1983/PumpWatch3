@@ -83,15 +83,6 @@ enum class Tab(val title: String, val emoji: String) {
     BACKTEST("بک‌تست", "🧪")
 }
 
-private val backtestCoins = listOf(
-    "bitcoin" to "بیت‌کوین",
-    "ethereum" to "اتریوم",
-    "solana" to "سولانا",
-    "dogecoin" to "دوج",
-    "ripple" to "ریپل",
-    "tron" to "ترون"
-)
-
 // ---------- داده‌های ربات دستیار ----------
 data class IndicatorResult(
     val rsi: Double,
@@ -669,4 +660,34 @@ fun AlertCard(coin: CoinMarket, onClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(14.dp),
-           
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "#$rank  ${coin.symbol.uppercase(Locale.US)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+                Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+                Text(
+                    "کپ: ${formatMarketCap(coin.market_cap)}",
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    formatPrice(coin.current_price),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+                Text(
+                    String.format(Locale.US, "%+.2f%%", change),
+                    color = if (isPump) AccentGreen else AccentRed,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
