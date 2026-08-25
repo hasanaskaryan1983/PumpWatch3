@@ -225,7 +225,7 @@ fun MarketScreen() {
             loading = true
             errorMsg = null
             try {
-                coins = ApiClient.api.getMarkets()
+                coins = ApiClient.getTop1000Coins()
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -287,6 +287,7 @@ fun MarketScreen() {
 fun CoinCard(coin: CoinMarket) {
     val change = coin.price_change_percentage_24h ?: 0.0
     val isUp = change >= 0
+    val rank = coin.market_cap_rank ?: 0
     Surface(color = DarkCard, shape = RoundedCornerShape(16.dp)) {
         Row(
             modifier = Modifier
@@ -296,7 +297,7 @@ fun CoinCard(coin: CoinMarket) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    coin.symbol.uppercase(Locale.US),
+                    "#$rank  ${coin.symbol.uppercase(Locale.US)}",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
                 )
@@ -337,7 +338,7 @@ fun AlertsScreen() {
             loading = true
             errorMsg = null
             try {
-                coins = ApiClient.api.getMarkets(perPage = 100)
+                coins = ApiClient.getTop1000Coins()
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -431,6 +432,7 @@ fun AlertsScreen() {
 fun AlertCard(coin: CoinMarket) {
     val change = coin.price_change_percentage_24h ?: 0.0
     val isPump = change >= 0
+    val rank = coin.market_cap_rank ?: 0
     Surface(color = DarkCard, shape = RoundedCornerShape(16.dp)) {
         Row(
             modifier = Modifier
@@ -442,7 +444,7 @@ fun AlertCard(coin: CoinMarket) {
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "${coin.symbol.uppercase(Locale.US)} ${if (isPump) "پامپ" else "دامپ"}",
+                    "#$rank  ${coin.symbol.uppercase(Locale.US)} ${if (isPump) "پامپ" else "دامپ"}",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = if (isPump) AccentGreen else AccentRed
