@@ -45,4 +45,9 @@ object ApiClient {
         }
         return results.sortedBy { it.market_cap_rank ?: 9999 }
     }
+
+    // گرفتن 100 کوین برتر (فقط فیوچرز)
+    suspend fun getTop100Coins(): List<CoinMarket> {
+        return api.getMarkets(perPage = 100, page = 1)
+    }
 }
