@@ -53,10 +53,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.work.BackoffPolicy
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BacktestEngine
 import com.pumpwatch.app.data.BacktestResult
@@ -65,7 +61,6 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.SimulatedTrade
 import kotlinx.coroutines.launch
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 // ---------- رنگ‌های تم ----------
@@ -128,15 +123,7 @@ class MainActivity : ComponentActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        // هشدارهای پس‌زمینه: هر ۱۵ دقیقه بازار چک می‌شه
-        val request = PeriodicWorkRequestBuilder<MonitoringWorker>(15, TimeUnit.MINUTES)
-            .setBackoffCriteria(BackoffPolicy.LINEAR, 5, TimeUnit.MINUTES)
-            .build()
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "pump_monitoring",
-            ExistingPeriodicWorkPolicy.KEEP,
-            request
-        )
+        // WorkManager حذف شد — رفت توی Application
 
         setContent {
             PumpWatchTheme {
