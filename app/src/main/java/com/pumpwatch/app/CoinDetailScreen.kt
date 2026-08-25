@@ -20,8 +20,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.IndicatorEngine
-import com.pumpwatch.app.data.IndicatorResult
 import kotlinx.coroutines.launch
 import java.util.Locale
 
