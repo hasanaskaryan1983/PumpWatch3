@@ -3,6 +3,7 @@ package com.pumpwatch.app.data
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 data class CoinMarket(
@@ -25,6 +26,13 @@ interface CoinGeckoApi {
         @Query("per_page") perPage: Int = 250,
         @Query("page") page: Int = 1
     ): List<CoinMarket>
+
+    @GET("coins/{id}/ohlc")
+    suspend fun getOhlc(
+        @Path("id") id: String,
+        @Query("vs_currency") vsCurrency: String = "usd",
+        @Query("days") days: String
+    ): List<List<Double>>
 }
 
 object ApiClient {
@@ -36,7 +44,6 @@ object ApiClient {
             .create(CoinGeckoApi::class.java)
     }
 
-    // گرفتن 1000 کوین (4 صفحه × 250)
     suspend fun getTop1000Coins(): List<CoinMarket> {
         val results = mutableListOf<CoinMarket>()
         for (page in 1..4) {
@@ -46,7 +53,6 @@ object ApiClient {
         return results.sortedBy { it.market_cap_rank ?: 9999 }
     }
 
-    // گرفتن 100 کوین برتر (فقط فیوچرز)
     suspend fun getTop100Coins(): List<CoinMarket> {
         return api.getMarkets(perPage = 100, page = 1)
     }
