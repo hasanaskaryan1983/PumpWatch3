@@ -572,7 +572,10 @@ fun BacktestScreen() {
         }
 
         result?.let { r ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
                 StatCard("معاملات", r.totalTrades.toString(), TextPrimary)
                 StatCard(
                     "وین‌ریت",
@@ -580,7 +583,10 @@ fun BacktestScreen() {
                     if (r.winRatePercent >= 50) AccentGreen else AccentRed
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
                 StatCard(
                     "سود خالص",
                     String.format(Locale.US, "%+.1f%%", r.netPnlPercent),
@@ -603,8 +609,7 @@ fun BacktestScreen() {
 fun StatCard(title: String, value: String, color: Color) {
     Surface(
         color = DarkCard,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.weight(1f)
+        shape = RoundedCornerShape(12.dp)
     ) {
         Column(
             modifier = Modifier.padding(10.dp),
