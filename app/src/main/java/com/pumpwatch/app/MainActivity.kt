@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -67,6 +69,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 // ---------- رنگ‌های تم ----------
 private val DarkBackground = Color(0xFF0B0F14)
@@ -76,24 +79,7 @@ private val AccentGreen = Color(0xFF00E676)
 private val AccentRed = Color(0xFFFF5252)
 private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
-
-@Composable
-fun PumpWatchTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = AccentGreen,
-            onPrimary = Color.Black,
-            background = DarkBackground,
-            onBackground = TextPrimary,
-            surface = DarkSurface,
-            onSurface = TextPrimary,
-            secondaryContainer = DarkCard,
-            onSecondaryContainer = TextPrimary,
-            error = AccentRed
-        ),
-        content = content
-    )
-}
+private val WarningYellow = Color(0xFFFFC107)
 
 // ---------- تب‌ها ----------
 enum class Tab(val title: String, val emoji: String) {
@@ -110,6 +96,199 @@ private val backtestCoins = listOf(
     "ripple" to "ریپل",
     "tron" to "ترون"
 )
+
+// ---------- داده‌های ربات دستیار ----------
+data class IndicatorResult(
+    val rsi: Double,
+    val macd: Double,
+    val macdSignal: Double,
+    val ema20: Double,
+    val ema50: Double,
+    val ema200: Double,
+    val bbUpper: Double,
+    val bbLower: Double,
+    val supports: List<Double>,
+    val resistances: List<Double>,
+    val signal: String,
+    val confidence: Int,
+    val explanation: String
+)
+
+object IndicatorEngine {
+
+    fun calculate(ohlc: List<List<Double>>, currentPrice: Double): IndicatorResult {
+        if (ohlc.size < 50) {
+            return IndicatorResult(
+                50.0, 0.0, 0.0, currentPrice, currentPrice, currentPrice,
+                currentPrice * 1.05, currentPrice * 0.95,
+                emptyList(), emptyList(), "HOLD", 0,
+                "داده کافی برای تحلیل نیست (حداقل ۵۰ کندل لازم است)"
+            )
+        }
+
+        val closes = ohlc.map { it[4] }
+        val highs = ohlc.map { it[2] }
+        val lows = ohlc.map { it[3] }
+
+        val rsi = calculateRSI(closes)
+        val (macd, macdSignal) = calculateMACD(closes)
+        val ema20 = calculateEMA(closes, 20)
+        val ema50 = calculateEMA(closes, 50)
+        val ema200 = if (closes.size >= 200) calculateEMA(closes, 200) else ema50
+        val (bbUpper, _, bbLower) = calculateBollinger(closes)
+        val (supports, resistances) = findSupportResistance(highs, lows)
+
+        val signal = determineSignal(rsi, macd, macdSignal, currentPrice, ema20, ema50, bbUpper, bbLower, supports, resistances)
+        val confidence = calculateConfidence(rsi, macd, macdSignal, currentPrice, ema20, ema50, supports, resistances)
+        val explanation = generateExplanation(signal, rsi, macd, macdSignal, currentPrice, ema20, ema50, supports, resistances)
+
+        return IndicatorResult(
+            rsi, macd, macdSignal, ema20, ema50, ema200,
+            bbUpper, bbLower, supports, resistances,
+            signal, confidence, explanation
+        )
+    }
+
+    private fun calculateRSI(closes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period + 1) return 50.0
+        var gains = 0.0
+        var losses = 0.0
+        val start = closes.size - period
+        for (i in start until closes.size) {
+            val diff = closes[i] - closes[i - 1]
+            if (diff > 0) gains += diff else losses -= diff
+        }
+        val avgGain = gains / period
+        val avgLoss = losses / period
+        if (avgLoss == 0.0) return 100.0
+        val rs = avgGain / avgLoss
+        return 100.0 - (100.0 / (1.0 + rs))
+    }
+
+    private fun calculateEMA(data: List<Double>, period: Int): Double {
+        val multiplier = 2.0 / (period + 1)
+        var ema = data.take(period).average()
+        for (i in period until data.size) {
+            ema = (data[i] * multiplier) + (ema * (1 - multiplier))
+        }
+        return ema
+    }
+
+    private fun calculateMACD(closes: List<Double>): Pair<Double, Double> {
+        val macdValues = mutableListOf<Double>()
+        for (i in 26 until closes.size) {
+            val slice = closes.subList(0, i + 1)
+            val ema12 = calculateEMA(slice, 12)
+            val ema26 = calculateEMA(slice, 26)
+            macdValues.add(ema12 - ema26)
+        }
+        if (macdValues.isEmpty()) return Pair(0.0, 0.0)
+        val macd = macdValues.last()
+        val signal = calculateEMA(macdValues, 9)
+        return Pair(macd, signal)
+    }
+
+    private fun calculateBollinger(closes: List<Double>, period: Int = 20): Triple<Double, Double, Double> {
+        val slice = closes.takeLast(period)
+        val middle = slice.average()
+        val variance = slice.map { (it - middle) * (it - middle) }.average()
+        val stdDev = sqrt(variance)
+        return Triple(middle + 2 * stdDev, middle, middle - 2 * stdDev)
+    }
+
+    private fun findSupportResistance(highs: List<Double>, lows: List<Double>, window: Int = 3): Pair<List<Double>, List<Double>> {
+        val supports = mutableListOf<Double>()
+        val resistances = mutableListOf<Double>()
+        for (i in window until highs.size - window) {
+            val lowWindow = lows.subList(i - window, i + window + 1)
+            if (lows[i] == lowWindow.minOrNull()) supports.add(lows[i])
+            val highWindow = highs.subList(i - window, i + window + 1)
+            if (highs[i] == highWindow.maxOrNull()) resistances.add(highs[i])
+        }
+        return Pair(supports.takeLast(3), resistances.takeLast(3))
+    }
+
+    private fun determineSignal(
+        rsi: Double, macd: Double, macdSignal: Double, price: Double,
+        ema20: Double, ema50: Double, bbUpper: Double, bbLower: Double,
+        supports: List<Double>, resistances: List<Double>
+    ): String {
+        var buyScore = 0
+        var sellScore = 0
+
+        if (rsi < 30) buyScore += 2
+        if (rsi > 70) sellScore += 2
+        if (rsi < 45) buyScore += 1
+        if (rsi > 55) sellScore += 1
+
+        if (macd > macdSignal) buyScore += 2
+        if (macd < macdSignal) sellScore += 2
+
+        if (price > ema20 && ema20 > ema50) buyScore += 2
+        if (price < ema20 && ema20 < ema50) sellScore += 2
+
+        if (price < bbLower) buyScore += 1
+        if (price > bbUpper) sellScore += 1
+
+        val nearSupport = supports.any { abs(price - it) / it < 0.03 }
+        val nearResistance = resistances.any { abs(price - it) / it < 0.03 }
+        if (nearSupport) buyScore += 2
+        if (nearResistance) sellScore += 2
+
+        return when {
+            buyScore >= 6 -> "STRONG_BUY"
+            buyScore >= 4 -> "BUY"
+            sellScore >= 6 -> "STRONG_SELL"
+            sellScore >= 4 -> "SELL"
+            else -> "HOLD"
+        }
+    }
+
+    private fun calculateConfidence(
+        rsi: Double, macd: Double, macdSignal: Double, price: Double,
+        ema20: Double, ema50: Double, supports: List<Double>, resistances: List<Double>
+    ): Int {
+        var score = 0
+        if (rsi < 30 || rsi > 70) score += 20
+        if (abs(macd - macdSignal) > abs(macd) * 0.1) score += 20
+        val nearSupport = supports.any { abs(price - it) / it < 0.03 }
+        val nearResistance = resistances.any { abs(price - it) / it < 0.03 }
+        if (nearSupport || nearResistance) score += 20
+        if (price > ema20 && ema20 > ema50 || price < ema20 && ema20 < ema50) score += 20
+        score += 20 // base
+        return score.coerceIn(0, 100)
+    }
+
+    private fun generateExplanation(
+        signal: String, rsi: Double, macd: Double, macdSignal: Double,
+        price: Double, ema20: Double, ema50: Double,
+        supports: List<Double>, resistances: List<Double>
+    ): String {
+        val parts = mutableListOf<String>()
+
+        when {
+            rsi < 30 -> parts.add("RSI در محدوده اشباع فروش ($rsi)")
+            rsi > 70 -> parts.add("RSI در محدوده اشباع خرید ($rsi)")
+            else -> parts.add("RSI در وضعیت متعادل ($rsi)")
+        }
+
+        if (macd > macdSignal) parts.add("MACD تقاطع صعودی داده")
+        else if (macd < macdSignal) parts.add("MACD تقاطع نزولی داده")
+
+        when {
+            price > ema20 && ema20 > ema50 -> parts.add("قیمت بالای EMA20 و EMA50 است (روند صعودی)")
+            price < ema20 && ema20 < ema50 -> parts.add("قیمت زیر EMA20 و EMA50 است (روند نزولی)")
+            else -> parts.add("قیمت در نزدیکی میانگین‌ها است")
+        }
+
+        val nearSupport = supports.any { abs(price - it) / it < 0.03 }
+        val nearResistance = resistances.any { abs(price - it) / it < 0.03 }
+        if (nearSupport) parts.add("قیمت نزدیک حمایت کلیدی است")
+        if (nearResistance) parts.add("قیمت نزدیک مقاومت کلیدی است")
+
+        return parts.joinToString(" • ")
+    }
+}
 
 // ---------- اکتیویتی ----------
 class MainActivity : ComponentActivity() {
@@ -131,6 +310,24 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+@Composable
+fun PumpWatchTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = AccentGreen,
+            onPrimary = Color.Black,
+            background = DarkBackground,
+            onBackground = TextPrimary,
+            surface = DarkSurface,
+            onSurface = TextPrimary,
+            secondaryContainer = DarkCard,
+            onSecondaryContainer = TextPrimary,
+            error = AccentRed
+        ),
+        content = content
+    )
 }
 
 // ---------- صفحه اصلی ----------
@@ -508,14 +705,16 @@ fun AlertCard(coin: CoinMarket, onClick: () -> Unit) {
     }
 }
 
-// ---------- صفحه جزئیات کوین + نمودار (با کش و آپدیت خودکار) ----------
+// ---------- صفحه جزئیات کوین + نمودار + ربات دستیار ----------
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
-    // کش داده‌ها: کلید = تایم‌فریم، مقدار = داده OHLC
     var ohlcCache by remember { mutableStateOf<Map<String, List<List<Double>>>>(emptyMap()) }
     var selectedTimeframe by remember { mutableStateOf("1h") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    var showAssistant by remember { mutableStateOf(false) }
+    var indicatorResult by remember { mutableStateOf<IndicatorResult?>(null) }
+    var isAnalyzing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val timeframes = listOf(
@@ -524,11 +723,9 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
         "1d" to "1", "1w" to "7", "1M" to "30", "1y" to "365", "ALL" to "max"
     )
 
-    // داده فعلی از کش
     val currentData = ohlcCache[selectedTimeframe] ?: emptyList()
 
     fun loadChart(days: String, tf: String, force: Boolean = false) {
-        // اگه توی کش هست و force نیست، نیازی به درخواست نیست
         if (!force && ohlcCache.containsKey(tf)) {
             errorMsg = null
             return
@@ -551,11 +748,19 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
         }
     }
 
-    // لود اولیه + آپدیت خودکار هر ۳۰ ثانیه
+    fun analyze() {
+        if (currentData.size < 20) return
+        scope.launch {
+            isAnalyzing = true
+            delay(300) // حس تحلیل :)
+            indicatorResult = IndicatorEngine.calculate(currentData, coin.current_price)
+            isAnalyzing = false
+        }
+    }
+
     LaunchedEffect(selectedTimeframe) {
         val days = timeframes.find { it.first == selectedTimeframe }?.second ?: "1"
         loadChart(days, selectedTimeframe)
-        // آپدیت خودکار در پس‌زمینه
         while (true) {
             delay(30000)
             val d = timeframes.find { it.first == selectedTimeframe }?.second ?: "1"
@@ -648,7 +853,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
         // نمودار
         when {
-            // لودینگ و هیچ داده قبلی نداریم
             isLoading && currentData.isEmpty() -> Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -658,7 +862,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 CircularProgressIndicator(color = AccentGreen)
             }
 
-            // خطا و هیچ داده قبلی نداریم
             errorMsg != null && currentData.isEmpty() -> Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -677,7 +880,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 }
             }
 
-            // داده کافی نیست
             currentData.size < 2 -> Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -687,7 +889,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 Text("داده کافی برای نمایش نمودار نیست", color = TextSecondary)
             }
 
-            // نمایش نمودار (حتی اگه لودینگ باشه ولی داده قبلی داریم)
             else -> Column {
                 if (isLoading) {
                     Text(
@@ -707,7 +908,268 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
+
+        // دکمه ربات دستیار
+        Button(
+            onClick = {
+                showAssistant = !showAssistant
+                if (showAssistant && indicatorResult == null && currentData.size >= 20) {
+                    analyze()
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            enabled = currentData.size >= 20
+        ) {
+            Text(
+                if (showAssistant) "🤖 بستن دستیار" else "🤖 ربات دستیار تحلیلگر",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        if (currentData.size < 20) {
+            Text(
+                "برای فعال‌سازی دستیار، تایم‌فریم با داده بیشتر انتخاب کنید",
+                color = TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
+
+        // پنل دستیار
+        if (showAssistant && currentData.size >= 20) {
+            RobotAssistantPanel(
+                result = indicatorResult,
+                isAnalyzing = isAnalyzing,
+                onRefresh = { analyze() }
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// ---------- پنل ربات دستیار ----------
+@Composable
+fun RobotAssistantPanel(
+    result: IndicatorResult?,
+    isAnalyzing: Boolean,
+    onRefresh: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Surface(
+            color = DarkCard,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "🤖 تحلیل تکنیکال",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    color = AccentGreen
+                )
+
+                if (isAnalyzing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = AccentGreen)
+                            Spacer(Modifier.height(8.dp))
+                            Text("در حال تحلیل...", color = TextSecondary)
+                        }
+                    }
+                } else if (result == null) {
+                    Text(
+                        "دکمه زیر را بزنید تا تحلیل انجام شود",
+                        color = TextSecondary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
+                        Text("شروع تحلیل 📊")
+                    }
+                } else {
+                    // سیگنال اصلی
+                    val (signalText, signalColor, signalEmoji) = when (result.signal) {
+                        "STRONG_BUY" -> Triple("خرید قوی ⭐⭐⭐", AccentGreen, "🟢")
+                        "BUY" -> Triple("خرید ⭐⭐", AccentGreen.copy(alpha = 0.85f), "🟢")
+                        "HOLD" -> Triple("نگهداری / صبر ⭐", WarningYellow, "🟡")
+                        "SELL" -> Triple("فروش ⭐⭐", AccentRed.copy(alpha = 0.85f), "🔴")
+                        "STRONG_SELL" -> Triple("فروش قوی ⭐⭐⭐", AccentRed, "🔴")
+                        else -> Triple("نامشخص", TextSecondary, "⚪")
+                    }
+
+                    Surface(
+                        color = signalColor.copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(signalEmoji, fontSize = 36.sp)
+                            Text(
+                                signalText,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = signalColor
+                            )
+                        }
+                    }
+
+                    // اعتماد
+                    Text(
+                        "اعتماد به سیگنال: ${result.confidence}٪",
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                    LinearProgressIndicator(
+                        progress = { result.confidence / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp),
+                        color = signalColor,
+                        trackColor = Color(0xFF2A3441),
+                    )
+
+                    // توضیحات
+                    Surface(
+                        color = DarkSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            result.explanation,
+                            modifier = Modifier.padding(12.dp),
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp,
+                            color = TextPrimary
+                        )
+                    }
+
+                    // جدول اندیکاتورها
+                    Text(
+                        "مقادیر اندیکاتورها:",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IndicatorValueCard("RSI", String.format(Locale.US, "%.1f", result.rsi), when {
+                            result.rsi < 30 -> AccentGreen
+                            result.rsi > 70 -> AccentRed
+                            else -> TextSecondary
+                        })
+                        IndicatorValueCard("MACD", String.format(Locale.US, "%.2f", result.macd), when {
+                            result.macd > result.macdSignal -> AccentGreen
+                            result.macd < result.macdSignal -> AccentRed
+                            else -> TextSecondary
+                        })
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IndicatorValueCard("EMA20", formatPriceShort(result.ema20), TextPrimary)
+                        IndicatorValueCard("EMA50", formatPriceShort(result.ema50), TextPrimary)
+                    }
+
+                    // حمایت و مقاومت
+                    if (result.supports.isNotEmpty()) {
+                        Text(
+                            "سطوح حمایت:",
+                            fontSize = 13.sp,
+                            color = AccentGreen
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            result.supports.forEach {
+                                Surface(
+                                    color = AccentGreen.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        formatPriceShort(it),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        color = AccentGreen,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (result.resistances.isNotEmpty()) {
+                        Text(
+                            "سطوح مقاومت:",
+                            fontSize = 13.sp,
+                            color = AccentRed
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            result.resistances.forEach {
+                                Surface(
+                                    color = AccentRed.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        formatPriceShort(it),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        color = AccentRed,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    TextButton(
+                        onClick = onRefresh,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("🔄 بروزرسانی تحلیل")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun IndicatorValueCard(title: String, value: String, color: Color) {
+    Surface(
+        color = DarkSurface,
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.weight(1f)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(title, fontSize = 11.sp, color = TextSecondary)
+            Text(value, color = color, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
     }
 }
 
@@ -737,7 +1199,6 @@ fun CandlestickChart(ohlcData: List<List<Double>>, modifier: Modifier = Modifier
         val spacing = chartWidth / ohlcData.size
         val candleWidth = spacing * 0.65f
 
-        // خطوط افقی راهنما
         for (i in 0..4) {
             val y = padding + (chartHeight / 4) * i
             drawLine(
@@ -763,7 +1224,6 @@ fun CandlestickChart(ohlcData: List<List<Double>>, modifier: Modifier = Modifier
 
             val color = if (close >= open) greenColor else redColor
 
-            // شدو (wick)
             drawLine(
                 color = color,
                 start = Offset(x, yHigh),
@@ -771,7 +1231,6 @@ fun CandlestickChart(ohlcData: List<List<Double>>, modifier: Modifier = Modifier
                 strokeWidth = 1.5f
             )
 
-            // بدنه کندل
             val bodyTop = minOf(yOpen, yClose)
             val bodyBottom = maxOf(yOpen, yClose)
             val bodyHeight = maxOf(bodyBottom - bodyTop, 2f)
@@ -979,11 +1438,6 @@ fun formatPrice(price: Double): String {
     }
 }
 
-fun formatMarketCap(marketCap: Double): String {
+fun formatPriceShort(price: Double): String {
     return when {
-        marketCap >= 1_000_000_000_000 -> String.format(Locale.US, "$%.1fT", marketCap / 1_000_000_000_000)
-        marketCap >= 1_000_000_000 -> String.format(Locale.US, "$%.1fB", marketCap / 1_000_000_000)
-        marketCap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", marketCap / 1_000_000)
-        else -> String.format(Locale.US, "$%,.0f", marketCap)
-    }
-}
+        price >= 1_000_000_000_000 -> String.format(Locale.US, "$%.1fT", price /
