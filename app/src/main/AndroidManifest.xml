@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".PumpWatchApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="PumpDump"
