@@ -1,34 +1,5 @@
 package com.pumpwatch.app.data
 
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.GET
-import retrofit2.http.Path
-import retrofit2.http.Query
-
-data class MarketChart(
-    val prices: List<List<Double>>
-)
-
-interface CoinGeckoChartApi {
-    @GET("coins/{id}/market_chart")
-    suspend fun getMarketChart(
-        @Path("id") id: String,
-        @Query("vs_currency") vsCurrency: String = "usd",
-        @Query("days") days: Int
-    ): MarketChart
-}
-
-object ChartClient {
-    val api: CoinGeckoChartApi by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.coingecko.com/api/v3/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(CoinGeckoChartApi::class.java)
-    }
-}
-
 data class SimulatedTrade(
     val entryPrice: Double,
     val exitPrice: Double,
@@ -37,8 +8,6 @@ data class SimulatedTrade(
 
 data class BacktestResult(
     val totalTrades: Int,
-    val winCount: Int,
-    val lossCount: Int,
     val winRatePercent: Double,
     val netPnlPercent: Double,
     val maxDrawdownPercent: Double,
@@ -48,54 +17,56 @@ data class BacktestResult(
 object BacktestEngine {
 
     fun run(
-        prices: List<Pair<Long, Double>>,
-        buyDrop: Double,
-        sellRise: Double
+        series: List<Pair<Long, Double>>,
+        buyDropPercent: Double,
+        sellRisePercent: Double
     ): BacktestResult {
+        if (series.size < 2) {
+            return BacktestResult(0, 0.0, 0.0, 0.0, emptyList())
+        }
+
         val trades = mutableListOf<SimulatedTrade>()
         var inPosition = false
         var entryPrice = 0.0
-        var peak = 0.0
-        var equity = 1.0
-        var peakEquity = 1.0
-        var maxDd = 0.0
+        var peak = series.first().second
+        var equity = 100.0
+        var peakEquity = 100.0
+        var maxDrawdown = 0.0
 
-        fun close(price: Double) {
-            val change = (price - entryPrice) / entryPrice * 100
-            trades.add(SimulatedTrade(entryPrice, price, change))
-            equity *= (1 + change / 100)
-            peakEquity = maxOf(peakEquity, equity)
-            maxDd = maxOf(maxDd, (peakEquity - equity) / peakEquity * 100)
-            inPosition = false
-            peak = price
-        }
-
-        for ((_, price) in prices) {
+        for ((_, price) in series) {
             if (!inPosition) {
+                // دنبال نقطه خرید: ریزش کافی از قله اخیر
                 peak = maxOf(peak, price)
-                if (peak > 0 && price <= peak * (1 - buyDrop / 100)) {
+                val dropFromPeak = (peak - price) / peak * 100.0
+                if (dropFromPeak >= buyDropPercent) {
                     inPosition = true
                     entryPrice = price
                 }
             } else {
-                val change = (price - entryPrice) / entryPrice * 100
-                if (change >= sellRise || change <= -sellRise) {
-                    close(price)
+                // دنبال نقطه فروش: رشد یا افت کافی از قیمت خرید
+                val changeFromEntry = (price - entryPrice) / entryPrice * 100.0
+                if (changeFromEntry >= sellRisePercent || changeFromEntry <= -sellRisePercent) {
+                    inPosition = false
+                    trades.add(SimulatedTrade(entryPrice, price, changeFromEntry))
+                    equity *= (1.0 + changeFromEntry / 100.0)
+                    peakEquity = maxOf(peakEquity, equity)
+                    val dd = (peakEquity - equity) / peakEquity * 100.0
+                    maxDrawdown = maxOf(maxDrawdown, dd)
+                    peak = price
                 }
             }
         }
-        if (inPosition && prices.isNotEmpty()) {
-            close(prices.last().second)
-        }
 
+        val total = trades.size
         val wins = trades.count { it.pnlPercent >= 0 }
+        val winRate = if (total > 0) wins * 100.0 / total else 0.0
+        val netPnl = equity - 100.0
+
         return BacktestResult(
-            totalTrades = trades.size,
-            winCount = wins,
-            lossCount = trades.size - wins,
-            winRatePercent = if (trades.isEmpty()) 0.0 else wins * 100.0 / trades.size,
-            netPnlPercent = (equity - 1) * 100,
-            maxDrawdownPercent = maxDd,
+            totalTrades = total,
+            winRatePercent = winRate,
+            netPnlPercent = netPnl,
+            maxDrawdownPercent = maxDrawdown,
             trades = trades
         )
     }
