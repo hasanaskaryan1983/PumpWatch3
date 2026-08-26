@@ -11,6 +11,8 @@ import androidx.core.content.ContextCompat
 import androidx.work.BackoffPolicy
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -143,8 +145,6 @@ object AutoOptimizer {
         prefs.edit().putLong(KEY_LAST_OPT, System.currentTimeMillis()).apply()
     }
 
-    // ---------- ارزیابی یک preset روی تاریخچه ----------
-
     private suspend fun evalPreset(
         coinIds: List<String>,
         params: SignalParams
@@ -215,20 +215,38 @@ object AutoOptimizer {
     }
 }
 
-// ---------- زمان‌بندی پایش ----------
+// ---------- زمان‌بندی پایش (هوشمند) ----------
 
 object MonitorScheduler {
 
     fun start(context: Context) {
         try {
-            val request = PeriodicWorkRequestBuilder<MonitorWorker>(30, TimeUnit.MINUTES)
+            val wm = WorkManager.getInstance(context)
+
+            // ۱) پایش دوره‌ای هر ۳۰ دقیقه
+            val periodic = PeriodicWorkRequestBuilder<MonitorWorker>(30, TimeUnit.MINUTES)
                 .setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.MINUTES)
                 .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            wm.enqueueUniquePeriodicWork(
                 "pumpdump_monitor",
                 ExistingPeriodicWorkPolicy.KEEP,
-                request
+                periodic
             )
+
+            // ۲) اسکن فوری خودکار (اگه داده‌ها قدیمی‌تر از ۳۰ دقیقه باشن)
+            val lastScan = maxOf(
+                PicksStore.lastScan(context, "SPOT"),
+                PicksStore.lastScan(context, "FUT")
+            )
+            val isStale = System.currentTimeMillis() - lastScan > 30 * 60 * 1000L
+            if (isStale) {
+                val oneTime = OneTimeWorkRequestBuilder<MonitorWorker>().build()
+                wm.enqueueUniqueWork(
+                    "pumpdump_immediate",
+                    ExistingWorkPolicy.KEEP,
+                    oneTime
+                )
+            }
         } catch (_: Exception) { }
     }
 }
