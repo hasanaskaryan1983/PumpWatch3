@@ -60,6 +60,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.ui.TopPicksScreen
+import com.pumpwatch.app.ui.HistoryScreen
+import com.pumpwatch.app.worker.MonitorScheduler
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -80,7 +83,9 @@ private val WarningYellow = Color(0xFFFFC107)
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
     ALERTS("هشدارها", "🔔"),
-    BACKTEST("بک‌تست", "🧪")
+    BACKTEST("بک‌تست", "🧪"),
+    TOP("برترین‌ها", "🏆"),
+    HISTORY("تاریخچه", "📚")
 }
 
 // ---------- داده‌های ربات دستیار ----------
@@ -290,6 +295,8 @@ class MainActivity : ComponentActivity() {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        MonitorScheduler.start(this)
+
         setContent {
             PumpWatchTheme {
                 MainApp()
@@ -403,6 +410,8 @@ fun MainApp() {
                     Tab.MARKET -> MarketScreen(onCoinClick = { selectedCoin = it })
                     Tab.ALERTS -> AlertsScreen(onCoinClick = { selectedCoin = it })
                     Tab.BACKTEST -> BacktestScreen()
+                    Tab.TOP -> TopPicksScreen(if (isFutures) "FUT" else "SPOT")
+                    Tab.HISTORY -> HistoryScreen(if (isFutures) "FUT" else "SPOT")
                 }
             }
         }
