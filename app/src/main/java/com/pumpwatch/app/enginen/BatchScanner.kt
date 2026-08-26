@@ -3,6 +3,7 @@ package com.pumpwatch.app.engine
 import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.data.ScanMarket
 import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -141,6 +142,4 @@ object BatchScanner {
         }
         return out
     }
-
-    private val Locale = java.util.Locale
 }
