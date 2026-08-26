@@ -63,7 +63,8 @@ object BatchScanner {
                 "تحلیل عمیق ${m.symbol.uppercase(Locale.US)}... ($done/${candidates.size})"
             )
             try {
-                val chart = ScanClient.api.chart(m.id, days = 30, interval = "hourly")
+                // تغییر: ۹۰ روز داده برای تحلیل دقیق‌تر
+                val chart = ScanClient.api.chart(m.id, days = 90, interval = "hourly")
                 val candles = toCandles(chart.prices, chart.volumes ?: emptyList())
                 val sig = SignalEngine.analyze(
                     coinId = m.id,
