@@ -1,5 +1,6 @@
 package com.pumpwatch.app.data
 
+import com.google.gson.annotations.SerializedName
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
@@ -18,6 +19,11 @@ data class CoinMarket(
     val market_cap_rank: Int?
 )
 
+data class CoinChart(
+    val prices: List<List<Double>>,
+    @SerializedName("total_volumes") val totalVolumes: List<List<Double>>?
+)
+
 interface CoinGeckoApi {
     @GET("coins/markets")
     suspend fun getMarkets(
@@ -33,6 +39,13 @@ interface CoinGeckoApi {
         @Query("vs_currency") vsCurrency: String = "usd",
         @Query("days") days: String
     ): List<List<Double>>
+
+    @GET("coins/{id}/market_chart")
+    suspend fun getMarketChart(
+        @Path("id") id: String,
+        @Query("vs_currency") vsCurrency: String = "usd",
+        @Query("days") days: Int
+    ): CoinChart
 }
 
 object ApiClient {
@@ -55,5 +68,9 @@ object ApiClient {
 
     suspend fun getTop100Coins(): List<CoinMarket> {
         return api.getMarkets(perPage = 100, page = 1)
+    }
+
+    suspend fun getCoinChart(id: String, days: Int): CoinChart {
+        return api.getMarketChart(id, days = days)
     }
 }
