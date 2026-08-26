@@ -36,10 +36,26 @@ object PicksStore {
     fun todayKey(): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
-    // ---------- ذخیره نتیجه اسکن ----------
+    // ---------- ذخیره با ادغام هوشمند ----------
 
     fun saveScan(ctx: Context, mode: String, picks: List<SignalResult>) {
-        val day = DayPicks(todayKey(), mode, System.currentTimeMillis(), picks)
+        val limit = if (mode == "SPOT") 50 else 20
+
+        // ادغام با سیگنال‌های قبلیِ همان روز (بهترین امتیاز نگه داشته می‌شه)
+        val existing = loadToday(ctx, mode)?.picks ?: emptyList()
+        val map = linkedMapOf<String, SignalResult>()
+        existing.forEach { map[it.coinId + "|" + it.side] = it }
+        picks.forEach { n ->
+            val k = n.coinId + "|" + n.side
+            val o = map[k]
+            if (o == null || n.score > o.score) map[k] = n
+        }
+        val merged = map.values
+            .sortedByDescending { it.score }
+            .take(limit)
+            .toList()
+
+        val day = DayPicks(todayKey(), mode, System.currentTimeMillis(), merged)
         val p = prefs(ctx).edit()
         p.putString(KEY_TODAY + mode, gson.toJson(day))
         p.putLong(KEY_LAST_SCAN + mode, System.currentTimeMillis())
