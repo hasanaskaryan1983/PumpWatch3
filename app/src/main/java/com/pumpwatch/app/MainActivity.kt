@@ -78,6 +78,7 @@ private val AccentRed = Color(0xFFFF5252)
 private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
 private val WarningYellow = Color(0xFFFFC107)
+private val AccentBlue = Color(0xFF4FC3F7)
 
 // ---------- تب‌ها ----------
 enum class Tab(val title: String, val emoji: String) {
@@ -102,24 +103,37 @@ data class IndicatorResult(
     val resistances: List<Double>,
     val signal: String,
     val confidence: Int,
-    val explanation: String
+    val explanation: String,
+    // فیلدهای جدید
+    val mfi: Double,
+    val vwap: Double,
+    val vwapDeviation: Double,
+    val obvDivergence: String,
+    val adx: Double,
+    val diPlus: Double,
+    val diMinus: Double,
+    val atr: Double,
+    val volumeRatio: Double,
+    val trailingStop: Double
 )
 
 object IndicatorEngine {
 
-    fun calculate(ohlc: List<List<Double>>, currentPrice: Double): IndicatorResult {
-        if (ohlc.size < 50) {
+    fun calculate(ohlc: List<List<Double>>, volumes: List<Double>, currentPrice: Double): IndicatorResult {
+        if (ohlc.size < 90) {
             return IndicatorResult(
                 50.0, 0.0, 0.0, currentPrice, currentPrice, currentPrice,
                 currentPrice * 1.05, currentPrice * 0.95,
                 emptyList(), emptyList(), "HOLD", 0,
-                "داده کافی برای تحلیل نیست (حداقل ۵۰ کندل لازم است)"
+                "داده کافی برای تحلیل نیست (حداقل ۹۰ کندل لازم است)",
+                50.0, currentPrice, 0.0, "NONE", 0.0, 0.0, 0.0, 0.0, 0.0, currentPrice
             )
         }
 
         val closes = ohlc.map { it[4] }
         val highs = ohlc.map { it[2] }
         val lows = ohlc.map { it[3] }
+        val opens = ohlc.map { it[1] }
 
         val rsi = calculateRSI(closes)
         val macdVal = calculateMACD(closes)
@@ -128,15 +142,35 @@ object IndicatorEngine {
         val ema200 = if (closes.size >= 200) calculateEMA(closes, 200) else ema50
         val bb = calculateBollinger(closes)
         val sr = findSupportResistance(highs, lows)
+        val adx = calculateADX(highs, lows, closes)
+        val diPlus = calculateDIPlus(highs, lows, closes)
+        val diMinus = calculateDIMinus(highs, lows, closes)
+        val atr = calculateATR(highs, lows, closes)
+        val mfi = calculateMFI(highs, lows, closes, volumes)
+        val vwap = calculateVWAP(highs, lows, closes, volumes)
+        val vwapDev = if (vwap > 0) abs(currentPrice - vwap) / vwap * 100 else 0.0
+        val obvDiv = calculateOBVDivergence(closes, volumes)
+        val volRatio = calculateVolumeRatio(volumes)
+        val trailingStop = currentPrice - atr * 2.5
 
-        val signal = determineSignal(rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50, bb.first, bb.third, sr.first, sr.second)
-        val confidence = calculateConfidence(rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50, sr.first, sr.second)
-        val explanation = generateExplanation(signal, rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50, sr.first, sr.second)
+        val signal = determineSignal(
+            rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
+            bb.first, bb.third, sr.first, sr.second, mfi, vwap, adx, diPlus, diMinus, obvDiv
+        )
+        val confidence = calculateConfidence(
+            rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
+            sr.first, sr.second, mfi, adx, obvDiv, volRatio
+        )
+        val explanation = generateExplanation(
+            signal, rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
+            sr.first, sr.second, mfi, vwap, adx, diPlus, diMinus, obvDiv, volRatio
+        )
 
         return IndicatorResult(
             rsi, macdVal.first, macdVal.second, ema20, ema50, ema200,
             bb.first, bb.third, sr.first, sr.second,
-            signal, confidence, explanation
+            signal, confidence, explanation,
+            mfi, vwap, vwapDev, obvDiv, adx, diPlus, diMinus, atr, volRatio, trailingStop
         )
     }
 
@@ -199,24 +233,201 @@ object IndicatorEngine {
         return Pair(supports.takeLast(3), resistances.takeLast(3))
     }
 
+    // ---------- ATR ----------
+    private fun calculateATR(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period + 1) return 0.0
+        var sum = 0.0
+        for (i in 1..period) {
+            val tr = maxOf(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            sum += tr
+        }
+        var atr = sum / period
+        for (i in period + 1 until closes.size) {
+            val tr = maxOf(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+            atr = (atr * (period - 1) + tr) / period
+        }
+        return atr
+    }
+
+    // ---------- ADX ----------
+    private fun calculateADX(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period * 2) return 0.0
+        val plusDM = mutableListOf<Double>()
+        val minusDM = mutableListOf<Double>()
+        val trs = mutableListOf<Double>()
+        for (i in 1 until closes.size) {
+            val up = highs[i] - highs[i - 1]
+            val dn = lows[i - 1] - lows[i]
+            plusDM.add(if (up > dn && up > 0) up else 0.0)
+            minusDM.add(if (dn > up && dn > 0) dn else 0.0)
+            trs.add(maxOf(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+        }
+        var sTR = trs.take(period).sum()
+        var sP = plusDM.take(period).sum()
+        var sM = minusDM.take(period).sum()
+        val dxList = mutableListOf<Double>()
+        for (i in period until trs.size) {
+            sTR = sTR - sTR / period + trs[i]
+            sP = sP - sP / period + plusDM[i]
+            sM = sM - sM / period + minusDM[i]
+            val pDI = if (sTR > 0) 100 * sP / sTR else 0.0
+            val mDI = if (sTR > 0) 100 * sM / sTR else 0.0
+            val d = pDI + mDI
+            dxList.add(if (d > 0) 100 * abs(pDI - mDI) / d else 0.0)
+        }
+        if (dxList.isEmpty()) return 0.0
+        if (dxList.size < period) return dxList.last()
+        var a = dxList.take(period).average()
+        for (i in period until dxList.size) {
+            a = (a * (period - 1) + dxList[i]) / period
+        }
+        return a
+    }
+
+    private fun calculateDIPlus(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period * 2) return 0.0
+        val plusDM = mutableListOf<Double>()
+        val trs = mutableListOf<Double>()
+        for (i in 1 until closes.size) {
+            val up = highs[i] - highs[i - 1]
+            val dn = lows[i - 1] - lows[i]
+            plusDM.add(if (up > dn && up > 0) up else 0.0)
+            trs.add(maxOf(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+        }
+        var sTR = trs.take(period).sum()
+        var sP = plusDM.take(period).sum()
+        for (i in period until trs.size) {
+            sTR = sTR - sTR / period + trs[i]
+            sP = sP - sP / period + plusDM[i]
+        }
+        return if (sTR > 0) 100 * sP / sTR else 0.0
+    }
+
+    private fun calculateDIMinus(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period * 2) return 0.0
+        val minusDM = mutableListOf<Double>()
+        val trs = mutableListOf<Double>()
+        for (i in 1 until closes.size) {
+            val up = highs[i] - highs[i - 1]
+            val dn = lows[i - 1] - lows[i]
+            minusDM.add(if (dn > up && dn > 0) dn else 0.0)
+            trs.add(maxOf(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+        }
+        var sTR = trs.take(period).sum()
+        var sM = minusDM.take(period).sum()
+        for (i in period until trs.size) {
+            sTR = sTR - sTR / period + trs[i]
+            sM = sM - sM / period + minusDM[i]
+        }
+        return if (sTR > 0) 100 * sM / sTR else 0.0
+    }
+
+    // ---------- MFI ----------
+    private fun calculateMFI(highs: List<Double>, lows: List<Double>, closes: List<Double>, volumes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period + 1 || volumes.size < closes.size) return 50.0
+        var posFlow = 0.0
+        var negFlow = 0.0
+        val offset = closes.size - volumes.size
+        for (i in closes.size - period until closes.size) {
+            val tp = (highs[i] + lows[i] + closes[i]) / 3.0
+            val vi = i - offset
+            if (vi > 0 && vi < volumes.size) {
+                val mf = tp * volumes[vi]
+                if (i > 0) {
+                    val prevTP = (highs[i - 1] + lows[i - 1] + closes[i - 1]) / 3.0
+                    if (tp > prevTP) posFlow += mf else negFlow += mf
+                }
+            }
+        }
+        return if (negFlow == 0.0) 100.0 else 100.0 - (100.0 / (1.0 + posFlow / negFlow))
+    }
+
+    // ---------- VWAP ----------
+    private fun calculateVWAP(highs: List<Double>, lows: List<Double>, closes: List<Double>, volumes: List<Double>): Double {
+        if (volumes.isEmpty() || closes.size != volumes.size) {
+            val start = maxOf(0, closes.size - 20)
+            var cumTPV = 0.0
+            var cumVol = 0.0
+            for (i in start until closes.size) {
+                val tp = (highs[i] + lows[i] + closes[i]) / 3.0
+                cumTPV += tp * volumes.getOrElse(i) { 1.0 }
+                cumVol += volumes.getOrElse(i) { 1.0 }
+            }
+            return if (cumVol > 0) cumTPV / cumVol else closes.lastOrNull() ?: 0.0
+        }
+        var cumTPV = 0.0
+        var cumVol = 0.0
+        for (i in closes.indices) {
+            val tp = (highs[i] + lows[i] + closes[i]) / 3.0
+            cumTPV += tp * volumes[i]
+            cumVol += volumes[i]
+        }
+        return if (cumVol > 0) cumTPV / cumVol else closes.lastOrNull() ?: 0.0
+    }
+
+    // ---------- OBV Divergence ----------
+    private fun calculateOBVDivergence(closes: List<Double>, volumes: List<Double>): String {
+        if (closes.size < 20 || volumes.size < closes.size) return "NONE"
+        var obv = 0.0
+        val obvSeries = mutableListOf<Double>()
+        for (i in closes.indices) {
+            if (i == 0) {
+                obv = volumes.getOrElse(i) { 0.0 }
+            } else {
+                obv += when {
+                    closes[i] > closes[i - 1] -> volumes.getOrElse(i) { 0.0 }
+                    closes[i] < closes[i - 1] -> -volumes.getOrElse(i) { 0.0 }
+                    else -> 0.0
+                }
+            }
+            obvSeries.add(obv)
+        }
+        val obvLast10 = obvSeries.takeLast(10)
+        val closeLast10 = closes.takeLast(10)
+        val obvTrend = if (obvLast10.last() > obvLast10.first()) "UP" else "DOWN"
+        val priceTrend = if (closeLast10.last() > closeLast10.first()) "UP" else "DOWN"
+        return when {
+            priceTrend == "UP" && obvTrend == "DOWN" -> "BEARISH"
+            priceTrend == "DOWN" && obvTrend == "UP" -> "BULLISH"
+            else -> "NONE"
+        }
+    }
+
+    // ---------- Volume Ratio ----------
+    private fun calculateVolumeRatio(volumes: List<Double>, period: Int = 20): Double {
+        if (volumes.size <= period) return 0.0
+        val last = volumes.last()
+        val avg = volumes.dropLast(1).takeLast(period).average()
+        return if (avg > 0) last / avg else 0.0
+    }
+
     private fun determineSignal(
         rsi: Double, macd: Double, macdSignal: Double, price: Double,
         ema20: Double, ema50: Double, bbUpper: Double, bbLower: Double,
-        supports: List<Double>, resistances: List<Double>
+        supports: List<Double>, resistances: List<Double>,
+        mfi: Double, vwap: Double, adx: Double, diPlus: Double, diMinus: Double, obvDiv: String
     ): String {
         var buyScore = 0
         var sellScore = 0
 
         if (rsi < 30) buyScore += 2
         if (rsi > 70) sellScore += 2
-        if (rsi < 45) buyScore += 1
-        if (rsi > 55) sellScore += 1
+        if (rsi < 35) buyScore += 1
+        if (rsi > 65) sellScore += 1
+
+        if (mfi < 25) buyScore += 2
+        if (mfi > 75) sellScore += 2
+        if (mfi < 35) buyScore += 1
+        if (mfi > 65) sellScore += 1
 
         if (macd > macdSignal) buyScore += 2
         if (macd < macdSignal) sellScore += 2
 
         if (price > ema20 && ema20 > ema50) buyScore += 2
         if (price < ema20 && ema20 < ema50) sellScore += 2
+
+        if (price > vwap) buyScore += 1
+        if (price < vwap) sellScore += 1
 
         if (price < bbLower) buyScore += 1
         if (price > bbUpper) sellScore += 1
@@ -226,56 +437,90 @@ object IndicatorEngine {
         if (nearSupport) buyScore += 2
         if (nearResistance) sellScore += 2
 
+        if (adx >= 25) {
+            if (diPlus > diMinus) buyScore += 2
+            if (diMinus > diPlus) sellScore += 2
+        }
+
+        if (obvDiv == "BULLISH") buyScore += 2
+        if (obvDiv == "BEARISH") sellScore += 2
+
         return when {
-            buyScore >= 6 -> "STRONG_BUY"
-            buyScore >= 4 -> "BUY"
-            sellScore >= 6 -> "STRONG_SELL"
-            sellScore >= 4 -> "SELL"
+            buyScore >= 7 -> "STRONG_BUY"
+            buyScore >= 5 -> "BUY"
+            sellScore >= 7 -> "STRONG_SELL"
+            sellScore >= 5 -> "SELL"
             else -> "HOLD"
         }
     }
 
     private fun calculateConfidence(
         rsi: Double, macd: Double, macdSignal: Double, price: Double,
-        ema20: Double, ema50: Double, supports: List<Double>, resistances: List<Double>
+        ema20: Double, ema50: Double, supports: List<Double>, resistances: List<Double>,
+        mfi: Double, adx: Double, obvDiv: String, volRatio: Double
     ): Int {
         var score = 0
-        if (rsi < 30 || rsi > 70) score += 20
-        if (abs(macd - macdSignal) > abs(macd) * 0.1) score += 20
+        if (rsi < 30 || rsi > 70) score += 15
+        if (mfi < 25 || mfi > 75) score += 15
+        if (abs(macd - macdSignal) > abs(macd) * 0.1) score += 15
         val nearSupport = supports.any { abs(price - it) / it < 0.03 }
         val nearResistance = resistances.any { abs(price - it) / it < 0.03 }
-        if (nearSupport || nearResistance) score += 20
-        if (price > ema20 && ema20 > ema50 || price < ema20 && ema20 < ema50) score += 20
-        score += 20
+        if (nearSupport || nearResistance) score += 15
+        if (price > ema20 && ema20 > ema50 || price < ema20 && ema20 < ema50) score += 15
+        if (adx >= 25) score += 10
+        if (obvDiv != "NONE") score += 10
+        if (volRatio >= 2.0) score += 5
         return score.coerceIn(0, 100)
     }
 
     private fun generateExplanation(
         signal: String, rsi: Double, macd: Double, macdSignal: Double,
         price: Double, ema20: Double, ema50: Double,
-        supports: List<Double>, resistances: List<Double>
+        supports: List<Double>, resistances: List<Double>,
+        mfi: Double, vwap: Double, adx: Double, diPlus: Double, diMinus: Double,
+        obvDiv: String, volRatio: Double
     ): String {
         val parts = mutableListOf<String>()
 
         when {
-            rsi < 30 -> parts.add("RSI در محدوده اشباع فروش (${String.format(Locale.US, "%.1f", rsi)})")
-            rsi > 70 -> parts.add("RSI در محدوده اشباع خرید (${String.format(Locale.US, "%.1f", rsi)})")
-            else -> parts.add("RSI در وضعیت متعادل (${String.format(Locale.US, "%.1f", rsi)})")
+            rsi < 30 -> parts.add("RSI اشباع فروش (${String.format(Locale.US, "%.1f", rsi)})")
+            rsi > 70 -> parts.add("RSI اشباع خرید (${String.format(Locale.US, "%.1f", rsi)})")
+            else -> parts.add("RSI متعادل (${String.format(Locale.US, "%.1f", rsi)})")
         }
 
-        if (macd > macdSignal) parts.add("MACD تقاطع صعودی داده")
-        else if (macd < macdSignal) parts.add("MACD تقاطع نزولی داده")
+        when {
+            mfi < 25 -> parts.add("MFI اشباع فروش (${String.format(Locale.US, "%.1f", mfi)})")
+            mfi > 75 -> parts.add("MFI اشباع خرید (${String.format(Locale.US, "%.1f", mfi)})")
+            else -> parts.add("MFI متعادل (${String.format(Locale.US, "%.1f", mfi)})")
+        }
+
+        if (macd > macdSignal) parts.add("MACD صعودی")
+        else if (macd < macdSignal) parts.add("MACD نزولی")
 
         when {
-            price > ema20 && ema20 > ema50 -> parts.add("قیمت بالای EMA20 و EMA50 است (روند صعودی)")
-            price < ema20 && ema20 < ema50 -> parts.add("قیمت زیر EMA20 و EMA50 است (روند نزولی)")
-            else -> parts.add("قیمت در نزدیکی میانگین‌ها است")
+            price > ema20 && ema20 > ema50 -> parts.add("روند صعودی EMA")
+            price < ema20 && ema20 < ema50 -> parts.add("روند نزولی EMA")
+            else -> parts.add("EMA متقاطع")
+        }
+
+        if (price > vwap) parts.add("قیمت بالای VWAP")
+        else if (price < vwap) parts.add("قیمت زیر VWAP")
+
+        if (adx >= 25) {
+            parts.add("ADX قوی (${String.format(Locale.US, "%.1f", adx)})")
+            if (diPlus > diMinus) parts.add("DI+ > DI-")
+            else if (diMinus > diPlus) parts.add("DI- > DI+")
         }
 
         val nearSupport = supports.any { abs(price - it) / it < 0.03 }
         val nearResistance = resistances.any { abs(price - it) / it < 0.03 }
-        if (nearSupport) parts.add("قیمت نزدیک حمایت کلیدی است")
-        if (nearResistance) parts.add("قیمت نزدیک مقاومت کلیدی است")
+        if (nearSupport) parts.add("نزدیک حمایت")
+        if (nearResistance) parts.add("نزدیک مقاومت")
+
+        if (obvDiv == "BULLISH") parts.add(" divergence صعودی OBV")
+        if (obvDiv == "BEARISH") parts.add(" divergence نزولی OBV")
+
+        if (volRatio >= 2.0) parts.add("حجم بالا (${String.format(Locale.US, "%.1f", volRatio)}x)")
 
         return parts.joinToString(" • ")
     }
@@ -698,5 +943,22 @@ fun AlertCard(coin: CoinMarket, onClick: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+// ---------- توابع کمکی ----------
+fun formatPrice(price: Double?): String {
+    if (price == null) return "$0.00"
+    return if (price >= 1) String.format(Locale.US, "$%,.2f", price)
+    else String.format(Locale.US, "$%.6f", price)
+}
+
+fun formatMarketCap(cap: Double?): String {
+    if (cap == null) return "N/A"
+    return when {
+        cap >= 1_000_000_000_000 -> String.format(Locale.US, "%.1fT", cap / 1_000_000_000_000)
+        cap >= 1_000_000_000 -> String.format(Locale.US, "%.1fB", cap / 1_000_000_000)
+        cap >= 1_000_000 -> String.format(Locale.US, "%.1fM", cap / 1_000_000)
+        else -> String.format(Locale.US, "%.0f", cap)
     }
 }
