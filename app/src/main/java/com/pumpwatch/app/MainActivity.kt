@@ -6,9 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,13 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -48,8 +42,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -60,10 +52,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.ui.TopPicksScreen
+import com.pumpwatch.app.ui.CoinDetailScreen
 import com.pumpwatch.app.ui.HistoryScreen
+import com.pumpwatch.app.ui.TopPicksScreen
 import com.pumpwatch.app.worker.MonitorScheduler
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -77,8 +69,6 @@ private val AccentGreen = Color(0xFF00E676)
 private val AccentRed = Color(0xFFFF5252)
 private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
-private val WarningYellow = Color(0xFFFFC107)
-private val AccentBlue = Color(0xFF4FC3F7)
 
 // ---------- تب‌ها ----------
 enum class Tab(val title: String, val emoji: String) {
@@ -104,7 +94,6 @@ data class IndicatorResult(
     val signal: String,
     val confidence: Int,
     val explanation: String,
-    // فیلدهای جدید
     val mfi: Double,
     val vwap: Double,
     val vwapDeviation: Double,
@@ -125,7 +114,7 @@ object IndicatorEngine {
                 50.0, 0.0, 0.0, currentPrice, currentPrice, currentPrice,
                 currentPrice * 1.05, currentPrice * 0.95,
                 emptyList(), emptyList(), "HOLD", 0,
-                "داده کافی برای تحلیل نیست (حداقل ۹۰ کندل لازم است)",
+                "داده کافی نیست (۹۰ کندل لازم)",
                 50.0, currentPrice, 0.0, "NONE", 0.0, 0.0, 0.0, 0.0, 0.0, currentPrice
             )
         }
@@ -133,7 +122,6 @@ object IndicatorEngine {
         val closes = ohlc.map { it[4] }
         val highs = ohlc.map { it[2] }
         val lows = ohlc.map { it[3] }
-        val opens = ohlc.map { it[1] }
 
         val rsi = calculateRSI(closes)
         val macdVal = calculateMACD(closes)
@@ -153,25 +141,16 @@ object IndicatorEngine {
         val volRatio = calculateVolumeRatio(volumes)
         val trailingStop = currentPrice - atr * 2.5
 
-        val signal = determineSignal(
-            rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
-            bb.first, bb.third, sr.first, sr.second, mfi, vwap, adx, diPlus, diMinus, obvDiv
-        )
-        val confidence = calculateConfidence(
-            rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
-            sr.first, sr.second, mfi, adx, obvDiv, volRatio
-        )
-        val explanation = generateExplanation(
-            signal, rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
-            sr.first, sr.second, mfi, vwap, adx, diPlus, diMinus, obvDiv, volRatio
-        )
+        val signal = determineSignal(rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
+            bb.first, bb.third, sr.first, sr.second, mfi, vwap, adx, diPlus, diMinus, obvDiv)
+        val confidence = calculateConfidence(rsi, macdVal.first, macdVal.second, currentPrice, ema20, ema50,
+            sr.first, sr.second, mfi, adx, obvDiv, volRatio)
+        val explanation = generateExplanation(signal, rsi, macdVal.first, macdVal.second, currentPrice,
+            ema20, ema50, sr.first, sr.second, mfi, vwap, adx, diPlus, diMinus, obvDiv, volRatio)
 
-        return IndicatorResult(
-            rsi, macdVal.first, macdVal.second, ema20, ema50, ema200,
-            bb.first, bb.third, sr.first, sr.second,
-            signal, confidence, explanation,
-            mfi, vwap, vwapDev, obvDiv, adx, diPlus, diMinus, atr, volRatio, trailingStop
-        )
+        return IndicatorResult(rsi, macdVal.first, macdVal.second, ema20, ema50, ema200,
+            bb.first, bb.third, sr.first, sr.second, signal, confidence, explanation,
+            mfi, vwap, vwapDev, obvDiv, adx, diPlus, diMinus, atr, volRatio, trailingStop)
     }
 
     private fun calculateRSI(closes: List<Double>, period: Int = 14): Double {
@@ -233,7 +212,6 @@ object IndicatorEngine {
         return Pair(supports.takeLast(3), resistances.takeLast(3))
     }
 
-    // ---------- ATR ----------
     private fun calculateATR(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
         if (closes.size < period + 1) return 0.0
         var sum = 0.0
@@ -249,7 +227,6 @@ object IndicatorEngine {
         return atr
     }
 
-    // ---------- ADX ----------
     private fun calculateADX(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
         if (closes.size < period * 2) return 0.0
         val plusDM = mutableListOf<Double>()
@@ -322,7 +299,6 @@ object IndicatorEngine {
         return if (sTR > 0) 100 * sM / sTR else 0.0
     }
 
-    // ---------- MFI ----------
     private fun calculateMFI(highs: List<Double>, lows: List<Double>, closes: List<Double>, volumes: List<Double>, period: Int = 14): Double {
         if (closes.size < period + 1 || volumes.size < closes.size) return 50.0
         var posFlow = 0.0
@@ -331,7 +307,7 @@ object IndicatorEngine {
         for (i in closes.size - period until closes.size) {
             val tp = (highs[i] + lows[i] + closes[i]) / 3.0
             val vi = i - offset
-            if (vi > 0 && vi < volumes.size) {
+            if (vi >= 0 && vi < volumes.size) {
                 val mf = tp * volumes[vi]
                 if (i > 0) {
                     val prevTP = (highs[i - 1] + lows[i - 1] + closes[i - 1]) / 3.0
@@ -342,7 +318,6 @@ object IndicatorEngine {
         return if (negFlow == 0.0) 100.0 else 100.0 - (100.0 / (1.0 + posFlow / negFlow))
     }
 
-    // ---------- VWAP ----------
     private fun calculateVWAP(highs: List<Double>, lows: List<Double>, closes: List<Double>, volumes: List<Double>): Double {
         if (volumes.isEmpty() || closes.size != volumes.size) {
             val start = maxOf(0, closes.size - 20)
@@ -365,7 +340,6 @@ object IndicatorEngine {
         return if (cumVol > 0) cumTPV / cumVol else closes.lastOrNull() ?: 0.0
     }
 
-    // ---------- OBV Divergence ----------
     private fun calculateOBVDivergence(closes: List<Double>, volumes: List<Double>): String {
         if (closes.size < 20 || volumes.size < closes.size) return "NONE"
         var obv = 0.0
@@ -393,7 +367,6 @@ object IndicatorEngine {
         }
     }
 
-    // ---------- Volume Ratio ----------
     private fun calculateVolumeRatio(volumes: List<Double>, period: Int = 20): Double {
         if (volumes.size <= period) return 0.0
         val last = volumes.last()
