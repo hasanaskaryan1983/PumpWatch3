@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.BacktestConfig
+import com.pumpwatch.app.data.BacktestEngine
 import com.pumpwatch.app.data.BacktestResult
 import com.pumpwatch.app.data.ChartClient
 import kotlinx.coroutines.launch
