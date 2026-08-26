@@ -2,6 +2,7 @@ package com.pumpwatch.app.ui
 
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -242,14 +243,27 @@ fun SignalCard(s: SignalResult) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("RSI ${String.format(Locale.US, "%.0f", s.rsi)}", fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                Text("ADX ${String.format(Locale.US, "%.0f", s.adx)}", fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                Text("حجم ${String.format(Locale.US, "%.1f", s.volumeRatio)}x", fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                Text("MTF: ${s.mtfTrend}", fontSize = 11.sp,
-                    color = if (s.mtfAligned) Green else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                Text(
+                    "RSI ${String.format(Locale.US, "%.0f", s.rsi)}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Text(
+                    "ADX ${String.format(Locale.US, "%.0f", s.adx)}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Text(
+                    "حجم ${String.format(Locale.US, "%.1f", s.volumeRatio)}x",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Text(
+                    "MTF: ${s.mtfTrend}",
+                    fontSize = 11.sp,
+                    color = if (s.mtfAligned) Green
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
             }
 
             // ---------- دلایل ----------
