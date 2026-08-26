@@ -28,11 +28,20 @@ data class BollingerResult(
 
 data class SupertrendResult(val direction: Int, val line: Double) // +1 صعودی / -1 نزولی
 
+data class MfiResult(val mfi: Double, val typicalPrice: Double, val moneyFlow: Double)
+
+data class VwapResult(val vwap: Double, val deviation: Double)
+
+data class ObvResult(val obv: Double, val obvEma: Double, val divergence: String)
+
 // ---------- موتور محاسبات ----------
 
 object Indicators {
 
     fun closes(candles: List<Candle>): List<Double> = candles.map { it.close }
+    fun highs(candles: List<Candle>): List<Double> = candles.map { it.high }
+    fun lows(candles: List<Candle>): List<Double> = candles.map { it.low }
+    fun volumes(candles: List<Candle>): List<Double> = candles.map { it.volume }
 
     // ---------- EMA ----------
 
@@ -103,7 +112,7 @@ object Indicators {
         return a
     }
 
-    // ---------- ADX (قدرت روند) ----------
+    // ---------- ADX (قدرت روند) + DI ----------
 
     fun adx(candles: List<Candle>, period: Int = 14): Double {
         if (candles.size < period * 2) return 0.0
@@ -137,6 +146,119 @@ object Indicators {
             a = (a * (period - 1) + dxList[i]) / period
         }
         return a
+    }
+
+    fun diPlus(candles: List<Candle>, period: Int = 14): Double {
+        if (candles.size < period * 2) return 0.0
+        val plusDM = ArrayList<Double>()
+        val trs = ArrayList<Double>()
+        for (i in 1 until candles.size) {
+            val up = candles[i].high - candles[i - 1].high
+            val dn = candles[i - 1].low - candles[i].low
+            plusDM.add(if (up > dn && up > 0) up else 0.0)
+            trs.add(tr(candles[i], candles[i - 1].close))
+        }
+        var sTR = trs.take(period).sum()
+        var sP = plusDM.take(period).sum()
+        for (i in period until trs.size) {
+            sTR = sTR - sTR / period + trs[i]
+            sP = sP - sP / period + plusDM[i]
+        }
+        return if (sTR > 0) 100 * sP / sTR else 0.0
+    }
+
+    fun diMinus(candles: List<Candle>, period: Int = 14): Double {
+        if (candles.size < period * 2) return 0.0
+        val minusDM = ArrayList<Double>()
+        val trs = ArrayList<Double>()
+        for (i in 1 until candles.size) {
+            val up = candles[i].high - candles[i - 1].high
+            val dn = candles[i - 1].low - candles[i].low
+            minusDM.add(if (dn > up && dn > 0) dn else 0.0)
+            trs.add(tr(candles[i], candles[i - 1].close))
+        }
+        var sTR = trs.take(period).sum()
+        var sM = minusDM.take(period).sum()
+        for (i in period until trs.size) {
+            sTR = sTR - sTR / period + trs[i]
+            sM = sM - sM / period + minusDM[i]
+        }
+        return if (sTR > 0) 100 * sM / sTR else 0.0
+    }
+
+    // ---------- MFI (شاخص جریان پول) ----------
+
+    fun mfi(candles: List<Candle>, period: Int = 14): MfiResult {
+        if (candles.size < period + 1) return MfiResult(50.0, 0.0, 0.0)
+        var posFlow = 0.0
+        var negFlow = 0.0
+        var prevTP = 0.0
+        for (i in candles.size - period until candles.size) {
+            val tp = (candles[i].high + candles[i].low + candles[i].close) / 3.0
+            val mf = tp * candles[i].volume
+            if (i > candles.size - period) {
+                if (tp > prevTP) posFlow += mf else negFlow += mf
+            }
+            prevTP = tp
+        }
+        val lastTP = (candles.last().high + candles.last().low + candles.last().close) / 3.0
+        val lastMF = lastTP * candles.last().volume
+        val mfi = if (negFlow == 0.0) 100.0 else 100.0 - (100.0 / (1.0 + posFlow / negFlow))
+        return MfiResult(mfi.coerceIn(0.0, 100.0), lastTP, lastMF)
+    }
+
+    // ---------- VWAP (میانگین وزنی حجمی) ----------
+
+    fun vwap(candles: List<Candle>): VwapResult {
+        if (candles.isEmpty()) return VwapResult(0.0, 0.0)
+        var cumTPV = 0.0
+        var cumVol = 0.0
+        for (c in candles) {
+            val tp = (c.high + c.low + c.close) / 3.0
+            cumTPV += tp * c.volume
+            cumVol += c.volume
+        }
+        val vwap = if (cumVol > 0) cumTPV / cumVol else 0.0
+        val last = candles.last()
+        val lastTP = (last.high + last.low + last.close) / 3.0
+        val dev = if (vwap > 0) abs(lastTP - vwap) / vwap * 100 else 0.0
+        return VwapResult(vwap, dev)
+    }
+
+    // ---------- OBV (حجم تعادلی) ----------
+
+    fun obv(candles: List<Candle>): ObvResult {
+        if (candles.size < 20) return ObvResult(0.0, 0.0, "NONE")
+        var obv = 0.0
+        val obvSeries = ArrayList<Double>()
+        for (i in candles.indices) {
+            if (i == 0) {
+                obv = candles[i].volume
+            } else {
+                obv += when {
+                    candles[i].close > candles[i - 1].close -> candles[i].volume
+                    candles[i].close < candles[i - 1].close -> -candles[i].volume
+                    else -> 0.0
+                }
+            }
+            obvSeries.add(obv)
+        }
+        val obvEma = emaLast(obvSeries, 20)
+        val lastObv = obvSeries.last()
+        
+        // Detect divergence
+        val closes = candles.map { it.close }
+        val obvLast10 = obvSeries.takeLast(10)
+        val closeLast10 = closes.takeLast(10)
+        val obvTrend = if (obvLast10.last() > obvLast10.first()) "UP" else "DOWN"
+        val priceTrend = if (closeLast10.last() > closeLast10.first()) "UP" else "DOWN"
+        val divergence = when {
+            priceTrend == "UP" && obvTrend == "DOWN" -> "BEARISH"
+            priceTrend == "DOWN" && obvTrend == "UP" -> "BULLISH"
+            else -> "NONE"
+        }
+        
+        return ObvResult(lastObv, obvEma, divergence)
     }
 
     // ---------- بولینگر ----------
