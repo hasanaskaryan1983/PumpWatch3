@@ -39,7 +39,6 @@ import java.util.Locale
 
 private val BGreen = Color(0xFF00E676)
 private val BRed = Color(0xFFFF5252)
-private val BYellow = Color(0xFFFFC107)
 
 // ---------- صفحه بک‌تست حرفه‌ای ----------
 
@@ -176,10 +175,9 @@ fun BacktestScreen() {
         }
 
         // ---------- دکمه‌ها ----------
-        Button(
-            onClick = { applyBest() },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("بهترین تنظیمات 🎯") }
+        Button(onClick = { applyBest() }, modifier = Modifier.fillMaxWidth()) {
+            Text("بهترین تنظیمات 🎯")
+        }
 
         Button(
             onClick = { runBacktest() },
@@ -213,13 +211,19 @@ fun BacktestScreen() {
                     ResultRow("تعداد معاملات:", "${r.totalTrades}")
                     ResultRow("سود:", "${r.winCount}")
                     ResultRow("ضرر:", "${r.lossCount}")
-                    ResultRow("نرخ برد:", String.format(Locale.US, "%.1f%%", r.winRatePercent))
+                    ResultRow(
+                        "نرخ برد:",
+                        String.format(Locale.US, "%.1f%%", r.winRatePercent)
+                    )
                     ResultRow(
                         "سود خالص:",
                         String.format(Locale.US, "%.2f%%", r.netPnlPercent),
                         if (r.netPnlPercent >= 0) BGreen else BRed
                     )
-                    ResultRow("حداکثر کشیدگی:", String.format(Locale.US, "%.2f%%", r.maxDrawdownPercent))
+                    ResultRow(
+                        "حداکثر کشیدگی:",
+                        String.format(Locale.US, "%.2f%%", r.maxDrawdownPercent)
+                    )
 
                     Text(
                         "معاملات اخیر:",
@@ -254,16 +258,8 @@ private fun SliderRow(
     onValueChange: (Float) -> Unit
 ) {
     Column {
-        Text(
-            "$label: ${value.toInt()}%",
-            fontSize = 13.sp
-        )
-        Slider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = range,
-            steps = 0
-        )
+        Text("$label: ${value.toInt()}%", fontSize = 13.sp)
+        Slider(value = value, onValueChange = onValueChange, valueRange = range, steps = 0)
     }
 }
 
