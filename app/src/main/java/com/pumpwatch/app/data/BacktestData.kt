@@ -1,14 +1,17 @@
 package com.pumpwatch.app.data
 
+import com.google.gson.annotations.SerializedName
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 data class MarketChart(
-    val prices: List<List<Double>>
+    val prices: List<List<Double>>,
+    @SerializedName("total_volumes") val totalVolumes: List<List<Double>>? = null
 )
 
 interface CoinGeckoChartApi {
@@ -47,14 +50,29 @@ data class BacktestResult(
     val trades: List<SimulatedTrade>
 )
 
-// ---------- موتور بک‌تست هوشمند نسخه ۲ ----------
+// ---------- تنظیمات استراتژی ----------
+
+data class BacktestConfig(
+    val buyDrop: Double = 5.0,
+    val sellRise: Double = 6.0,
+    val stopLoss: Double = 6.0,
+    val rsiMax: Double = 40.0,
+    val stochMax: Double = 25.0,
+    val useTrend: Boolean = true,
+    val useMacd: Boolean = true,
+    val useBollinger: Boolean = true,
+    val useVolume: Boolean = true,
+    val useBreakEven: Boolean = true
+)
+
+// ---------- موتور بک‌تست نسخه ۳ ----------
 
 object BacktestEngine {
 
     fun run(
         prices: List<Pair<Long, Double>>,
-        buyDrop: Double,
-        sellRise: Double
+        config: BacktestConfig,
+        volumes: List<Double> = emptyList()
     ): BacktestResult {
         val closes = prices.map { it.second }
         val n = closes.size
@@ -65,6 +83,8 @@ object BacktestEngine {
         val ema20 = emaSeries(closes, 20)
         val ema50 = emaSeries(closes, 50)
         val rsi = rsiSeries(closes, 14)
+        val stoch = stochSeries(closes, 14)
+        val pb = bollingerPB(closes, 20)
         val hist = macdHistSeries(closes)
         val atrPct = atrPctSeries(closes, 14)
 
@@ -92,16 +112,24 @@ object BacktestEngine {
             val price = closes[i]
 
             if (!inPosition) {
-                // ---------- ۶ شرط ورود (همه لازم) ----------
                 val peak20 = closes.subList(i - 20, i + 1).maxOrNull() ?: price
-                val dropped = (peak20 - price) / peak20 * 100 >= buyDrop
-                val trendUp = ema20[i] > ema50[i] && ema50[i] > ema50[i - 10]
-                val rsiLow = rsi[i] < 40
+                val dropped = (peak20 - price) / peak20 * 100 >= config.buyDrop
                 val confirm = price > closes[i - 1]
-                val macdTurn = hist[i] > hist[i - 1] && hist[i - 1] > hist[i - 2]
-                val volOk = atrPct[i] in 0.5..6.0
 
-                if (dropped && trendUp && rsiLow && confirm && macdTurn && volOk) {
+                val trendOk = !config.useTrend ||
+                        (ema20[i] > ema50[i] && ema50[i] > ema50[i - 10])
+                val rsiOk = rsi[i] < config.rsiMax
+                val stochOk = stoch[i] < config.stochMax
+                val bollOk = !config.useBollinger || pb[i] < 0.2
+                val macdOk = !config.useMacd ||
+                        (hist[i] > hist[i - 1] && hist[i - 1] > hist[i - 2])
+                val volOk = !config.useVolume || volumes.isEmpty() ||
+                        (i >= 20 && volumes[i] > 1.3 * volumes.subList(i - 20, i).average())
+                val atrOk = atrPct[i] in 0.5..6.0
+
+                if (dropped && confirm && trendOk && rsiOk && stochOk &&
+                    bollOk && macdOk && volOk && atrOk
+                ) {
                     inPosition = true
                     entry = price
                     entryIndex = i
@@ -109,16 +137,15 @@ object BacktestEngine {
             } else {
                 val pnl = (price - entry) / entry * 100
 
-                // ---------- استاپ بیک‌ایون ----------
-                if (!breakEven && pnl >= sellRise * 0.5) breakEven = true
-
-                val slDist = maxOf(buyDrop * 1.2, 6.0)
+                if (config.useBreakEven && !breakEven && pnl >= config.sellRise * 0.5) {
+                    breakEven = true
+                }
 
                 when {
-                    pnl >= sellRise -> close(price)
+                    pnl >= config.sellRise -> close(price)
                     breakEven && price <= entry -> close(price)
-                    !breakEven && pnl <= -slDist -> close(price)
-                    rsi[i] >= 70 && pnl >= sellRise * 0.4 -> close(price)
+                    !breakEven && pnl <= -config.stopLoss -> close(price)
+                    rsi[i] >= 70 && pnl >= config.sellRise * 0.4 -> close(price)
                     i - entryIndex > 96 -> close(price)
                 }
             }
@@ -144,9 +171,8 @@ object BacktestEngine {
         val k = 2.0 / (period + 1)
         var ema = data.take(period).average()
         for (i in data.indices) {
-            if (i < period - 1) {
-                out[i] = ema
-            } else {
+            if (i < period - 1) out[i] = ema
+            else {
                 ema = data[i] * k + ema * (1 - k)
                 out[i] = ema
             }
@@ -154,7 +180,7 @@ object BacktestEngine {
         return out.toList()
     }
 
-    // ---------- RSI (Wilder) ----------
+    // ---------- RSI ----------
 
     private fun rsiSeries(data: List<Double>, period: Int): List<Double> {
         val out = DoubleArray(data.size) { 50.0 }
@@ -177,7 +203,35 @@ object BacktestEngine {
         return out.toList()
     }
 
-    // ---------- هیستوگرام MACD ----------
+    // ---------- Stochastic %K ----------
+
+    private fun stochSeries(data: List<Double>, period: Int): List<Double> {
+        val out = DoubleArray(data.size) { 50.0 }
+        for (i in period - 1 until data.size) {
+            val win = data.subList(i - period + 1, i + 1)
+            val hh = win.maxOrNull() ?: data[i]
+            val ll = win.minOrNull() ?: data[i]
+            out[i] = if (hh > ll) (data[i] - ll) / (hh - ll) * 100 else 50.0
+        }
+        return out.toList()
+    }
+
+    // ---------- Bollinger %B ----------
+
+    private fun bollingerPB(data: List<Double>, period: Int): List<Double> {
+        val out = DoubleArray(data.size) { 0.5 }
+        for (i in period - 1 until data.size) {
+            val win = data.subList(i - period + 1, i + 1)
+            val mid = win.average()
+            val sd = sqrt(win.map { (it - mid) * (it - mid) }.average())
+            val upper = mid + 2 * sd
+            val lower = mid - 2 * sd
+            out[i] = if (upper > lower) (data[i] - lower) / (upper - lower) else 0.5
+        }
+        return out.toList()
+    }
+
+    // ---------- MACD Histogram ----------
 
     private fun macdHistSeries(data: List<Double>): List<Double> {
         val ema12 = emaSeries(data, 12)
@@ -187,7 +241,7 @@ object BacktestEngine {
         return List(data.size) { macd[it] - signal[it] }
     }
 
-    // ---------- نوسان ATR درصدی ----------
+    // ---------- ATR % ----------
 
     private fun atrPctSeries(data: List<Double>, period: Int): List<Double> {
         val out = DoubleArray(data.size) { 1.0 }
