@@ -15,15 +15,12 @@ object BatchScanner {
         "usde", "usds", "pyusd", "usdd", "gusd"
     )
 
-    // ---------- اسکن کامل دولایه‌ای ----------
-
     suspend fun scan(
         mode: String,
         params: SignalParams,
         onProgress: (Int, String) -> Unit = { _, _ -> }
     ): List<SignalResult> {
 
-        // ---------- لایه ۰: دریافت لیست کامل ----------
         onProgress(
             3,
             if (mode == "SPOT") "دریافت لیست ۱۰۰۰ ارز اسپات..."
@@ -38,13 +35,11 @@ object BatchScanner {
                     m.rank != null
         }
 
-        // ---------- لایه ۱: اسکن سریع همه ارزها ----------
         onProgress(8, "اسکن سریع ${filtered.size} ارز...")
         val ranked = filtered
             .map { it to quickScore(it) }
             .sortedByDescending { it.second }
 
-        // ---------- لایه ۲: تحلیل عمیق برترین‌ها ----------
         val deepCount = if (mode == "SPOT") {
             minOf(200, ranked.size)
         } else {
@@ -63,9 +58,9 @@ object BatchScanner {
                 "تحلیل عمیق ${m.symbol.uppercase(Locale.US)}... ($done/${candidates.size})"
             )
             try {
-                // تغییر: ۹۰ روز داده برای تحلیل دقیق‌تر
-                val chart = ScanClient.api.chart(m.id, days = 90, interval = "hourly")
-                val candles = toCandles(chart.prices, chart.volumes ?: emptyList())
+                // فقط days=90، بدون interval
+                val chart = ScanClient.api.chart(m.id, days = 90)
+                val candles = toCandles(chart.prices, chart.totalVolumes ?: emptyList())
                 val sig = SignalEngine.analyze(
                     coinId = m.id,
                     symbol = m.symbol.uppercase(Locale.US),
@@ -77,7 +72,6 @@ object BatchScanner {
                 )
                 if (sig != null && sig.side != "NONE") results.add(sig)
             } catch (_: Exception) {
-                // خطای API → رد کن
             }
             delay(300)
         }
@@ -85,8 +79,6 @@ object BatchScanner {
         val limit = if (mode == "SPOT") 50 else 20
         return results.sortedByDescending { it.score }.take(limit)
     }
-
-    // ---------- امتیاز سریع (لایه ۱) ----------
 
     private fun quickScore(m: ScanMarket): Double {
         val change = abs(m.change24h ?: 0.0)
@@ -98,8 +90,6 @@ object BatchScanner {
         val rangePos = if (high > low) (m.price - low) / (high - low) else 0.5
         return change * 2.0 + change7 + turnover * 50.0 + rangePos * 10.0
     }
-
-    // ---------- دریافت لیست بازار ----------
 
     private suspend fun loadMarkets(mode: String): List<ScanMarket> {
         return if (mode == "SPOT") {
@@ -116,8 +106,6 @@ object BatchScanner {
         }
     }
 
-    // ---------- فاندینگ فیوچرز ----------
-
     private suspend fun loadFunding(): Map<String, Double> {
         return try {
             ScanClient.api.derivatives()
@@ -128,8 +116,6 @@ object BatchScanner {
             emptyMap()
         }
     }
-
-    // ---------- تبدیل داده ساعتی به کندل ----------
 
     private fun toCandles(
         prices: List<List<Double>>,
