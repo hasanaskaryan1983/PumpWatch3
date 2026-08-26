@@ -60,7 +60,7 @@ object BatchScanner {
             try {
                 // فقط days=90، بدون interval
                 val chart = ScanClient.api.chart(m.id, days = 90)
-                val candles = toCandles(chart.prices, chart.totalVolumes ?: emptyList())
+                val candles = toCandles(chart.prices, chart.volumes ?: emptyList())
                 val sig = SignalEngine.analyze(
                     coinId = m.id,
                     symbol = m.symbol.uppercase(Locale.US),
