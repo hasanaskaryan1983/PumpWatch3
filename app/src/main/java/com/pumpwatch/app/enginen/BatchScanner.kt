@@ -15,7 +15,7 @@ object BatchScanner {
         "usde", "usds", "pyusd", "usdd", "gusd"
     )
 
-    // ---------- اسکن کامل ----------
+    // ---------- اسکن کامل دولایه‌ای ----------
 
     suspend fun scan(
         mode: String,
@@ -23,29 +23,44 @@ object BatchScanner {
         onProgress: (Int, String) -> Unit = { _, _ -> }
     ): List<SignalResult> {
 
-        onProgress(5, "دریافت لیست بازار...")
+        // ---------- لایه ۰: دریافت لیست کامل ----------
+        onProgress(
+            3,
+            if (mode == "SPOT") "دریافت لیست ۱۰۰۰ ارز اسپات..."
+            else "دریافت لیست ۱۰۰ ارز فیوچرز..."
+        )
         val markets = loadMarkets(mode)
 
-        // مرحله ۱: فیلتر نقدشوندگی + حذف استیبل‌کوین
+        val minVolume = if (mode == "SPOT") 5_000_000 else 1_000_000
         val filtered = markets.filter { m ->
             m.symbol.lowercase() !in STABLES &&
-                    (m.volume ?: 0.0) > 5_000_000 &&
+                    (m.volume ?: 0.0) > minVolume &&
                     m.rank != null
         }
 
-        // مرحله ۲: انتخاب کاندیداها (حجم بالا + حرکت زیاد)
-        val candidates = pickCandidates(filtered, mode)
+        // ---------- لایه ۱: اسکن سریع همه ارزها ----------
+        onProgress(8, "اسکن سریع ${filtered.size} ارز...")
+        val ranked = filtered
+            .map { it to quickScore(it) }
+            .sortedByDescending { it.second }
+
+        // ---------- لایه ۲: تحلیل عمیق برترین‌ها ----------
+        val deepCount = if (mode == "SPOT") {
+            minOf(200, ranked.size)
+        } else {
+            minOf(100, ranked.size)
+        }
+        val candidates = ranked.take(deepCount).map { it.first }
 
         val funding = if (mode == "FUT") loadFunding() else emptyMap()
 
-        // مرحله ۳: تحلیل عمیق هر کاندیدا
         val results = mutableListOf<SignalResult>()
         var done = 0
         for (m in candidates) {
             done++
             onProgress(
                 10 + done * 85 / candidates.size,
-                "تحلیل ${m.symbol.uppercase(Locale.US)}... ($done/${candidates.size})"
+                "تحلیل عمیق ${m.symbol.uppercase(Locale.US)}... ($done/${candidates.size})"
             )
             try {
                 val chart = ScanClient.api.chart(m.id, days = 30, interval = "hourly")
@@ -61,13 +76,26 @@ object BatchScanner {
                 )
                 if (sig != null && sig.side != "NONE") results.add(sig)
             } catch (_: Exception) {
-                // خطای API یا محدودیت نرخ → رد کن
+                // خطای API → رد کن
             }
-            delay(1200) // احترام به محدودیت API
+            delay(300)
         }
 
         val limit = if (mode == "SPOT") 50 else 20
         return results.sortedByDescending { it.score }.take(limit)
+    }
+
+    // ---------- امتیاز سریع (لایه ۱) ----------
+
+    private fun quickScore(m: ScanMarket): Double {
+        val change = abs(m.change24h ?: 0.0)
+        val change7 = abs(m.change7d ?: 0.0)
+        val cap = m.marketCap ?: 0.0
+        val turnover = if (cap > 0) (m.volume ?: 0.0) / cap else 0.0
+        val high = m.high24h ?: 0.0
+        val low = m.low24h ?: 0.0
+        val rangePos = if (high > low) (m.price - low) / (high - low) else 0.5
+        return change * 2.0 + change7 + turnover * 50.0 + rangePos * 10.0
     }
 
     // ---------- دریافت لیست بازار ----------
@@ -85,21 +113,6 @@ object BatchScanner {
         } else {
             ScanClient.api.markets(perPage = 100, page = 1)
         }
-    }
-
-    // ---------- انتخاب کاندیداها ----------
-
-    private fun pickCandidates(list: List<ScanMarket>, mode: String): List<ScanMarket> {
-        val volCount = if (mode == "SPOT") 40 else 50
-        val moveCount = if (mode == "SPOT") 40 else 40
-        val cap = if (mode == "SPOT") 60 else 40
-
-        val byVol = list.sortedByDescending { it.volume ?: 0.0 }.take(volCount)
-        val byMove = list.sortedByDescending { abs(it.change24h ?: 0.0) }.take(moveCount)
-
-        val set = linkedMapOf<String, ScanMarket>()
-        (byVol + byMove).forEach { set[it.id] = it }
-        return set.values.take(cap)
     }
 
     // ---------- فاندینگ فیوچرز ----------
