@@ -41,42 +41,51 @@ import java.util.Locale
 private val BGreen = Color(0xFF00E676)
 private val BRed = Color(0xFFFF5252)
 
-// ---------- صفحه بک‌تست حرفه‌ای ----------
+// ---------- صفحه بک‌تست حرفه‌ای (نسخه ۲ - بهینه‌شده) ----------
 
 @Composable
 fun BacktestScreen() {
     val scope = rememberCoroutineScope()
 
     var coinId by remember { mutableStateOf("bitcoin") }
-    var days by remember { mutableStateOf(90) }
+    var days by remember { mutableStateOf(90) }  // پیش‌فرض ۹۰ روز
 
     var buyDrop by remember { mutableStateOf(5f) }
-    var sellRise by remember { mutableStateOf(6f) }
+    var sellRise by remember { mutableStateOf(9f) }     // RR 1:1.5 با استاپ ۶٪
     var stopLoss by remember { mutableStateOf(6f) }
-    var rsiMax by remember { mutableStateOf(40f) }
-    var stochMax by remember { mutableStateOf(25f) }
+    var rsiMax by remember { mutableStateOf(32f) }        // پایین‌تر = سیگنال قوی‌تر
+    var stochMax by remember { mutableStateOf(20f) }      // پایین‌تر = سیگنال قوی‌تر
+    var atrMult by remember { mutableStateOf(2.5f) }     // ATR-based stop
 
     var useTrend by remember { mutableStateOf(true) }
     var useMacd by remember { mutableStateOf(true) }
     var useBollinger by remember { mutableStateOf(true) }
-    var useVolume by remember { mutableStateOf(true) }
+    var useVolume by remember { mutableStateOf(true) }    // اجباری
     var useBreakEven by remember { mutableStateOf(true) }
+    var useMfi by remember { mutableStateOf(true) }       // جدید
+    var useAdx by remember { mutableStateOf(true) }       // جدید
+    var useTrailing by remember { mutableStateOf(true) }  // جدید
 
     var loading by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<BacktestResult?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun applyBest() {
+        // تنظیمات بهینه پیشنهادی
         buyDrop = 5f
-        sellRise = 6f
+        sellRise = 9f       // ۹٪ فروش / ۶٪ استاپ = RR 1:1.5
         stopLoss = 6f
-        rsiMax = 40f
-        stochMax = 25f
+        rsiMax = 32f        // پایین‌تر = سیگنال قوی‌تر
+        stochMax = 20f
+        atrMult = 2.5f
         useTrend = true
         useMacd = true
         useBollinger = true
         useVolume = true
         useBreakEven = true
+        useMfi = true
+        useAdx = true
+        useTrailing = true
     }
 
     fun runBacktest() {
@@ -95,11 +104,15 @@ fun BacktestScreen() {
                         stopLoss = stopLoss.toDouble(),
                         rsiMax = rsiMax.toDouble(),
                         stochMax = stochMax.toDouble(),
+                        atrMult = atrMult.toDouble(),
                         useTrend = useTrend,
                         useMacd = useMacd,
                         useBollinger = useBollinger,
                         useVolume = useVolume,
-                        useBreakEven = useBreakEven
+                        useBreakEven = useBreakEven,
+                        useMfi = useMfi,
+                        useAdx = useAdx,
+                        useTrailing = useTrailing
                     ),
                     vols
                 )
@@ -160,8 +173,9 @@ fun BacktestScreen() {
         SliderRow("خرید در افت", buyDrop, 1f..15f) { buyDrop = it }
         SliderRow("فروش در رشد", sellRise, 2f..20f) { sellRise = it }
         SliderRow("استاپ ضرر", stopLoss, 3f..15f) { stopLoss = it }
-        SliderRow("حداکثر RSI ورود", rsiMax, 30f..45f) { rsiMax = it }
+        SliderRow("حداکثر RSI ورود", rsiMax, 25f..45f) { rsiMax = it }
         SliderRow("حداکثر Stochastic ورود", stochMax, 10f..40f) { stochMax = it }
+        SliderRow("ضریب ATR استاپ", atrMult, 1.5f..4f) { atrMult = it }
 
         // ---------- فیلترها ----------
         Text("فیلترهای تأیید:", fontSize = 13.sp)
@@ -172,7 +186,12 @@ fun BacktestScreen() {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ToggleChip("حجم 💧", useVolume) { useVolume = !useVolume }
+            ToggleChip("MFI 💰", useMfi) { useMfi = !useMfi }
+            ToggleChip("ADX 📊", useAdx) { useAdx = !useAdx }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ToggleChip("بیک‌ایون 🛡️", useBreakEven) { useBreakEven = !useBreakEven }
+            ToggleChip("تریلینگ 📉", useTrailing) { useTrailing = !useTrailing }
         }
 
         // ---------- دکمه‌ها ----------
@@ -225,6 +244,10 @@ fun BacktestScreen() {
                         "حداکثر کشیدگی:",
                         String.format(Locale.US, "%.2f%%", r.maxDrawdownPercent)
                     )
+                    ResultRow(
+                        "نسبت RR میانگین:",
+                        String.format(Locale.US, "%.2f", r.avgRR)
+                    )
 
                     Text(
                         "معاملات اخیر:",
@@ -271,7 +294,7 @@ private fun ToggleChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(selected = selected, onClick = onClick, label = { Text(label, fontSize = 12.sp) })
 }
 
-// ---------- ردیف نتیجه ----------
+// ---------- ردیج نتیجه ----------
 
 @Composable
 private fun ResultRow(label: String, value: String, color: Color = Color.Unspecified) {
