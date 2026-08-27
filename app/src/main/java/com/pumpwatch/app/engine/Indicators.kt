@@ -2,6 +2,7 @@ package com.pumpwatch.app.engine
 
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 // ---------- کندل ----------
@@ -236,27 +237,27 @@ object Indicators {
         return out
     }
 
-    // ---------- Volume Profile (ابزار حرفه‌ای‌ها) ----------
+    // ---------- Volume Profile ----------
 
     fun volumeProfile(candles: List<Candle>, period: Int = 96): VolumeProfileResult {
         val win = candles.takeLast(period)
         if (win.isEmpty()) return VolumeProfileResult(0.0, 0.0, 0.0)
-        val min = win.minOf { it.low }
-        val max = win.maxOf { it.high }
-        if (max <= min) return VolumeProfileResult(win.last().close, max, min)
+        val minP = win.minOf { it.low }
+        val maxP = win.maxOf { it.high }
+        if (maxP <= minP) return VolumeProfileResult(win.last().close, maxP, minP)
 
         val bins = 24
         val vol = DoubleArray(bins)
         for (c in win) {
             val mid = (c.high + c.low) / 2
-            var idx = ((mid - min) / (max - min) * bins).toInt()
+            var idx = ((mid - minP) / (maxP - minP) * bins).toInt()
             if (idx >= bins) idx = bins - 1
             if (idx < 0) idx = 0
             vol[idx] += c.volume
         }
         val pocIdx = vol.indices.maxByOrNull { vol[it] } ?: 0
-        val binSize = (max - min) / bins
-        val poc = min + (pocIdx + 0.5) * binSize
+        val binSize = (maxP - minP) / bins
+        val poc = minP + (pocIdx + 0.5) * binSize
 
         val total = vol.sum()
         var acc = vol[pocIdx]
@@ -273,12 +274,12 @@ object Indicators {
                 acc += vol[hi]
             }
         }
-        val vah = min + (hi + 1) * binSize
-        val vall = min + lo * binSize
+        val vah = minP + (hi + 1) * binSize
+        val vall = minP + lo * binSize
         return VolumeProfileResult(poc, vah, vall)
     }
 
-    // ---------- Order Blocks (Smart Money) ----------
+    // ---------- Order Blocks ----------
 
     fun findOrderBlocks(candles: List<Candle>, lookback: Int = 50): List<OrderBlock> {
         val out = mutableListOf<OrderBlock>()
@@ -292,7 +293,6 @@ object Indicators {
             val n3 = candles[i + 3]
             val body = max(c.high - c.low, 0.0000001)
 
-            // اردر بلاک صعودی: آخرین کندل نزولی قبل از حرکت صعودی قوی
             if (c.close < c.open &&
                 n1.close > n1.open && n2.close > n2.open &&
                 n3.close > c.high &&
@@ -301,7 +301,6 @@ object Indicators {
                 out.add(OrderBlock(true, max(c.open, c.close), min(c.open, c.close), c.time))
             }
 
-            // اردر بلاک نزولی
             if (c.close > c.open &&
                 n1.close < n1.open && n2.close < n2.open &&
                 n3.close < c.low &&
@@ -313,7 +312,7 @@ object Indicators {
         return out.takeLast(6)
     }
 
-    // ---------- BOS (شکست ساختار) ----------
+    // ---------- BOS ----------
 
     fun detectBOS(candles: List<Candle>, swing: Int = 10): Pair<Boolean, Boolean> {
         if (candles.size < swing * 2 + 1) return Pair(false, false)
