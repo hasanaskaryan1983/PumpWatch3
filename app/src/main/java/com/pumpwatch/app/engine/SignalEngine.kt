@@ -1,57 +1,46 @@
 package com.pumpwatch.app.engine
 
-// ---------- پارامترهای قابل بهینه‌سازی ----------
+import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
 
 data class SignalParams(
     val rsiPeriod: Int = 14,
     val adxMin: Double = 25.0,
-    val volumeMin: Double = 2.0,        // حجم اجباری: حداقل ۲ برابر میانگین
+    val volumeMin: Double = 1.5,
     val breakoutLookback: Int = 20,
     val minScore: Double = 70.0,
     val goldenScore: Double = 80.0,
-    val atrMult: Double = 2.5,          // ATR × 2.5 برای استاپ هوشمند
-    val rr: Double = 1.5,               // Risk/Reward 1:1.5
-    val rsiBuyMax: Double = 35.0,       // RSI max برای خرید (پایین‌تر = سیگنال قوی‌تر)
-    val rsiSellMin: Double = 65.0,      // RSI min برای فروش
-    val mfiBuyMax: Double = 30.0,       // MFI max برای خرید
-    val mfiSellMin: Double = 70.0,      // MFI min برای فروش
-    val useTrailingStop: Boolean = true,
-    val trailingTrigger: Double = 4.0,  // وقتی سود به ۴٪ رسید، تریلینگ فعال
-    val trailingStep: Double = 2.0    // هر ۲٪ سود، استاپ جلو می‌آید
+    val atrMult: Double = 1.5,
+    val rr: Double = 1.5
 )
-
-// ---------- نتیجه سیگنال ----------
 
 data class SignalResult(
     val coinId: String,
     val symbol: String,
     val name: String,
     val price: Double,
-    val mode: String,              // "SPOT" | "FUT"
+    val mode: String,
     val pumpScore: Int,
     val dumpScore: Int,
-    val side: String,              // "PUMP" | "DUMP" | "NONE"
+    val side: String,
     val score: Int,
     val golden: Boolean,
+    val ultra: Boolean,
     val mtfAligned: Boolean,
-    val mtfTrend: String,          // "UP" | "DOWN" | "MIX"
+    val mtfTrend: String,
     val adx: Double,
     val rsi: Double,
-    val mfi: Double,
-    val vwap: Double,
-    val vwapDeviation: Double,
-    val obvDivergence: String,
     val volumeRatio: Double,
     val funding: Double?,
     val entry: Double,
     val stopLoss: Double,
     val target1: Double,
     val target2: Double,
-    val trailingStop: Double,      // قیمت تریلینگ استاپ
     val reasons: List<String>
 )
 
-// ---------- موتور سیگنال ----------
+// ---------- موتور سیگنال حالت ۹۰٪ ----------
 
 object SignalEngine {
 
@@ -64,215 +53,168 @@ object SignalEngine {
         funding: Double? = null,
         params: SignalParams = SignalParams()
     ): SignalResult? {
-        if (candles1h.size < 90) return null  // نیاز به ۹۰ کندل برای دقت
+        if (candles1h.size < 100) return null
 
         val closes = Indicators.closes(candles1h)
         val volumes = candles1h.map { it.volume }
-        val last = candles1h.last()
-        val price = last.close
+        val price = closes.last()
 
-        // ----- اندیکاتورهای 1H -----
+        // ---------- اندیکاتورهای 1H ----------
         val ema20 = Indicators.emaLast(closes, 20)
         val ema50 = Indicators.emaLast(closes, 50)
-        val ema200 = Indicators.emaLast(closes, 200)
-        val ema20Series = Indicators.emaSeries(closes, 20)
-        val ema20Rising = ema20Series.size > 3 &&
-                ema20Series.last() > ema20Series[ema20Series.size - 4]
-
         val rsi = Indicators.rsi(closes, params.rsiPeriod)
-        val rsiPrev = Indicators.rsi(closes.dropLast(1), params.rsiPeriod)
         val macd = Indicators.macd(closes)
         val macdPrev = Indicators.macd(closes.dropLast(1))
         val adx = Indicators.adx(candles1h)
-        val diPlus = Indicators.diPlus(candles1h)
-        val diMinus = Indicators.diMinus(candles1h)
-        val volRatio = Indicators.volumeRatio(volumes)
-        val atrVal = Indicators.atr(candles1h)
-        val mfiResult = Indicators.mfi(candles1h)
-        val vwapResult = Indicators.vwap(candles1h)
-        val obvResult = Indicators.obv(candles1h)
+        val atr = Indicators.atr(candles1h)
         val st = Indicators.supertrend(candles1h)
+        val volRatio = Indicators.volumeRatio(volumes)
+        val bb = Indicators.bollinger(closes)
+        val vp = Indicators.volumeProfile(candles1h)
+        val obs = Indicators.findOrderBlocks(candles1h)
+        val bos = Indicators.detectBOS(candles1h)
+        val srsi = Indicators.stochRsi(closes)
 
-        // ----- فیلتر حجم اجباری -----
-        if (volRatio < params.volumeMin) {
-            return null  // حجم ناکافی → بدون سیگنال
-        }
+        // ---------- تایم‌فریم‌های 4H و Daily ----------
+        val c4h = Indicators.aggregate(candles1h, 4)
+        val cD = Indicators.aggregate(candles1h, 24)
+        val closes4h = Indicators.closes(c4h)
+        val closesD = Indicators.closes(cD)
 
-        // ----- شکست مقاومت / حمایت -----
+        val t1hUp = ema20 > ema50 && st.direction > 0
+        val t1hDn = ema20 < ema50 && st.direction < 0
+        val t4hUp = closes4h.size >= 60 &&
+                Indicators.emaLast(closes4h, 20) > Indicators.emaLast(closes4h, 50) &&
+                Indicators.supertrend(c4h).direction > 0
+        val t4hDn = closes4h.size >= 60 &&
+                Indicators.emaLast(closes4h, 20) < Indicators.emaLast(closes4h, 50) &&
+                Indicators.supertrend(c4h).direction < 0
+        val tDUp = closesD.size >= 60 &&
+                Indicators.emaLast(closesD, 20) > Indicators.emaLast(closesD, 50)
+        val tDDn = closesD.size >= 60 &&
+                Indicators.emaLast(closesD, 20) < Indicators.emaLast(closesD, 50)
+
+        val mtfUp = t1hUp && t4hUp && tDUp
+        val mtfDn = t1hDn && t4hDn && tDDn
+        val mtfAligned = mtfUp || mtfDn
+        val mtfTrend = if (mtfUp) "UP" else if (mtfDn) "DOWN" else "MIX"
+
+        // ---------- شکست‌ها ----------
         val lookback = params.breakoutLookback
-        val prev = candles1h.dropLast(1).takeLast(lookback)
-        val prevHigh = prev.maxOf { it.high }
-        val prevLow = prev.minOf { it.low }
+        val prevHigh = candles1h.dropLast(1).takeLast(lookback).maxOf { it.high }
+        val prevLow = candles1h.dropLast(1).takeLast(lookback).minOf { it.low }
         val breakout = price > prevHigh
         val breakdown = price < prevLow
 
-        // ----- فشردگی بولینگر -----
-        val bbNow = Indicators.bollinger(closes)
-        val bbPrev = Indicators.bollinger(closes.dropLast(24))
-        val squeeze = bbPrev.widthPct > 0 && bbNow.widthPct < bbPrev.widthPct * 0.75
+        val inBullOB = obs.any { it.isBullish && price in it.bottom..it.top * 1.02 }
+        val inBearOB = obs.any { !it.isBullish && price in it.bottom * 0.98..it.top }
 
-        // ----- MTF: تایم‌فریم 4H و Daily -----
-        val candles4h = Indicators.aggregate(candles1h, 4)
-        val candlesD = Indicators.aggregate(candles1h, 24)
-        val trend1 = trendOf(candles1h)
-        val trend4 = trendOf(candles4h)
-        val trendD = trendOf(candlesD)
-        val mtfUp = trend1 == "UP" && trend4 == "UP" && trendD == "UP"
-        val mtfDown = trend1 == "DOWN" && trend4 == "DOWN" && trendD == "DOWN"
-        val mtfTrend = if (mtfUp) "UP" else if (mtfDown) "DOWN" else "MIX"
-
-        // ================= امتیاز پامپ =================
+        // ---------- امتیاز PUMP ----------
         var pump = 0
-        val pumpReasons = mutableListOf<String>()
+        val pReasons = mutableListOf<String>()
 
-        // قیمت و EMA
-        if (price > ema20 && price > ema50) { pump += 8; pumpReasons.add("قیمت بالای EMA20 و EMA50") }
-        if (ema20 > ema50) { pump += 6; pumpReasons.add("EMA20 بالای EMA50 (روند صعودی)") }
-        if (price > ema200) { pump += 4; pumpReasons.add("قیمت بالای EMA200") }
-        if (ema20Rising) { pump += 2; pumpReasons.add("شیب EMA20 صعودی") }
-
-        // VWAP
-        if (price > vwapResult.vwap) { pump += 5; pumpReasons.add("قیمت بالای VWAP (فشار خریدار)") }
-        if (vwapResult.deviation < 2.0) { pump += 3; pumpReasons.add("قیمت نزدیک VWAP") }
-
-        // RSI
-        if (rsi in 50.0..params.rsiSellMin) { pump += 8; pumpReasons.add("RSI در منطقه قدرت (${fmt(rsi)})") }
-        if (rsiPrev < 50 && rsi >= 50) { pump += 5; pumpReasons.add("شکست سطح ۵۰ توسط RSI") }
-
-        // MFI
-        if (mfiResult.mfi in 40.0..params.mfiSellMin) { pump += 6; pumpReasons.add("MFI در منطقه قدرت (${fmt(mfiResult.mfi)})") }
-        if (mfiResult.mfi > 50 && mfiResult.moneyFlow > 0) { pump += 4; pumpReasons.add("جریان پول مثبت") }
-
-        // MACD
-        if (macd.macd > macd.signal) { pump += 5; pumpReasons.add("MACD بالای خط سیگنال") }
-        if (macd.histogram > macdPrev.histogram) { pump += 2; pumpReasons.add("هیستوگرام MACD صعودی") }
-
-        // ADX
-        if (adx >= params.adxMin) { pump += 6; pumpReasons.add("ADX قوی (${fmt(adx)}) → روند تأیید شده") }
-        if (diPlus > diMinus) { pump += 4; pumpReasons.add("DI+ بالای DI- (فشار خریدار)") }
-
-        // Supertrend
-        if (st.direction == 1) { pump += 5; pumpReasons.add("Supertrend صعودی") }
-
-        // حجم
-        if (volRatio >= 4.0) { pump += 15; pumpReasons.add("حجم انفجاری (${fmt(volRatio)}x)") }
-        else if (volRatio >= 3.0) { pump += 12; pumpReasons.add("حجم غیرعادی (${fmt(volRatio)}x)") }
-        else if (volRatio >= 2.0) { pump += 8; pumpReasons.add("حجم بالاتر از میانگین") }
-
-        // شکست
-        if (breakout) {
-            pump += 12; pumpReasons.add("شکست مقاومت ${lookback} کندلی")
-            if (volRatio >= 2.0) { pump += 5; pumpReasons.add("شکست با حجم بالا") }
+        if (price > ema20 && ema20 > ema50) { pump += 10; pReasons.add("روند صعودی EMA") }
+        if (mtfUp) { pump += 10; pReasons.add("تأیید سه تایم‌فریم 📊") }
+        if (rsi in 45.0..68.0) { pump += 8; pReasons.add("RSI در محدوده قدرت") }
+        if (macd.macd > macd.signal && macd.histogram > macdPrev.histogram) {
+            pump += 10; pReasons.add("MACD صعودی")
         }
+        if (volRatio >= params.volumeMin) {
+            pump += 12; pReasons.add("حجم ${String.format(Locale.US, "%.1f", volRatio)}x")
+        }
+        if (breakout) { pump += 12; pReasons.add("شکست مقاومت $lookback کندلی") }
+        if (bb.widthPct < Indicators.bollinger(closes.dropLast(24)).widthPct * 0.8 && volRatio > 1.2) {
+            pump += 8; pReasons.add("خروج از فشردگی بولینگر")
+        }
+        if (price > vp.poc) { pump += 8; pReasons.add("بالای POC حجم 🎯") }
+        if (inBullOB) { pump += 8; pReasons.add("واکنش به اردر بلاک صعودی 🏦") }
+        if (bos.first) { pump += 8; pReasons.add("شکست ساختار (BOS) 🏗️") }
+        if (st.direction > 0) { pump += 6; pReasons.add("Supertrend صعودی") }
+        if (adx >= params.adxMin) { pump += 5; pReasons.add("قدرت روند ADX") }
+        if (srsi < 80) pump += 3
+        if (funding != null && funding <= -0.0003) { pump += 5; pReasons.add("فاندینگ منفی") }
+        pump = min(100, pump)
 
-        // بولینگر
-        if (squeeze && volRatio >= 1.5) { pump += 10; pumpReasons.add("فشردگی بولینگر + شروع حرکت") }
-        else if (squeeze) { pump += 5; pumpReasons.add("فشردگی بولینگر (آماده انفجار)") }
-
-        // OBV divergence
-        if (obvResult.divergence == "BULLISH") { pump += 8; pumpReasons.add(" divergence صعودی OBV") }
-
-        // ================= امتیاز دامپ =================
+        // ---------- امتیاز DUMP ----------
         var dump = 0
-        val dumpReasons = mutableListOf<String>()
+        val dReasons = mutableListOf<String>()
 
-        if (breakdown) { dump += 25; dumpReasons.add("شکست حمایت ${lookback} کندلی") }
-        if (volRatio >= 3.0 && last.close < last.open) { dump += 25; dumpReasons.add("حجم فروش سنگین") }
-        else if (volRatio >= 2.0 && last.close < last.open) { dump += 18; dumpReasons.add("فشار فروش با حجم") }
-        
-        if (price < vwapResult.vwap) { dump += 8; dumpReasons.add("قیمت زیر VWAP (فشار فروشنده)") }
-        if (rsi < params.rsiBuyMax) { dump += 12; dumpReasons.add("RSI ضعیف (${fmt(rsi)})") }
-        if (mfiResult.mfi < 40.0) { dump += 10; dumpReasons.add("MFI ضعیف (${fmt(mfiResult.mfi)})") }
-        if (macd.macd < macd.signal) { dump += 12; dumpReasons.add("MACD زیر خط سیگنال") }
-        if (price < ema20 && price < ema50) { dump += 12; dumpReasons.add("قیمت زیر EMA20 و EMA50") }
-        if (price < ema200) { dump += 5; dumpReasons.add("قیمت زیر EMA200") }
-        if (adx >= params.adxMin) { dump += 6; dumpReasons.add("ADX قوی (${fmt(adx)}) → روند نزولی تأیید") }
-        if (diMinus > diPlus) { dump += 4; dumpReasons.add("DI- بالای DI+ (فشار فروشنده)") }
-        if (st.direction == -1) { dump += 5; dumpReasons.add("Supertrend نزولی") }
-        if (obvResult.divergence == "BEARISH") { dump += 8; dumpReasons.add(" divergence نزولی OBV") }
-
-        // ================= تنظیمات فیوچرز =================
-        if (mode == "FUT" && funding != null) {
-            if (funding <= -0.0005) { pump += 5; pumpReasons.add("فاندینگ منفی شدید → پتانسیل شورت‌اسکوییز") }
-            if (funding >= 0.0005) { dump += 5; dumpReasons.add("فاندینگ مثبت شدید → بازار اشباع") }
+        if (price < ema20 && ema20 < ema50) { dump += 10; dReasons.add("روند نزولی EMA") }
+        if (mtfDn) { dump += 10; dReasons.add("تأیید سه تایم‌فریم 📊") }
+        if (rsi in 32.0..55.0) { dump += 8; dReasons.add("RSI ضعیف") }
+        if (macd.macd < macd.signal && macd.histogram < macdPrev.histogram) {
+            dump += 10; dReasons.add("MACD نزولی")
         }
+        if (volRatio >= params.volumeMin && price < closes.dropLast(1).last()) {
+            dump += 12; dReasons.add("حجم فروش بالا")
+        }
+        if (breakdown) { dump += 12; dReasons.add("شکست حمایت $lookback کندلی") }
+        if (price < vp.poc) { dump += 8; dReasons.add("زیر POC حجم 🎯") }
+        if (inBearOB) { dump += 8; dReasons.add("واکنش به اردر بلاک نزولی 🏦") }
+        if (bos.second) { dump += 8; dReasons.add("شکست ساختار نزولی 🏗️") }
+        if (st.direction < 0) { dump += 6; dReasons.add("Supertrend نزولی") }
+        if (adx >= params.adxMin) dump += 5
+        if (funding != null && funding >= 0.0005) { dump += 5; dReasons.add("فاندینگ مثبت شدید") }
+        dump = min(100, dump)
 
-        pump = pump.coerceIn(0, 100)
-        dump = dump.coerceIn(0, 100)
-
-        // ================= تصمیم نهایی =================
+        // ---------- تصمیم ----------
         val side = when {
             pump >= dump && pump >= params.minScore -> "PUMP"
             dump > pump && dump >= params.minScore -> "DUMP"
             else -> "NONE"
         }
-        val score = maxOf(pump, dump)
-        val reasons = if (pump >= dump) pumpReasons else dumpReasons
+        val score = max(pump, dump)
+        val reasons = if (pump >= dump) pReasons else dReasons
 
-        val golden = score >= params.goldenScore &&
+        // ---------- چک‌لیست حالت ۹۰٪ (۰ شرط) ----------
+        val ultraCount = when (side) {
+            "PUMP" -> listOf(
+                tDUp,
+                t4hUp,
+                st.direction > 0,
+                rsi in 45.0..68.0,
+                macd.macd > macd.signal,
+                volRatio >= params.volumeMin,
+                breakout || inBullOB,
+                price > vp.poc,
+                adx >= params.adxMin,
+                srsi < 80
+            ).count { it }
+            "DUMP" -> listOf(
+                tDDn,
+                t4hDn,
+                st.direction < 0,
+                rsi in 32.0..55.0,
+                macd.macd < macd.signal,
+                volRatio >= params.volumeMin,
+                breakdown || inBearOB,
+                price < vp.poc,
+                adx >= params.adxMin,
+                srsi > 20
+            ).count { it }
+            else -> 0
+        }
+
+        val ultra = side != "NONE" && ultraCount >= 9
+        val golden = side != "NONE" &&
+                score >= params.goldenScore &&
                 adx >= params.adxMin &&
                 volRatio >= params.volumeMin &&
-                ((side == "PUMP" && mtfUp) || (side == "DUMP" && mtfDown))
+                mtfAligned &&
+                ultra
 
-        // ================= ورود / هدف / استاپ ATR-based =================
-        val risk = atrVal * params.atrMult
-        val (sl, t1, t2) = if (side == "DUMP") {
-            Triple(price + risk, price - risk * params.rr, price - risk * params.rr * 2)
-        } else {
-            Triple(price - risk, price + risk * params.rr, price + risk * params.rr * 2)
-        }
-
-        // تریلینگ استاپ
-        val trailing = if (side == "PUMP") {
-            price + risk * 0.5  // برای Long: بالاتر از entry
-        } else {
-            price - risk * 0.5  // برای Short: پایین‌تر از entry
-        }
+        // ---------- ورود / استاپ / اهداف ----------
+        val risk = atr * params.atrMult
+        val entry = price
+        val stopLoss = if (side == "DUMP") price + risk else price - risk
+        val target1 = if (side == "DUMP") price - risk * params.rr else price + risk * params.rr
+        val target2 = if (side == "DUMP") price - risk * params.rr * 2 else price + risk * params.rr * 2
 
         return SignalResult(
-            coinId = coinId,
-            symbol = symbol,
-            name = name,
-            price = price,
-            mode = mode,
-            pumpScore = pump,
-            dumpScore = dump,
-            side = side,
-            score = score,
-            golden = golden,
-            mtfAligned = mtfUp || mtfDown,
-            mtfTrend = mtfTrend,
-            adx = adx,
-            rsi = rsi,
-            mfi = mfiResult.mfi,
-            vwap = vwapResult.vwap,
-            vwapDeviation = vwapResult.deviation,
-            obvDivergence = obvResult.divergence,
-            volumeRatio = volRatio,
-            funding = funding,
-            entry = price,
-            stopLoss = sl,
-            target1 = t1,
-            target2 = t2,
-            trailingStop = trailing,
-            reasons = reasons
+            coinId, symbol, name, price, mode,
+            pump, dump, side, score, golden, ultra,
+            mtfAligned, mtfTrend, adx, rsi, volRatio, funding,
+            entry, stopLoss, target1, target2, reasons
         )
     }
-
-    // ---------- روند یک تایم‌فریم ----------
-
-    private fun trendOf(candles: List<Candle>): String {
-        if (candles.size < 60) return "MIX"
-        val closes = Indicators.closes(candles)
-        val e20 = Indicators.emaLast(closes, 20)
-        val e50 = Indicators.emaLast(closes, 50)
-        val st = Indicators.supertrend(candles)
-        return when {
-            e20 > e50 && st.direction == 1 -> "UP"
-            e20 < e50 && st.direction == -1 -> "DOWN"
-            else -> "MIX"
-        }
-    }
-
-    private fun fmt(d: Double): String = String.format(java.util.Locale.US, "%.1f", d)
 }
