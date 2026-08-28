@@ -1,11 +1,15 @@
 package com.pumpwatch.app.data
 
-import com.google.gson.annotations.SerializedName
+import kotlinx.coroutines.delay
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
+import java.util.concurrent.TimeUnit
 
 data class CoinMarket(
     val id: String,
@@ -16,122 +20,22 @@ data class CoinMarket(
     val market_cap: Double,
     val total_volume: Double,
     val price_change_percentage_24h: Double?,
-    val market_cap_rank: Int?
-)
-
-data class CoinChart(
-    val prices: List<List<Double>>,
-    @SerializedName("total_volumes") val totalVolumes: List<List<Double>>?
-)
-
-data class DexBoostedToken(
-    val url: String?,
-    val chainId: String?,
-    val tokenAddress: String?,
-    val amount: Double?,
-    val totalAmount: Double?,
-    val icon: String?,
-    val header: String?,
-    val openGraph: String?,
-    val description: String?,
-    val links: List<DexLink>?
-)
-
-data class DexLink(
-    val type: String?,
-    val url: String?
-)
-
-data class DexTokenProfile(
-    val url: String?,
-    val chainId: String?,
-    val tokenAddress: String?,
-    val icon: String?,
-    val header: String?,
-    val openGraph: String?,
-    val description: String?,
-    val links: List<DexLink>?,
-    @SerializedName("topPools") val topPools: List<DexPool>?
-)
-
-data class DexPool(
-    @SerializedName("poolAddress") val poolAddress: String?,
-    val chainId: String?,
-    val dexId: String?,
-    val baseToken: DexToken?,
-    val quoteToken: DexToken?,
-    val priceNative: String?,
-    val priceUsd: String?,
-    val txns: DexTxns?,
-    val volume: DexVolume?,
-    val liquidity: DexLiquidity?,
-    val fdv: Double?,
-    val marketCap: Double?,
-    val pairCreatedAt: Long?,
-    val info: DexPoolInfo?
-)
-
-data class DexToken(
-    val address: String?,
-    val name: String?,
-    val symbol: String?,
-    val icon: String?
-)
-
-data class DexTxns(
-    val m5: DexTxnCount?,
-    val h1: DexTxnCount?,
-    val h6: DexTxnCount?,
-    val h24: DexTxnCount?
-)
-
-data class DexTxnCount(
-    val buys: Int?,
-    val sells: Int?
-)
-
-data class DexVolume(
-    val h24: Double?,
-    val h6: Double?,
-    val h1: Double?,
-    val m5: Double?
-)
-
-data class DexLiquidity(
-    val usd: Double?,
-    val base: Double?,
-    val quote: Double?
-)
-
-data class DexPoolInfo(
-    val imageUrl: String?,
-    val header: String?,
-    val openGraph: String?,
-    val websites: List<DexWebsite>?,
-    val socials: List<DexSocial>?
-)
-
-data class DexWebsite(
-    val label: String?,
-    val url: String?
-)
-
-data class DexSocial(
-    val type: String?,
-    val url: String?
-)
-
-data class DexSearchResult(
-    val pairs: List<DexPool>?
+    val market_cap_rank: Int?,
+    @SerializedName("price_change_percentage_1h_in_currency") val change1h: Double?,
+    @SerializedName("price_change_percentage_7d_in_currency") val change7d: Double?,
+    @SerializedName("high_24h") val high24h: Double?,
+    @SerializedName("low_24h") val low24h: Double?
 )
 
 interface CoinGeckoApi {
+
     @GET("coins/markets")
     suspend fun getMarkets(
         @Query("vs_currency") vsCurrency: String = "usd",
         @Query("order") order: String = "market_cap_desc",
         @Query("per_page") perPage: Int = 250,
-        @Query("page") page: Int = 1
+        @Query("page") page: Int = 1,
+        @Query("price_change_percentage") pcp: String = "1h,24h,7d"
     ): List<CoinMarket>
 
     @GET("coins/{id}/ohlc")
@@ -146,109 +50,91 @@ interface CoinGeckoApi {
         @Path("id") id: String,
         @Query("vs_currency") vsCurrency: String = "usd",
         @Query("days") days: Int
-    ): CoinChart
+    ): MarketChart
 }
 
-interface DexScreenerApi {
-    @GET("token-boosts/top/v1")
-    suspend fun getTopBoosted(): List<DexBoostedToken>
+// ---------- ترافیک‌شکن + تلاش مجدد ----------
 
-    @GET("token-profiles/latest/v1")
-    suspend fun getLatestProfiles(): List<DexTokenProfile>
+object ThrottledHttp {
 
-    @GET("latest/dex/search")
-    suspend fun searchToken(@Query("q") query: String): DexSearchResult
+    private const val MIN_INTERVAL_MS = 1100L
+    private var lastRequestMs = 0L
+    private val lock = Any()
+
+    private val interceptor = object : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            synchronized(lock) {
+                val wait = lastRequestMs + MIN_INTERVAL_MS - System.currentTimeMillis()
+                if (wait > 0) Thread.sleep(wait)
+                lastRequestMs = System.currentTimeMillis()
+            }
+            var response = chain.proceed(chain.request())
+            var retries = 0
+            while (response.code == 429 && retries < 3) {
+                response.close()
+                Thread.sleep(5000L * (retries + 1))
+                synchronized(lock) { lastRequestMs = System.currentTimeMillis() }
+                response = chain.proceed(chain.request())
+                retries++
+            }
+            return response
+        }
+    }
+
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .addInterceptor(interceptor)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
 }
+
+// ---------- کلاینت با کش ۹۰ ثانیه ----------
 
 object ApiClient {
+
+    private const val CACHE_TTL = 90_000L
+    private var cache1000: List<CoinMarket> = emptyList()
+    private var cache1000Time = 0L
+    private var cache100: List<CoinMarket> = emptyList()
+    private var cache100Time = 0L
+
     val api: CoinGeckoApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.coingecko.com/api/v3/")
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(CoinGeckoApi::class.java)
     }
 
-    private val dexApi: DexScreenerApi by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.dexscreener.com/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(DexScreenerApi::class.java)
-    }
-
     suspend fun getTop1000Coins(): List<CoinMarket> {
+        if (cache1000.isNotEmpty() &&
+            System.currentTimeMillis() - cache1000Time < CACHE_TTL
+        ) return cache1000
+
         val results = mutableListOf<CoinMarket>()
         for (page in 1..4) {
-            val pageCoins = api.getMarkets(perPage = 250, page = page)
-            results.addAll(pageCoins)
+            results.addAll(api.getMarkets(perPage = 250, page = page))
+            delay(1500)
         }
-        return results.sortedBy { it.market_cap_rank ?: 9999 }
+        cache1000 = results.sortedBy { it.market_cap_rank ?: 9999 }
+        cache1000Time = System.currentTimeMillis()
+        return cache1000
     }
 
     suspend fun getTop100Coins(): List<CoinMarket> {
-        return api.getMarkets(perPage = 100, page = 1)
+        if (cache100.isNotEmpty() &&
+            System.currentTimeMillis() - cache100Time < CACHE_TTL
+        ) return cache100
+
+        cache100 = api.getMarkets(perPage = 100, page = 1)
+        cache100Time = System.currentTimeMillis()
+        return cache100
     }
 
-    suspend fun getCoinChart(id: String, days: Int): CoinChart {
+    suspend fun getCoinChart(id: String, days: Int = 90): MarketChart {
         return api.getMarketChart(id, days = days)
     }
-
-    suspend fun getDexTrending(): List<CoinMarket> {
-        return try {
-            val profiles = dexApi.getLatestProfiles()
-            val allPools = profiles
-                .flatMap { it.topPools ?: emptyList() }
-                .distinctBy { it.poolAddress }
-                .filterViable()
-            allPools.map { it.toCoinMarket() }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
-    suspend fun getDexBoosted(): List<CoinMarket> {
-        return try {
-            val boosted = dexApi.getTopBoosted()
-            val boostedPools = boosted.mapNotNull { boost ->
-                boost.tokenAddress?.let { addr ->
-                    try {
-                        val result = dexApi.searchToken(addr)
-                        result.pairs?.firstOrNull()
-                    } catch (_: Exception) {
-                        null
-                    }
-                }
-            }.filterViable()
-            boostedPools.map { it.toCoinMarket() }
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-}
-
-fun List<DexPool>.filterViable(
-    minLiquidityUsd: Double = 10000.0,
-    minVolume24h: Double = 5000.0
-): List<DexPool> {
-    return filter { pool ->
-        val liq = pool.liquidity?.usd ?: 0.0
-        val vol = pool.volume?.h24 ?: 0.0
-        liq >= minLiquidityUsd && vol >= minVolume24h
-    }
-}
-
-fun DexPool.toCoinMarket(priceChange24h: Double? = null): CoinMarket {
-    val token = baseToken
-    return CoinMarket(
-        id = token?.address ?: poolAddress ?: "unknown",
-        symbol = token?.symbol ?: "???",
-        name = token?.name ?: "Unknown",
-        image = token?.icon ?: info?.imageUrl ?: "",
-        current_price = priceUsd?.toDoubleOrNull() ?: 0.0,
-        market_cap = marketCap ?: fdv ?: 0.0,
-        total_volume = volume?.h24 ?: 0.0,
-        price_change_percentage_24h = priceChange24h,
-        market_cap_rank = null
-    )
 }
