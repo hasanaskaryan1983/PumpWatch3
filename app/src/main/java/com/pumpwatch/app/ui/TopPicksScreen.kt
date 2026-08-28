@@ -44,7 +44,6 @@ import java.util.Locale
 private val Green = Color(0xFF00E676)
 private val Red = Color(0xFFFF5252)
 private val Gold = Color(0xFFFFC107)
-private val Blue = Color(0xFF4FC3F7)
 
 // ---------- صفحه برترین‌های روز ----------
 
@@ -239,7 +238,7 @@ fun SignalCard(s: SignalResult) {
                 Text("استاپ: ${priceText(s.stopLoss)}", fontSize = 11.sp, color = Red)
             }
 
-            // ---------- اندیکاتورها (جدید) ----------
+            // ---------- اندیکاتورها ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -250,57 +249,20 @@ fun SignalCard(s: SignalResult) {
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
                 Text(
-                    "MFI ${String.format(Locale.US, "%.0f", s.mfi)}",
-                    fontSize = 11.sp,
-                    color = if (s.mfi < 30 || s.mfi > 70) sideColor
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-                Text(
                     "ADX ${String.format(Locale.US, "%.0f", s.adx)}",
                     fontSize = 11.sp,
-                    color = if (s.adx >= 25) sideColor
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
                 Text(
                     "حجم ${String.format(Locale.US, "%.1f", s.volumeRatio)}x",
                     fontSize = 11.sp,
-                    color = if (s.volumeRatio >= 2.0) sideColor
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-            }
-
-            // ---------- VWAP و OBV ----------
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                val vwapStatus = if (s.price > s.vwap) "بالا" else "پایین"
-                Text(
-                    "VWAP: $vwapStatus (${String.format(Locale.US, "%.1f%%", s.vwapDeviation)})",
-                    fontSize = 11.sp,
-                    color = if (s.price > s.vwap) Green else Red
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
                 Text(
                     "MTF: ${s.mtfTrend}",
                     fontSize = 11.sp,
                     color = if (s.mtfAligned) Green
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-                if (s.obvDivergence != "NONE") {
-                    Text(
-                        "OBV: ${s.obvDivergence}",
-                        fontSize = 11.sp,
-                        color = if (s.obvDivergence == "BULLISH") Green else Red
-                    )
-                }
-            }
-
-            // ---------- تریلینگ استاپ ----------
-            if (s.trailingStop > 0) {
-                Text(
-                    "تریلینگ: ${priceText(s.trailingStop)}",
-                    fontSize = 11.sp,
-                    color = Blue
                 )
             }
 
