@@ -1,5 +1,6 @@
 package com.pumpwatch.app.data
 
+import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.delay
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
