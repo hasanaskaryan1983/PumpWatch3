@@ -53,6 +53,7 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.ui.CoinDetailScreen
 import com.pumpwatch.app.ui.HistoryScreen
+import com.pumpwatch.app.ui.MemeRadarScreen
 import com.pumpwatch.app.ui.TopPicksScreen
 import com.pumpwatch.app.ui.TradesScreen
 import com.pumpwatch.app.worker.MonitorScheduler
@@ -77,6 +78,7 @@ enum class Tab(val title: String, val emoji: String) {
     ALERTS("هشدارها", "🔔"),
     BACKTEST("بک‌تست", "🧪"),
     TOP("برترین‌ها", "🏆"),
+    MEME("رادار میم", "🐸"),
     TRADES("معاملات", "📈"),
     HISTORY("تاریخچه", "📚")
 }
@@ -137,20 +139,14 @@ object IndicatorEngine {
         val ema200 = if (closes.size >= 200) calculateEMA(closes, 200) else ema50
         val bb = calculateBollinger(closes)
         val sr = findSupportResistance(highs, lows)
-
-        // محاسبه ADX ساده
         val adx = calculateADX(closes, highs, lows)
-
-        // محاسبه ATR ساده
         val atr = calculateATR(highs, lows, closes)
 
-        // محاسبه VWAP (تقریبی از closes)
         val vwap = if (volumes.isNotEmpty() && volumes.size == closes.size) {
             (closes.zip(volumes).sumOf { it.first * it.second } / volumes.sum())
         } else closes.takeLast(20).average()
         val vwapDeviation = if (vwap > 0) (currentPrice - vwap) / vwap * 100 else 0.0
 
-        // تشخیص OBV Divergence (ساده)
         val obvDiv = detectObvDivergence(closes, volumes)
 
         val signal = determineSignal(
@@ -169,26 +165,14 @@ object IndicatorEngine {
         val trailingStop = if (signal.contains("BUY")) currentPrice * 0.95 else currentPrice * 1.05
 
         return IndicatorResult(
-            rsi = rsi,
-            mfi = 50.0,
-            adx = adx,
-            macd = macdVal.first,
-            macdSignal = macdVal.second,
-            ema20 = ema20,
-            ema50 = ema50,
-            ema200 = ema200,
-            vwap = vwap,
-            vwapDeviation = vwapDeviation,
-            obvDivergence = obvDiv,
-            atr = atr,
-            trailingStop = trailingStop,
-            bbUpper = bb.first,
-            bbLower = bb.third,
-            supports = sr.first,
-            resistances = sr.second,
-            signal = signal,
-            confidence = confidence,
-            explanation = explanation
+            rsi = rsi, mfi = 50.0, adx = adx,
+            macd = macdVal.first, macdSignal = macdVal.second,
+            ema20 = ema20, ema50 = ema50, ema200 = ema200,
+            vwap = vwap, vwapDeviation = vwapDeviation, obvDivergence = obvDiv,
+            atr = atr, trailingStop = trailingStop,
+            bbUpper = bb.first, bbLower = bb.third,
+            supports = sr.first, resistances = sr.second,
+            signal = signal, confidence = confidence, explanation = explanation
         )
     }
 
@@ -472,8 +456,8 @@ fun MainApp() {
                         NavigationBarItem(
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
-                            icon = { Text(tab.emoji, fontSize = 20.sp) },
-                            label = { Text(tab.title, fontSize = 11.sp) },
+                            icon = { Text(tab.emoji, fontSize = 18.sp) },
+                            label = { Text(tab.title, fontSize = 10.sp) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = AccentGreen,
                                 selectedTextColor = AccentGreen,
@@ -496,6 +480,7 @@ fun MainApp() {
                     Tab.ALERTS -> AlertsScreen(onCoinClick = { selectedCoin = it })
                     Tab.BACKTEST -> BacktestScreen()
                     Tab.TOP -> TopPicksScreen(if (isFutures) "FUT" else "SPOT")
+                    Tab.MEME -> MemeRadarScreen()
                     Tab.TRADES -> TradesScreen()
                     Tab.HISTORY -> HistoryScreen(if (isFutures) "FUT" else "SPOT")
                 }
