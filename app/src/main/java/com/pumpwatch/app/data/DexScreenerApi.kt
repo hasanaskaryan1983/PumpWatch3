@@ -1,9 +1,13 @@
 package com.pumpwatch.app.data
 
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
+import java.util.concurrent.TimeUnit
 
 // ---------- مدل‌های DexScreener ----------
 
@@ -68,13 +72,34 @@ interface DexScreenerApi {
     suspend fun tokens(@Path("addresses") addresses: String): List<DexPair>
 }
 
-// ---------- کلاینت (با ترافیک‌شکن مشترک) ----------
+// ---------- کلاینت مستقل (با تلاش مجدد روی 429) ----------
 
 object DexClient {
+
+    private val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .addInterceptor(object : Interceptor {
+                override fun intercept(chain: Interceptor.Chain): Response {
+                    var response = chain.proceed(chain.request())
+                    var retries = 0
+                    while (response.code == 429 && retries < 3) {
+                        response.close()
+                        Thread.sleep(3000L * (retries + 1))
+                        response = chain.proceed(chain.request())
+                        retries++
+                    }
+                    return response
+                }
+            })
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .build()
+    }
+
     val api: DexScreenerApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.dexscreener.com/")
-            .client(ThrottledHttp.client)
+            .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(DexScreenerApi::class.java)
