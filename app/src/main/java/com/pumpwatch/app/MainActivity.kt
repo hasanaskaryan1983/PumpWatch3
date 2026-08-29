@@ -54,6 +54,7 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.ui.CoinDetailScreen
 import com.pumpwatch.app.ui.HistoryScreen
 import com.pumpwatch.app.ui.MemeRadarScreen
+import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.SmartAlertsScreen
 import com.pumpwatch.app.ui.TopPicksScreen
 import com.pumpwatch.app.ui.TradesScreen
@@ -403,6 +404,18 @@ fun MainApp() {
     }
     var selectedTab by remember { mutableStateOf(Tab.MARKET) }
     var selectedCoin by remember { mutableStateOf<CoinMarket?>(null) }
+    var onboarded by remember {
+        mutableStateOf(prefs.getBoolean("onboarded", false))
+    }
+
+    // ---------- دروازه ورود پرانرژی (فقط بار اول) ----------
+    if (!onboarded) {
+        OnboardingScreen(onDone = {
+            prefs.edit().putBoolean("onboarded", true).apply()
+            onboarded = true
+        })
+        return
+    }
 
     if (selectedCoin != null) {
         CoinDetailScreen(
