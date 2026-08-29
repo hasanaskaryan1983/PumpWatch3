@@ -58,11 +58,11 @@ interface CoinGeckoApi {
     ): MarketChart
 }
 
-// ---------- ترافیک‌شکن + تلاش مجدد ----------
+// ---------- ترافیک‌شکن با تلاش مجدد هوشمند ----------
 
 object ThrottledHttp {
 
-    private const val MIN_INTERVAL_MS = 1100L
+    private const val MIN_INTERVAL_MS = 1200L
     private var lastRequestMs = 0L
     private val lock = Any()
 
@@ -73,33 +73,33 @@ object ThrottledHttp {
                 if (wait > 0) Thread.sleep(wait)
                 lastRequestMs = System.currentTimeMillis()
             }
-            var response = chain.proceed(chain.request())
             var retries = 0
-            while (response.code == 429 && retries < 3) {
+            while (retries < 4) {
+                val response = chain.proceed(chain.request())
+                if (response.code != 429) return response
                 response.close()
-                Thread.sleep(5000L * (retries + 1))
-                synchronized(lock) { lastRequestMs = System.currentTimeMillis() }
-                response = chain.proceed(chain.request())
                 retries++
+                // انتظار نمایی: ۳، ۶، ۱۲، ۲۴ ثانیه
+                Thread.sleep(3000L * (1L shl (retries - 1)))
+                synchronized(lock) { lastRequestMs = System.currentTimeMillis() }
             }
-            return response
+            return chain.proceed(chain.request())
         }
     }
 
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .addInterceptor(interceptor)
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 }
 
-// ---------- کلاینت آفلاین‌اول (بدون نیاز به init) ----------
+// ---------- کلاینت با کش زنده و آفلاین ----------
 
 object ApiClient {
 
-    // پیدا کردن خودکار Context اپ — بدون دست‌کاری MainActivity
     private val app: Context? by lazy {
         try {
             val cl = Class.forName("android.app.ActivityThread")
@@ -111,7 +111,8 @@ object ApiClient {
 
     private val gson = Gson()
 
-    private const val CACHE_TTL = 90_000L
+    // کش کوتاه‌تر برای داده‌های زنده
+    private const val CACHE_TTL = 30_000L
     private var cache1000: List<CoinMarket> = emptyList()
     private var cache1000Time = 0L
     private var cache100: List<CoinMarket> = emptyList()
@@ -126,10 +127,8 @@ object ApiClient {
             .create(CoinGeckoApi::class.java)
     }
 
-    // ---------- ۱۰۰۰ ارز با فال‌بک آفلاین ----------
-
-    suspend fun getTop1000Coins(): List<CoinMarket> {
-        if (cache1000.isNotEmpty() &&
+    suspend fun getTop1000Coins(forceRefresh: Boolean = false): List<CoinMarket> {
+        if (!forceRefresh && cache1000.isNotEmpty() &&
             System.currentTimeMillis() - cache1000Time < CACHE_TTL
         ) return cache1000
 
@@ -137,7 +136,7 @@ object ApiClient {
             val results = mutableListOf<CoinMarket>()
             for (page in 1..4) {
                 results.addAll(api.getMarkets(perPage = 250, page = page))
-                delay(1500)
+                if (page < 4) delay(1300)
             }
             cache1000 = results.sortedBy { it.market_cap_rank ?: 9999 }
             cache1000Time = System.currentTimeMillis()
@@ -147,16 +146,13 @@ object ApiClient {
             val disk = loadList("m1000")
             if (disk != null) {
                 cache1000 = disk
-                cache1000Time = System.currentTimeMillis()
                 disk
             } else throw e
         }
     }
 
-    // ---------- ۱۰۰ ارز با فال‌بک آفلاین ----------
-
-    suspend fun getTop100Coins(): List<CoinMarket> {
-        if (cache100.isNotEmpty() &&
+    suspend fun getTop100Coins(forceRefresh: Boolean = false): List<CoinMarket> {
+        if (!forceRefresh && cache100.isNotEmpty() &&
             System.currentTimeMillis() - cache100Time < CACHE_TTL
         ) return cache100
 
@@ -169,13 +165,10 @@ object ApiClient {
             val disk = loadList("m100")
             if (disk != null) {
                 cache100 = disk
-                cache100Time = System.currentTimeMillis()
                 disk
             } else throw e
         }
     }
-
-    // ---------- نمودار با فال‌بک آفلاین ----------
 
     suspend fun getCoinChart(id: String, days: Int = 90): MarketChart {
         val key = "chart_${id}_$days"
@@ -193,6 +186,15 @@ object ApiClient {
                 }
             } else throw e
         }
+    }
+
+    // ---------- پاک کردن کش (برای refresh دستی) ----------
+
+    fun clearMemoryCache() {
+        cache1000 = emptyList()
+        cache1000Time = 0L
+        cache100 = emptyList()
+        cache100Time = 0L
     }
 
     private fun loadList(key: String): List<CoinMarket>? {
