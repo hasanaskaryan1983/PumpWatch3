@@ -240,8 +240,9 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
             try {
                 val c1d = ApiClient.getCoinChart(coin.id, days = 1)
                 val c30 = ApiClient.getCoinChart(coin.id, days = 30)
-                if (c1d.prices.size < 60 || c30.prices.size < 100) {
-                    error = "داده کافی برای تحلیل نیست"
+                // حداقل‌های کمتر برای ارزهای با داده محدود
+                if (c1d.prices.size < 10 || c30.prices.size < 20) {
+                    error = "داده کافی برای تحلیل نیست (تعداد کندل‌ها: ${c1d.prices.size}/${c30.prices.size})"
                 } else {
                     a = buildAnalysis(c1d.prices, c30.prices, coin.current_price)
                     try {
@@ -384,7 +385,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         modifier = Modifier.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("📊 اندیکاتورها (۱ ساعته):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("📊 اندیکاتورهای ۱ ساعته:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         IndRow("RSI", String.format(Locale.US, "%.1f", an.rsi1h),
                             if (an.rsi1h > 75 || an.rsi1h < 25) Yellow else Green)
                         IndRow("MACD", if (an.macdUp) "صعودی 🟢" else "نزولی 🔴",
