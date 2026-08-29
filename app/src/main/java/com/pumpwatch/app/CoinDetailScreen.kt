@@ -3,7 +3,6 @@ package com.pumpwatch.app.ui
 import android.content.Intent
 import android.net.Uri
 import android.text.format.DateUtils
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -31,7 +30,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -233,49 +231,6 @@ private fun buildAnalysis(
     )
 }
 
-// ---------- نمودار قیمت (اصلاح Float) ----------
-
-@Composable
-private fun PriceChart(prices: List<Double>, color: Color) {
-    if (prices.size < 2) return
-    val min = prices.minOrNull() ?: 0.0
-    val max = prices.maxOrNull() ?: 1.0
-    val range = if (max > min) max - min else 1.0
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(140.dp)
-    ) {
-        val w = size.width
-        val h = size.height
-        val step = w / (prices.size - 1).toFloat()
-        var prev: Offset? = null
-        prices.forEachIndexed { i, p ->
-            val x = i.toFloat() * step
-            val ratio = ((p - min) / range).toFloat()
-            val y = h - (ratio * (h * 0.86f) + h * 0.07f)
-            val cur = Offset(x, y)
-            if (prev != null) {
-                drawLine(
-                    color = color,
-                    start = prev!!,
-                    end = cur,
-                    strokeWidth = 4f
-                )
-            }
-            prev = cur
-        }
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text("کف: ${fmt(min)}", fontSize = 10.sp, color = Green)
-        Text("سقف: ${fmt(max)}", fontSize = 10.sp, color = Red)
-    }
-}
-
 // ---------- صفحه جزئیات حرفه‌ای ----------
 
 @Composable
@@ -288,7 +243,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
     var info by remember { mutableStateOf<CoinInfo?>(null) }
     var deriv by remember { mutableStateOf<Derivative?>(null) }
     var news by remember { mutableStateOf<List<NewsItem>>(emptyList()) }
-    var chartPrices by remember { mutableStateOf<List<Double>>(emptyList()) }
 
     val isFutures = remember {
         context.getSharedPreferences("pumpwatch_prefs", 0)
@@ -305,7 +259,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 if (c1d.prices.size < 10 || c30.prices.size < 20) {
                     error = "داده کافی برای تحلیل نیست (کندل‌ها: ${c1d.prices.size}/${c30.prices.size})"
                 } else {
-                    chartPrices = c1d.prices.map { it[1] }
                     a = buildAnalysis(c1d.prices, c30.prices, coin.current_price)
                     try {
                         info = CoinInfoClient.api.info(coin.id)
@@ -394,21 +347,8 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     }
                 }
 
-                // ---------- نمودار ۲۴ ساعته ----------
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("📈 نمودار ۲۴ ساعته:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Spacer(Modifier.height(8.dp))
-                        PriceChart(
-                            chartPrices,
-                            if ((chartPrices.lastOrNull() ?: 0.0) >= (chartPrices.firstOrNull() ?: 0.0)) Green else Red
-                        )
-                    }
-                }
+                // ---------- نمودار حرفه‌ای ----------
+                ProChart(coin.id)
 
                 // ---------- نقاط دقیق ----------
                 Surface(
