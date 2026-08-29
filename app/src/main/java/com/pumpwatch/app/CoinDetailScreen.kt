@@ -1,5 +1,10 @@
 package com.pumpwatch.app.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.text.format.DateUtils
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,7 +31,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,6 +41,10 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinInfo
 import com.pumpwatch.app.data.CoinInfoClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.Derivative
+import com.pumpwatch.app.data.NewsClient
+import com.pumpwatch.app.data.NewsItem
+import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.formatMarketCap
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -178,7 +189,6 @@ private fun buildAnalysis(
 
     val risk = atr * 1.5
 
-    // ---------- تصمیم حرفه‌ای ----------
     val signal: String = when {
         ups >= 4 && rsi1 > 75 -> "WAIT_BUY"
         ups >= 4 && rsi1 in 40.0..75.0 -> "BUY"
@@ -223,15 +233,65 @@ private fun buildAnalysis(
     )
 }
 
+// ---------- نمودار قیمت ----------
+
+@Composable
+private fun PriceChart(prices: List<Double>, color: Color) {
+    if (prices.size < 2) return
+    val min = prices.minOrNull() ?: 0.0
+    val max = prices.maxOrNull() ?: 1.0
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(140.dp)
+    ) {
+        val range = if (max > min) max - min else 1.0
+        val w = size.width
+        val h = size.height
+        val step = w / (prices.size - 1)
+        var prev: Offset? = null
+        prices.forEachIndexed { i, p ->
+            val x = i * step
+            val y = h - (((p - min) / range) * (h * 0.86f) + h * 0.07f)
+            val cur = Offset(x, y)
+            if (prev != null) {
+                drawLine(
+                    color = color,
+                    start = prev!!,
+                    end = cur,
+                    strokeWidth = 4f
+                )
+            }
+            prev = cur
+        }
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("کف: ${fmt(min)}", fontSize = 10.sp, color = Green)
+        Text("سقف: ${fmt(max)}", fontSize = 10.sp, color = Red)
+    }
+}
+
 // ---------- صفحه جزئیات حرفه‌ای ----------
 
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var a by remember { mutableStateOf<DetailAnalysis?>(null) }
     var info by remember { mutableStateOf<CoinInfo?>(null) }
+    var deriv by remember { mutableStateOf<Derivative?>(null) }
+    var news by remember { mutableStateOf<List<NewsItem>>(emptyList()) }
+    var chartPrices by remember { mutableStateOf<List<Double>>(emptyList()) }
+
+    val isFutures = remember {
+        context.getSharedPreferences("pumpwatch_prefs", 0)
+            .getString("mode", "SPOT") == "FUTURES"
+    }
 
     LaunchedEffect(coin.id) {
         scope.launch {
@@ -240,13 +300,30 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
             try {
                 val c1d = ApiClient.getCoinChart(coin.id, days = 1)
                 val c30 = ApiClient.getCoinChart(coin.id, days = 30)
-                // حداقل‌های کمتر برای ارزهای با داده محدود
                 if (c1d.prices.size < 10 || c30.prices.size < 20) {
-                    error = "داده کافی برای تحلیل نیست (تعداد کندل‌ها: ${c1d.prices.size}/${c30.prices.size})"
+                    error = "داده کافی برای تحلیل نیست (کندل‌ها: ${c1d.prices.size}/${c30.prices.size})"
                 } else {
+                    chartPrices = c1d.prices.map { it[1] }
                     a = buildAnalysis(c1d.prices, c30.prices, coin.current_price)
                     try {
                         info = CoinInfoClient.api.info(coin.id)
+                    } catch (_: Exception) { }
+                    if (isFutures) {
+                        try {
+                            val ders = ScanClient.api.derivatives()
+                            deriv = ders.find {
+                                it.base.equals(coin.symbol, true) ||
+                                        it.symbol.equals(coin.symbol, true)
+                            }
+                        } catch (_: Exception) { }
+                    }
+                    try {
+                        val sym = coin.symbol.uppercase(Locale.US)
+                        val specific = NewsClient.api.news(sym).data ?: emptyList()
+                        val general = if (specific.isEmpty()) {
+                            NewsClient.api.news(null).data ?: emptyList()
+                        } else specific
+                        news = general.take(3)
                     } catch (_: Exception) { }
                 }
             } catch (e: Exception) {
@@ -275,8 +352,8 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     fontSize = 18.sp
                 )
                 Text(
-                    String.format(Locale.US, "$%,.6f", coin.current_price),
-                    fontSize = 14.sp,
+                    "${String.format(Locale.US, "$%,.6f", coin.current_price)}  •  ${if (isFutures) "⚡ فیوچرز" else "🏦 اسپات"}",
+                    fontSize = 13.sp,
                     color = Gray
                 )
             }
@@ -312,6 +389,22 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     ) {
                         Text(sigText, fontWeight = FontWeight.Black, fontSize = 22.sp, color = sigColor)
                         Text("اطمینان: ${an.confidence}٪", fontSize = 14.sp, color = Gray)
+                    }
+                }
+
+                // ---------- نمودار ۲۴ ساعته ----------
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("📈 نمودار ۲۴ ساعته:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Spacer(Modifier.height(8.dp))
+                        PriceChart(
+                            chartPrices,
+                            if ((chartPrices.lastOrNull() ?: 0.0) >= (chartPrices.firstOrNull() ?: 0.0)) Green else Red
+                        )
                     }
                 }
 
@@ -419,6 +512,81 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         if (ath != null) {
                             IndRow("فاصله از سقف تاریخی", String.format(Locale.US, "%.1f%%", ath),
                                 if (ath < -50) Green else Yellow)
+                        }
+                        if (isFutures && deriv != null) {
+                            val d = deriv!!
+                            val fr = d.fundingRate ?: 0.0
+                            IndRow(
+                                "فاندینگ ریت",
+                                String.format(Locale.US, "%.4f%%", fr * 100),
+                                if (fr <= -0.0003) Green else if (fr >= 0.0005) Red else Gray
+                            )
+                            IndRow("Open Interest", formatMarketCap(d.openInterestUsd), Blue)
+                            IndRow("حجم ۲۴س فیوچرز", formatMarketCap(d.volume24h), Gray)
+                            if (d.market?.name != null) {
+                                IndRow("صرافی اصلی", d.market!!.name!!, Gray)
+                            }
+                        }
+                    }
+                }
+
+                // ---------- نکته فاندینگ ----------
+                if (isFutures && deriv?.fundingRate != null) {
+                    val fr = deriv!!.fundingRate!!
+                    if (fr <= -0.0003) {
+                        Text(
+                            "💡 فاندینگ منفی: شورت‌ها شلوغن — پتانسیل اسکوییز صعودی 🚀",
+                            fontSize = 12.sp,
+                            color = Green
+                        )
+                    } else if (fr >= 0.0005) {
+                        Text(
+                            "💡 فاندینگ مثبت شدید: لانگ‌ها شلوغن — احتیاط، احتمال اصلاح 🩸",
+                            fontSize = 12.sp,
+                            color = Red
+                        )
+                    }
+                }
+
+                // ---------- اخبار فاندامنتال ----------
+                if (news.isNotEmpty()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text("📰 اخبار فاندامنتال:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            news.forEach { n ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            try {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(n.url ?: ""))
+                                                context.startActivity(intent)
+                                            } catch (_: Exception) { }
+                                        }
+                                ) {
+                                    Text(
+                                        n.title ?: "",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Blue
+                                    )
+                                    val t = n.publishedOn ?: 0L
+                                    if (t > 0) {
+                                        Text(
+                                            "${n.source ?: ""} • ${DateUtils.getRelativeTimeSpanString(t * 1000)}",
+                                            fontSize = 10.sp,
+                                            color = Gray
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
