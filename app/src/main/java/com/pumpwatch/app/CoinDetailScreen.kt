@@ -233,26 +233,28 @@ private fun buildAnalysis(
     )
 }
 
-// ---------- نمودار قیمت ----------
+// ---------- نمودار قیمت (اصلاح Float) ----------
 
 @Composable
 private fun PriceChart(prices: List<Double>, color: Color) {
     if (prices.size < 2) return
     val min = prices.minOrNull() ?: 0.0
     val max = prices.maxOrNull() ?: 1.0
+    val range = if (max > min) max - min else 1.0
+
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
             .height(140.dp)
     ) {
-        val range = if (max > min) max - min else 1.0
         val w = size.width
         val h = size.height
-        val step = w / (prices.size - 1)
+        val step = w / (prices.size - 1).toFloat()
         var prev: Offset? = null
         prices.forEachIndexed { i, p ->
-            val x = i * step
-            val y = h - (((p - min) / range) * (h * 0.86f) + h * 0.07f)
+            val x = i.toFloat() * step
+            val ratio = ((p - min) / range).toFloat()
+            val y = h - (ratio * (h * 0.86f) + h * 0.07f)
             val cur = Offset(x, y)
             if (prev != null) {
                 drawLine(
