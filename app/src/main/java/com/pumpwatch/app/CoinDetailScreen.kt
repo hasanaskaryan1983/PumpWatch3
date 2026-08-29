@@ -14,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -31,45 +30,223 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pumpwatch.app.IndicatorEngine
-import com.pumpwatch.app.IndicatorResult
 import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.CoinInfo
+import com.pumpwatch.app.data.CoinInfoClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.formatMarketCap
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 private val Green = Color(0xFF00E676)
 private val Red = Color(0xFFFF5252)
-private val Gold = Color(0xFFFFC107)
-private val Blue = Color(0xFF4FC3F7)
+private val Yellow = Color(0xFFFFC107)
+private val Blue = Color(0xFF40C4FF)
+private val Gray = Color(0xFF9E9E9E)
+
+// ---------- مدل تحلیل ----------
+
+private data class TfRow(
+    val name: String,
+    val trend: String,
+    val rsi: Double
+)
+
+private data class DetailAnalysis(
+    val signal: String,
+    val confidence: Int,
+    val entry: Double,
+    val stop: Double,
+    val target1: Double,
+    val target2: Double,
+    val zoneLow: Double,
+    val zoneHigh: Double,
+    val tfs: List<TfRow>,
+    val rsi1h: Double,
+    val macdUp: Boolean,
+    val ema20: Double,
+    val ema50: Double,
+    val atr: Double,
+    val bbUpper: Double,
+    val bbLower: Double,
+    val explanation: String
+)
+
+// ---------- توابع محاسباتی ----------
+
+private fun emaLast(data: List<Double>, period: Int): Double {
+    if (data.size < period) return data.lastOrNull() ?: 0.0
+    val k = 2.0 / (period + 1)
+    var ema = data.take(period).average()
+    for (i in period until data.size) {
+        ema = data[i] * k + ema * (1 - k)
+    }
+    return ema
+}
+
+private fun rsiOf(data: List<Double>, period: Int = 14): Double {
+    if (data.size <= period) return 50.0
+    var g = 0.0
+    var l = 0.0
+    for (i in 1..period) {
+        val d = data[i] - data[i - 1]
+        if (d > 0) g += d else l -= d
+    }
+    var ag = g / period
+    var al = l / period
+    for (i in period + 1 until data.size) {
+        val d = data[i] - data[i - 1]
+        ag = (ag * (period - 1) + maxOf(d, 0.0)) / period
+        al = (al * (period - 1) + maxOf(-d, 0.0)) / period
+    }
+    if (al == 0.0) return 100.0
+    return 100.0 - 100.0 / (1.0 + ag / al)
+}
+
+private fun macdUp(data: List<Double>): Boolean {
+    if (data.size < 35) return false
+    val ef = emaLast(data, 12)
+    val es = emaLast(data, 26)
+    val prev = data.dropLast(1)
+    val pf = emaLast(prev, 12)
+    val ps = emaLast(prev, 26)
+    return (ef - es) > (pf - ps)
+}
+
+private fun atrOf(data: List<Double>, period: Int = 14): Double {
+    if (data.size <= period) return 0.0
+    var sum = 0.0
+    for (i in 1..period) sum += abs(data[i] - data[i - 1])
+    return sum / period
+}
+
+private fun bollOf(data: List<Double>, period: Int = 20): Pair<Double, Double> {
+    if (data.size < period) return Pair(0.0, 0.0)
+    val win = data.takeLast(period)
+    val mid = win.average()
+    val sd = sqrt(win.map { (it - mid) * (it - mid) }.average())
+    return Pair(mid + 2 * sd, mid - 2 * sd)
+}
+
+private fun takeNth(data: List<Double>, n: Int): List<Double> =
+    data.filterIndexed { i, _ -> (i + 1) % n == 0 }
+
+private fun trendOf(closes: List<Double>): String {
+    if (closes.size < 60) return "خنثی"
+    val e20 = emaLast(closes, 20)
+    val e50 = emaLast(closes, 50)
+    val last = closes.last()
+    return when {
+        last > e20 && e20 > e50 -> "صعودی"
+        last < e20 && e20 < e50 -> "نزولی"
+        else -> "خنثی"
+    }
+}
+
+// ---------- ساخت تحلیل کامل ----------
+
+private fun buildAnalysis(
+    p5: List<List<Double>>,
+    p1: List<List<Double>>,
+    price: Double
+): DetailAnalysis {
+    val c5 = p5.map { it[1] }
+    val c1 = p1.map { it[1] }
+    val c15 = takeNth(c5, 3)
+    val c4 = takeNth(c1, 4)
+    val c12 = takeNth(c1, 12)
+
+    val tfs = listOf(
+        TfRow("۵ دقیقه", trendOf(c5), rsiOf(c5)),
+        TfRow("۱۵ دقیقه", trendOf(c15), rsiOf(c15)),
+        TfRow("۱ ساعت", trendOf(c1), rsiOf(c1)),
+        TfRow("۴ ساعت", trendOf(c4), rsiOf(c4)),
+        TfRow("۱۲ ساعت", trendOf(c12), rsiOf(c12))
+    )
+
+    val ups = tfs.count { it.trend == "صعودی" }
+    val dns = tfs.count { it.trend == "نزولی" }
+
+    val rsi1 = rsiOf(c1)
+    val mUp = macdUp(c1)
+    val e20 = emaLast(c1, 20)
+    val e50 = emaLast(c1, 50)
+    val atr = atrOf(c1)
+    val bb = bollOf(c1)
+
+    val risk = atr * 1.5
+
+    // ---------- تصمیم حرفه‌ای ----------
+    val signal: String = when {
+        ups >= 4 && rsi1 > 75 -> "WAIT_BUY"
+        ups >= 4 && rsi1 in 40.0..75.0 -> "BUY"
+        dns >= 4 && rsi1 < 25 -> "WAIT_SELL"
+        dns >= 4 && rsi1 in 25.0..60.0 -> "SELL"
+        else -> "HOLD"
+    }
+
+    val confidence = (40 + maxOf(ups, dns) * 10 + if (mUp && ups > dns) 5 else 0)
+        .coerceIn(10, 95)
+
+    val entry = price
+    val stop: Double
+    val t1: Double
+    val t2: Double
+    if (signal == "SELL" || signal == "WAIT_SELL") {
+        stop = price + risk
+        t1 = price - risk * 1.5
+        t2 = price - risk * 2.5
+    } else {
+        stop = price - risk
+        t1 = price + risk * 1.5
+        t2 = price + risk * 2.5
+    }
+
+    val zoneLow = e20
+    val zoneHigh = price * 0.985
+
+    val parts = mutableListOf<String>()
+    parts.add("${ups} تایم‌فریم صعودی / ${dns} نزولی")
+    parts.add("RSI یک‌ساعته: ${String.format(Locale.US, "%.1f", rsi1)}")
+    if (rsi1 > 75) parts.add("⚠️ اشباع خرید — ورود الان دیره")
+    if (rsi1 < 25) parts.add("⚠️ اشباع فروش — دنبال کردن نزول خطرناکه")
+    parts.add(if (mUp) "MACD صعودی" else "MACD نزولی")
+    if (price > bb.first) parts.add("قیمت بالای باند بولینگر")
+    if (price < bb.second) parts.add("قیمت زیر باند بولینگر")
+
+    return DetailAnalysis(
+        signal, confidence, entry, stop, t1, t2, zoneLow, zoneHigh,
+        tfs, rsi1, mUp, e20, e50, atr, bb.first, bb.second,
+        parts.joinToString(" • ")
+    )
+}
+
+// ---------- صفحه جزئیات حرفه‌ای ----------
 
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(true) }
-    var result by remember { mutableStateOf<IndicatorResult?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var a by remember { mutableStateOf<DetailAnalysis?>(null) }
+    var info by remember { mutableStateOf<CoinInfo?>(null) }
 
     LaunchedEffect(coin.id) {
         scope.launch {
+            loading = true
+            error = null
             try {
-                val chart = ApiClient.getCoinChart(coin.id, days = 90)
-                val prices = chart.prices
-                val volumes = chart.totalVolumes?.map { it[1] } ?: emptyList()
-
-                if (prices.size >= 90) {
-                    val ohlc = prices.map { p ->
-                        listOf(
-                            p[0],           // time
-                            p[1],           // open (using close as proxy)
-                            p[1] * 1.005,   // high (estimate)
-                            p[1] * 0.995,   // low (estimate)
-                            p[1]            // close
-                        )
-                    }
-                    result = IndicatorEngine.calculate(ohlc, volumes, coin.current_price)
+                val c1d = ApiClient.getCoinChart(coin.id, days = 1)
+                val c30 = ApiClient.getCoinChart(coin.id, days = 30)
+                if (c1d.prices.size < 60 || c30.prices.size < 100) {
+                    error = "داده کافی برای تحلیل نیست"
                 } else {
-                    error = "داده کافی نیست (نیاز به ۹۰ کندل)"
+                    a = buildAnalysis(c1d.prices, c30.prices, coin.current_price)
+                    try {
+                        info = CoinInfoClient.api.info(coin.id)
+                    } catch (_: Exception) { }
                 }
             } catch (e: Exception) {
                 error = e.message
@@ -97,37 +274,34 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     fontSize = 18.sp
                 )
                 Text(
-                    String.format(Locale.US, "$%,.4f", coin.current_price),
+                    String.format(Locale.US, "$%,.6f", coin.current_price),
                     fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    color = Gray
                 )
             }
         }
 
         when {
-            loading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
-                    color = Green
-                )
-            }
+            loading -> CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                color = Green
+            )
 
             error != null -> Text("خطا: $error", color = Red)
 
-            result != null -> {
-                val r = result!!
+            a != null -> {
+                val an = a!!
 
-                // ---------- سیگنال اصلی ----------
-                val signalColor = when (r.signal) {
-                    "STRONG_BUY" -> Green
-                    "BUY" -> Green.copy(alpha = 0.7f)
-                    "STRONG_SELL" -> Red
-                    "SELL" -> Red.copy(alpha = 0.7f)
-                    else -> Color.Gray
+                // ---------- سیگنال ----------
+                val (sigText, sigColor) = when (an.signal) {
+                    "BUY" -> "✅ خرید" to Green
+                    "SELL" -> "❌ فروش / شورت" to Red
+                    "WAIT_BUY" -> "⏳ صبر کن برای پولبک" to Yellow
+                    "WAIT_SELL" -> "⏳ اشباع فروش — صبر کن" to Yellow
+                    else -> "⏸️ بدون معامله" to Gray
                 }
-
                 Surface(
-                    color = signalColor.copy(alpha = 0.1f),
+                    color = sigColor.copy(alpha = 0.12f),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -135,90 +309,127 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         modifier = Modifier.padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            when (r.signal) {
-                                "STRONG_BUY" -> "💪 خرید قوی"
-                                "BUY" -> "✅ خرید"
-                                "STRONG_SELL" -> "💪 فروش قوی"
-                                "SELL" -> "❌ فروش"
-                                else -> "⏳ نگه دار"
-                            },
-                            fontWeight = FontWeight.Black,
-                            fontSize = 22.sp,
-                            color = signalColor
-                        )
-                        Text(
-                            "اطمینان: ${r.confidence}%",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                        )
+                        Text(sigText, fontWeight = FontWeight.Black, fontSize = 22.sp, color = sigColor)
+                        Text("اطمینان: ${an.confidence}٪", fontSize = 14.sp, color = Gray)
                     }
                 }
 
-                // ---------- اندیکاتورها ----------
-                IndicatorRow("RSI", String.format(Locale.US, "%.1f", r.rsi), r.rsi < 30 || r.rsi > 70)
-                IndicatorRow("MFI", String.format(Locale.US, "%.1f", r.mfi), r.mfi < 25 || r.mfi > 75)
-                IndicatorRow("ADX", String.format(Locale.US, "%.1f", r.adx), r.adx >= 25)
-                IndicatorRow("MACD", String.format(Locale.US, "%.4f", r.macd), r.macd > r.macdSignal)
-
-                // ---------- EMA ----------
-                Text("میانگین‌های متحرک:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                EmaRow("EMA 20", r.ema20, coin.current_price)
-                EmaRow("EMA 50", r.ema50, coin.current_price)
-                EmaRow("EMA 200", r.ema200, coin.current_price)
-
-                // ---------- VWAP ----------
-                val vwapColor = if (coin.current_price > r.vwap) Green else Red
-                IndicatorRow(
-                    "VWAP",
-                    String.format(Locale.US, "%.4f (%.1f%%)", r.vwap, r.vwapDeviation),
-                    coin.current_price > r.vwap,
-                    vwapColor
-                )
-
-                // ---------- OBV Divergence ----------
-                if (r.obvDivergence != "NONE") {
-                    val obvColor = if (r.obvDivergence == "BULLISH") Green else Red
-                    IndicatorRow(
-                        "OBV Divergence",
-                        r.obvDivergence,
-                        true,
-                        obvColor
-                    )
-                }
-
-                // ---------- ATR & Trailing Stop ----------
-                IndicatorRow("ATR", String.format(Locale.US, "%.4f", r.atr), false)
-                IndicatorRow(
-                    "Trailing Stop",
-                    String.format(Locale.US, "%.4f", r.trailingStop),
-                    true,
-                    Blue
-                )
-
-                // ---------- بولینگر ----------
-                Text("بولینگر:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                BollingerRow(r.bbUpper, r.bbLower, coin.current_price)
-
-                // ---------- حمایت/مقاومت ----------
-                if (r.supports.isNotEmpty() || r.resistances.isNotEmpty()) {
-                    Text("حمایت / مقاومت:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    r.supports.forEach { s ->
-                        Text("  🟢 حمایت: ${String.format(Locale.US, "%.4f", s)}", fontSize = 12.sp, color = Green)
-                    }
-                    r.resistances.forEach { r ->
-                        Text("  🔴 مقاومت: ${String.format(Locale.US, "%.4f", r)}", fontSize = 12.sp, color = Red)
+                // ---------- نقاط دقیق ----------
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("🎯 نقاط دقیق معامله:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                            Text("ورود: ${fmt(an.entry)}", fontSize = 12.sp)
+                            Text("استاپ: ${fmt(an.stop)}", fontSize = 12.sp, color = Red)
+                        }
+                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                            Text("هدف۱: ${fmt(an.target1)}", fontSize = 12.sp, color = Green)
+                            Text("هدف۲: ${fmt(an.target2)}", fontSize = 12.sp, color = Green)
+                        }
+                        if (an.signal == "WAIT_BUY") {
+                            Text(
+                                "🟡 منطقه خرید ایده‌آل: ${fmt(an.zoneLow)} تا ${fmt(an.zoneHigh)}",
+                                fontSize = 12.sp,
+                                color = Yellow,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 
-                // ---------- توضیح ----------
+                // ---------- جدول تایم‌فریم‌ها ----------
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("⏱️ تایم‌فریم‌ها:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        an.tfs.forEach { t ->
+                            val (emoji, tColor) = when (t.trend) {
+                                "صعودی" -> "🟢" to Green
+                                "نزولی" -> "🔴" to Red
+                                else -> "⚪" to Gray
+                            }
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                                Text(t.name, fontSize = 12.sp)
+                                Text("${t.trend} $emoji", fontSize = 12.sp, color = tColor)
+                                Text(
+                                    "RSI: ${String.format(Locale.US, "%.0f", t.rsi)}",
+                                    fontSize = 12.sp,
+                                    color = Gray
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ---------- اندیکاتورهای ۱ ساعته ----------
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("📊 اندیکاتورها (۱ ساعته):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        IndRow("RSI", String.format(Locale.US, "%.1f", an.rsi1h),
+                            if (an.rsi1h > 75 || an.rsi1h < 25) Yellow else Green)
+                        IndRow("MACD", if (an.macdUp) "صعودی 🟢" else "نزولی 🔴",
+                            if (an.macdUp) Green else Red)
+                        IndRow("EMA 20", fmt(an.ema20), if (coin.current_price > an.ema20) Green else Red)
+                        IndRow("EMA 50", fmt(an.ema50), if (coin.current_price > an.ema50) Green else Red)
+                        IndRow("ATR", fmt(an.atr), Gray)
+                        IndRow("بولینگر بالا", fmt(an.bbUpper), Red)
+                        IndRow("بولینگر پایین", fmt(an.bbLower), Green)
+                    }
+                }
+
+                // ---------- فاندامنتال ----------
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("🏛️ فاندامنتال:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        IndRow("رتبه بازار", "#${info?.rank ?: coin.market_cap_rank ?: "-"}", Gray)
+                        IndRow("مارکت کپ", formatMarketCap(info?.marketData?.marketCap?.get("usd") ?: coin.market_cap), Gray)
+                        val cap = coin.market_cap
+                        val turnover = if (cap > 0) coin.total_volume / cap * 100 else 0.0
+                        IndRow("فعالیت (حجم/کپ)", String.format(Locale.US, "%.1f%%", turnover),
+                            if (turnover > 15) Green else Gray)
+                        val ath = info?.marketData?.athChange?.get("usd")
+                        if (ath != null) {
+                            IndRow("فاصله از سقف تاریخی", String.format(Locale.US, "%.1f%%", ath),
+                                if (ath < -50) Green else Yellow)
+                        }
+                    }
+                }
+
+                // ---------- توضیحات ----------
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        r.explanation,
+                        an.explanation,
                         modifier = Modifier.padding(12.dp),
                         fontSize = 12.sp,
                         lineHeight = 18.sp
@@ -227,58 +438,25 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
     }
 }
 
+// ---------- ردیف اندیکاتور ----------
+
 @Composable
-private fun IndicatorRow(
-    label: String,
-    value: String,
-    highlight: Boolean,
-    color: Color = if (highlight) Green else MaterialTheme.colorScheme.onSurface
-) {
+private fun IndRow(label: String, value: String, color: Color) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(label, fontSize = 12.sp, color = Gray)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = color)
     }
 }
 
-@Composable
-private fun EmaRow(label: String, ema: Double, price: Double) {
-    val color = if (price > ema) Green else Red
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        Text(
-            String.format(Locale.US, "%.4f", ema),
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = color
-        )
-    }
-}
+// ---------- فرمت قیمت ----------
 
-@Composable
-private fun BollingerRow(upper: Double, lower: Double, price: Double) {
-    val progress = if (upper > lower) ((price - lower) / (upper - lower)).toFloat().coerceIn(0f, 1f) else 0.5f
-    Column {
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth(),
-            color = if (price > (upper + lower) / 2) Green else Red,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(String.format(Locale.US, "پایین: %.4f", lower), fontSize = 11.sp, color = Green)
-            Text(String.format(Locale.US, "بالا: %.4f", upper), fontSize = 11.sp, color = Red)
-        }
-    }
-}
+private fun fmt(v: Double): String =
+    if (v >= 1) String.format(Locale.US, "$%,.4f", v)
+    else String.format(Locale.US, "$%.6f", v)
