@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -318,7 +319,7 @@ private fun ChartCanvas(
     }
 }
 
-// ---------- بدنه نمودار + легенда ----------
+// ---------- بدنه نمودار ----------
 
 @Composable
 private fun ChartBody(coinId: String, tf: String, candles: List<Candle>, loading: Boolean, height: androidx.compose.ui.unit.Dp?) {
