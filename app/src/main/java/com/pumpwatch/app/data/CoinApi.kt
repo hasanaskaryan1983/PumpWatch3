@@ -95,16 +95,21 @@ object ThrottledHttp {
     }
 }
 
-// ---------- کلاینت آفلاین‌اول ----------
+// ---------- کلاینت آفلاین‌اول (بدون نیاز به init) ----------
 
 object ApiClient {
 
-    private var app: Context? = null
-    private val gson = Gson()
-
-    fun init(context: Context) {
-        app = context.applicationContext
+    // پیدا کردن خودکار Context اپ — بدون دست‌کاری MainActivity
+    private val app: Context? by lazy {
+        try {
+            val cl = Class.forName("android.app.ActivityThread")
+            cl.getMethod("currentApplication").invoke(null) as? Context
+        } catch (_: Exception) {
+            null
+        }
     }
+
+    private val gson = Gson()
 
     private const val CACHE_TTL = 90_000L
     private var cache1000: List<CoinMarket> = emptyList()
@@ -148,7 +153,7 @@ object ApiClient {
         }
     }
 
-    // ---------- ۱۰ ارز با فال‌بک آفلاین ----------
+    // ---------- ۱۰۰ ارز با فال‌بک آفلاین ----------
 
     suspend fun getTop100Coins(): List<CoinMarket> {
         if (cache100.isNotEmpty() &&
@@ -189,10 +194,6 @@ object ApiClient {
             } else throw e
         }
     }
-
-    // ---------- زمان آخرین ذخیره ----------
-
-    fun cacheAge(key: String): Long = OfflineCache.time(app, key)
 
     private fun loadList(key: String): List<CoinMarket>? {
         val json = OfflineCache.load(app, key) ?: return null
