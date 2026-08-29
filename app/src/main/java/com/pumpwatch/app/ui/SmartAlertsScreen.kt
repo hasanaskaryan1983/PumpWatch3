@@ -119,9 +119,11 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             loading = true
             errorMsg = null
             try {
-                coins = ApiClient.getTop1000Coins()
+                // پاک کردن کش + refresh اجباری
+                ApiClient.clearMemoryCache()
+                coins = ApiClient.getTop1000Coins(forceRefresh = true)
             } catch (e: Exception) {
-                errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
+                errorMsg = "خطا: ${e.message}\n\nاگه 429 می‌بینی، ۱-۲ دقیقه صبر کن و دوباره بزن"
             } finally {
                 loading = false
             }
