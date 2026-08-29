@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.ui.AssistantScreen
 import com.pumpwatch.app.ui.CoinDetailScreen
 import com.pumpwatch.app.ui.HistoryScreen
 import com.pumpwatch.app.ui.MemeRadarScreen
@@ -78,9 +79,10 @@ private val WarningYellow = Color(0xFFFFC107)
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
     ALERTS("هشدارها", "🔔"),
+    ASSISTANT("دستیار", "🤖"),
     BACKTEST("بک‌تست", "🧪"),
     TOP("برترین‌ها", "🏆"),
-    MEME("رادار میم", "🐸"),
+    MEME("میم", "🐸"),
     TRADES("معاملات", "📈"),
     HISTORY("تاریخچه", "📚")
 }
@@ -470,8 +472,8 @@ fun MainApp() {
                         NavigationBarItem(
                             selected = selectedTab == tab,
                             onClick = { selectedTab = tab },
-                            icon = { Text(tab.emoji, fontSize = 18.sp) },
-                            label = { Text(tab.title, fontSize = 10.sp) },
+                            icon = { Text(tab.emoji, fontSize = 16.sp) },
+                            label = { Text(tab.title, fontSize = 9.sp) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = AccentGreen,
                                 selectedTextColor = AccentGreen,
@@ -492,6 +494,7 @@ fun MainApp() {
                 when (selectedTab) {
                     Tab.MARKET -> MarketScreen(onCoinClick = { selectedCoin = it })
                     Tab.ALERTS -> SmartAlertsScreen(onCoinClick = { selectedCoin = it })
+                    Tab.ASSISTANT -> AssistantScreen()
                     Tab.BACKTEST -> BacktestScreen()
                     Tab.TOP -> TopPicksScreen(if (isFutures) "FUT" else "SPOT")
                     Tab.MEME -> MemeRadarScreen()
