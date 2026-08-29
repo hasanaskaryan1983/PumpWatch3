@@ -1,6 +1,9 @@
 package com.pumpwatch.app.data
 
+import android.content.Context
+import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.delay
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -10,6 +13,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
+import com.pumpwatch.app.store.OfflineCache
 import java.util.concurrent.TimeUnit
 
 data class CoinMarket(
@@ -91,9 +95,16 @@ object ThrottledHttp {
     }
 }
 
-// ---------- کلاینت با کش ۹۰ ثانیه ----------
+// ---------- کلاینت آفلاین‌اول ----------
 
 object ApiClient {
+
+    private var app: Context? = null
+    private val gson = Gson()
+
+    fun init(context: Context) {
+        app = context.applicationContext
+    }
 
     private const val CACHE_TTL = 90_000L
     private var cache1000: List<CoinMarket> = emptyList()
@@ -110,32 +121,86 @@ object ApiClient {
             .create(CoinGeckoApi::class.java)
     }
 
+    // ---------- ۱۰۰۰ ارز با فال‌بک آفلاین ----------
+
     suspend fun getTop1000Coins(): List<CoinMarket> {
         if (cache1000.isNotEmpty() &&
             System.currentTimeMillis() - cache1000Time < CACHE_TTL
         ) return cache1000
 
-        val results = mutableListOf<CoinMarket>()
-        for (page in 1..4) {
-            results.addAll(api.getMarkets(perPage = 250, page = page))
-            delay(1500)
+        return try {
+            val results = mutableListOf<CoinMarket>()
+            for (page in 1..4) {
+                results.addAll(api.getMarkets(perPage = 250, page = page))
+                delay(1500)
+            }
+            cache1000 = results.sortedBy { it.market_cap_rank ?: 9999 }
+            cache1000Time = System.currentTimeMillis()
+            OfflineCache.save(app, "m1000", gson.toJson(cache1000))
+            cache1000
+        } catch (e: Exception) {
+            val disk = loadList("m1000")
+            if (disk != null) {
+                cache1000 = disk
+                cache1000Time = System.currentTimeMillis()
+                disk
+            } else throw e
         }
-        cache1000 = results.sortedBy { it.market_cap_rank ?: 9999 }
-        cache1000Time = System.currentTimeMillis()
-        return cache1000
     }
+
+    // ---------- ۱۰ ارز با فال‌بک آفلاین ----------
 
     suspend fun getTop100Coins(): List<CoinMarket> {
         if (cache100.isNotEmpty() &&
             System.currentTimeMillis() - cache100Time < CACHE_TTL
         ) return cache100
 
-        cache100 = api.getMarkets(perPage = 100, page = 1)
-        cache100Time = System.currentTimeMillis()
-        return cache100
+        return try {
+            cache100 = api.getMarkets(perPage = 100, page = 1)
+            cache100Time = System.currentTimeMillis()
+            OfflineCache.save(app, "m100", gson.toJson(cache100))
+            cache100
+        } catch (e: Exception) {
+            val disk = loadList("m100")
+            if (disk != null) {
+                cache100 = disk
+                cache100Time = System.currentTimeMillis()
+                disk
+            } else throw e
+        }
     }
 
+    // ---------- نمودار با فال‌بک آفلاین ----------
+
     suspend fun getCoinChart(id: String, days: Int = 90): MarketChart {
-        return api.getMarketChart(id, days = days)
+        val key = "chart_${id}_$days"
+        return try {
+            val chart = api.getMarketChart(id, days = days)
+            OfflineCache.save(app, key, gson.toJson(chart))
+            chart
+        } catch (e: Exception) {
+            val json = OfflineCache.load(app, key)
+            if (json != null) {
+                try {
+                    gson.fromJson(json, MarketChart::class.java)
+                } catch (_: Exception) {
+                    throw e
+                }
+            } else throw e
+        }
+    }
+
+    // ---------- زمان آخرین ذخیره ----------
+
+    fun cacheAge(key: String): Long = OfflineCache.time(app, key)
+
+    private fun loadList(key: String): List<CoinMarket>? {
+        val json = OfflineCache.load(app, key) ?: return null
+        return try {
+            val type = object : TypeToken<List<CoinMarket>>() {}.type
+            gson.fromJson(json, type)
+        } catch (_: Exception) {
+            null
+        }
     }
 }
