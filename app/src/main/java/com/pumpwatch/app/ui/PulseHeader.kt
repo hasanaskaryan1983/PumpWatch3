@@ -8,10 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -63,7 +61,6 @@ private fun fngColor(v: Int): Color = when {
     v <= 25 -> HRed
     v <= 45 -> HOrange
     v <= 55 -> HYellow
-    v <= 75 -> HGreen
     else -> HGreen
 }
 
@@ -122,9 +119,15 @@ fun MarketPulseHeader() {
     LaunchedEffect(Unit) {
         try {
             coroutineScope {
-                val f = async(Dispatchers.IO) { runCatching { FngClient.api.index() }.getOrNull() }
-                val g = async(Dispatchers.IO) { runCatching { PulseClient.api.global() }.getOrNull() }
-                val t = async(Dispatchers.IO) { runCatching { PulseClient.api.trending() }.getOrNull() }
+                val f = async(Dispatchers.IO) {
+                    try { FngClient.api.index() } catch (_: Exception) { null }
+                }
+                val g = async(Dispatchers.IO) {
+                    try { PulseClient.api.global() } catch (_: Exception) { null }
+                }
+                val t = async(Dispatchers.IO) {
+                    try { PulseClient.api.trending() } catch (_: Exception) { null }
+                }
 
                 f.await()?.data?.firstOrNull()?.let {
                     fng = it.value?.toIntOrNull() ?: -1
