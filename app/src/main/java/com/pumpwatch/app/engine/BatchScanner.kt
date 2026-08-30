@@ -11,7 +11,8 @@ import com.pumpwatch.app.data.ScanMarket
 import kotlin.math.abs
 
 /**
- * BatchScanner Pro — سازگار با ساختار فعلی پروژه
+ * BatchScanner Pro — نسخه سازگار نهایی
+ * خروجی: List<SignalResult> | ورودی: (mode, params, limit)
  */
 object BatchScanner {
 
@@ -39,7 +40,7 @@ object BatchScanner {
             Log.d(TAG, "🎯 candidates: ${candidates.size}")
 
             val results = mutableListOf<SignalResult>()
-            candidates.chunked(6).forEach { chunk ->
+            candidates.chunked(5).forEach { chunk ->
                 val part = coroutineScope {
                     chunk.map { m ->
                         async(Dispatchers.IO) {
@@ -56,12 +57,15 @@ object BatchScanner {
                 delay(300)
             }
 
+            Log.d(TAG, "✅ scan done: ${results.size}")
             results.sortedByDescending { it.score }
         } catch (e: Exception) {
             Log.e(TAG, "❌ scan failed: ${e.message}")
             emptyList()
         }
     }
+
+    // ---------- بارگذاری بازارها ----------
 
     private suspend fun loadMarkets(mode: String): List<ScanMarket> {
         val out = mutableListOf<ScanMarket>()
@@ -93,6 +97,8 @@ object BatchScanner {
         return vol * 0.0000001 + ch * 10
     }
 
+    // ---------- تحلیل کامل یک ارز با SignalEngine ----------
+
     private suspend fun analyze(
         m: ScanMarket,
         mode: String,
@@ -100,8 +106,11 @@ object BatchScanner {
         params: SignalParams
     ): SignalResult? {
         val chart = ScanClient.api.chart(m.id, days = 30)
-        val candles = buildCandles(chart.prices)
-        if (candles.size < 100) return null
+        val candles = buildCandles(chart.prices, chart.volumes)
+        if (candles.size < 100) {
+            Log.w(TAG, "${m.symbol}: ${candles.size} candles < 100")
+            return null
+        }
 
         return SignalEngine.analyze(
             coinId = m.id,
@@ -114,48 +123,66 @@ object BatchScanner {
         )
     }
 
-    private fun buildCandles(prices: List<List<Double>>): List<Candle> {
+    // ---------- ساخت کندل ساعتی از داده‌های چارت ----------
+
+    private fun buildCandles(
+        prices: List<List<Double>>,
+        volumes: List<List<Double>>?
+    ): List<Candle> {
         if (prices.size < 2) return emptyList()
-        val out = mutableListOf<Candle>()
         val hourMs = 3_600_000L
-        val sorted = prices.sortedBy { it[0].toLong() }
+        val out = mutableListOf<Candle>()
 
-        var bucketStart = (sorted.first()[0].toLong() / hourMs) * hourMs
-        val bucketPrices = mutableListOf<Double>()
+        var bucketStart = (prices[0][0].toLong() / hourMs) * hourMs
+        var open = prices[0][1]
+        var high = prices[0][1]
+        var low = prices[0][1]
+        var lastClose = prices[0][1]
+        var vol = 0.0
+        var lastVol = volumes?.firstOrNull()?.get(1) ?: 0.0
 
-        for (p in sorted) {
-            val ts = p[0].toLong()
-            val price = p[1]
+        for (i in 1 until prices.size) {
+            val ts = prices[i][0].toLong()
+            val p = prices[i][1]
 
-            if (ts - bucketStart >= hourMs && bucketPrices.isNotEmpty()) {
+            if (ts - bucketStart >= hourMs) {
                 out.add(
                     Candle(
                         time = bucketStart,
-                        open = bucketPrices.first(),
-                        high = bucketPrices.max(),
-                        low = bucketPrices.min(),
-                        close = bucketPrices.last(),
-                        volume = 0.0
+                        open = open,
+                        high = high,
+                        low = low,
+                        close = lastClose,
+                        volume = vol
                     )
                 )
-                bucketStart += hourMs
-                bucketPrices.clear()
+                bucketStart = (ts / hourMs) * hourMs
+                open = p
+                high = p
+                low = p
+                vol = 0.0
+            } else {
+                if (p > high) high = p
+                if (p < low) low = p
             }
-            bucketPrices.add(price)
+            lastClose = p
+
+            val v = volumes?.getOrNull(i)?.get(1) ?: 0.0
+            val dv = v - lastVol
+            if (dv > 0) vol += dv
+            lastVol = v
         }
 
-        if (bucketPrices.isNotEmpty()) {
-            out.add(
-                Candle(
-                    time = bucketStart,
-                    open = bucketPrices.first(),
-                    high = bucketPrices.max(),
-                    low = bucketPrices.min(),
-                    close = bucketPrices.last(),
-                    volume = 0.0
-                )
+        out.add(
+            Candle(
+                time = bucketStart,
+                open = open,
+                high = high,
+                low = low,
+                close = lastClose,
+                volume = vol
             )
-        }
+        )
 
         return out
     }
