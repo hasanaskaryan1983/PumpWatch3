@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.ui.AssistantScreen
-import com.pumpwatch.app.ui.CoinDetailScreen
 import com.pumpwatch.app.ui.HistoryScreen
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.MemeRadarScreen
