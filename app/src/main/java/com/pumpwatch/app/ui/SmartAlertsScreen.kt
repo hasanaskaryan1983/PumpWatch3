@@ -4,11 +4,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,8 +47,6 @@ private val ARed = Color(0xFFFF5252)
 private val AGold = Color(0xFFFFC107)
 private val ABlue = Color(0xFF40C4FF)
 
-// ---------- ارزیابی هشدار ----------
-
 private data class AlertEval(
     val coin: CoinMarket,
     val side: String,
@@ -67,7 +65,6 @@ private fun eval(c: CoinMarket): AlertEval? {
     val low = c.low24h ?: 0.0
     val rangePos = if (high > low) (c.current_price - low) / (high - low) else 0.5
 
-    // ---------- امتیاز پامپ ----------
     var pump = 0
     val pr = mutableListOf<String>()
     if (c1 >= 1.0) { pump += 25; pr.add("شتاب ۱ ساعته 🚀") }
@@ -77,7 +74,6 @@ private fun eval(c: CoinMarket): AlertEval? {
     if (rangePos >= 0.85) { pump += 20; pr.add("شکست سقف ۲۴ ساعته 📈") }
     if (c7 > 10) pump += 5
 
-    // ---------- امتیاز دامپ ----------
     var dump = 0
     val dr = mutableListOf<String>()
     if (c1 <= -1.0) { dump += 25; dr.add("ریزش ۱ ساعته 🩸") }
@@ -91,7 +87,6 @@ private fun eval(c: CoinMarket): AlertEval? {
     val score = max(pump, dump).coerceAtMost(100)
     if (score < 35) return null
 
-    // زودهنگام: شتاب ۱ ساعته قوی ولی ۲۴ ساعته هنوز کوچک
     val early = abs(c1) >= 1.5 && abs(c24) < 10
 
     return AlertEval(c, side, score, early, if (pump >= dump) pr else dr)
@@ -103,8 +98,6 @@ private fun levelOf(score: Int): String = when {
     else -> "👀 زودهنگام"
 }
 
-// ---------- صفحه هشدارهای هوشمند ----------
-
 @Composable
 fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     val scope = rememberCoroutineScope()
@@ -114,16 +107,31 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf("ALL") }
 
+    // ---------- لود فوری از کش (بدون نابودی کش) ----------
     fun load() {
         scope.launch {
             loading = true
             errorMsg = null
             try {
-                // پاک کردن کش + refresh اجباری
+                coins = ApiClient.getTop1000Coins(forceRefresh = false)
+            } catch (e: Exception) {
+                errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    // ---------- فقط با دکمه بروزرسانی ----------
+    fun forceRefresh() {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
                 ApiClient.clearMemoryCache()
                 coins = ApiClient.getTop1000Coins(forceRefresh = true)
             } catch (e: Exception) {
-                errorMsg = "خطا: ${e.message}\n\nاگه 429 می‌بینی، ۱-۲ دقیقه صبر کن و دوباره بزن"
+                errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
                 loading = false
             }
@@ -146,7 +154,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ---------- سربرگ ----------
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -159,7 +166,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { load() }) { Text("بروزرسانی") }
+            TextButton(onClick = { forceRefresh() }) { Text("بروزرسانی") }
         }
 
         Text(
@@ -169,7 +176,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         )
 
-        // ---------- فیلترها ----------
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -196,7 +202,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             )
         }
 
-        // ---------- محتوا ----------
         when {
             loading -> Box(
                 modifier = Modifier.fillMaxSize(),
@@ -229,7 +234,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(alerts) { a ->
@@ -239,8 +244,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 }
-
-// ---------- کارت هشدار ----------
 
 @Composable
 private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
@@ -259,7 +262,6 @@ private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // ---------- ردیف اول ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(if (isPump) "🚀" else "🩸", fontSize = 22.sp)
                 Spacer(Modifier.width(8.dp))
@@ -297,7 +299,6 @@ private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
                 }
             }
 
-            // ---------- ردیف تغییرات ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -321,7 +322,6 @@ private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
                 )
             }
 
-            // ---------- نوار موقعیت در range ----------
             val high = c.high24h ?: 0.0
             val low = c.low24h ?: 0.0
             if (high > low) {
@@ -340,7 +340,6 @@ private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
                 }
             }
 
-            // ---------- دلایل ----------
             a.reasons.take(3).forEach { r ->
                 Text(
                     "• $r",
