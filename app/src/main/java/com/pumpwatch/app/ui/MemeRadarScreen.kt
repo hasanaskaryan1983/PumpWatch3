@@ -120,8 +120,8 @@ fun MemeRadarScreen() {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    if (!scanned) "در حال اسکن ترندهای DexScreener..."
-                    else if (MemeRadar.lastScanFailed) "⚠️ اتصال به DexScreener برقرار نشد\nاینترنت/فیلترشکن رو چک کن و دوباره اسکن کن"
+                    if (!scanned) "در حال اسکن استخرهای داغ..."
+                    else if (MemeRadar.lastScanFailed) "⚠️ اتصال به سرورهای رادار برقرار نشد\nاینترنت/فیلترشکن رو چک کن و دوباره اسکن کن"
                     else "😴 الان میم‌کوین مستعدی پیدا نشد\nبعداً دوباره اسکن کن",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
@@ -263,6 +263,7 @@ private fun chainEmoji(chain: String): String = when (chain) {
     "bsc" -> "🟡"
     "base" -> "🔵"
     "ethereum" -> "⚪"
+    "binance" -> "🟠"
     else -> "⛓️"
 }
 
@@ -273,6 +274,7 @@ private fun compact(v: Double): String = when {
 }
 
 private fun ageText(h: Double): String = when {
+    h <= 0 -> "—"
     h < 48 -> "${h.toInt()} ساعت"
     else -> "${(h / 24).toInt()} روز"
 }
