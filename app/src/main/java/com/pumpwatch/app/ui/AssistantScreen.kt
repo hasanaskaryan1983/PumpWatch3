@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -35,19 +34,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.store.PicksStore
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 private val CGreen = Color(0xFF00E676)
 private val CRed = Color(0xFFFF5252)
 private val CGray = Color(0xFF9E9E9E)
+private val CGold = Color(0xFFFFC107)
 private val CBubbleMe = Color(0xFF0E3B2E)
 private val CBubbleAi = Color(0xFF1A2230)
 
 private data class Msg(val me: Boolean, val text: String)
+private data class CoinReply(val text: String, val price: Double)
 
 // ---------- توابع تحلیل ----------
 
@@ -95,36 +97,54 @@ private fun fmt(v: Double): String =
     if (v >= 1) String.format(Locale.US, "$%,.4f", v)
     else String.format(Locale.US, "$%.6f", v)
 
-// ---------- شناسایی ارز ----------
+// ---------- شناسایی ارز (لیست بزرگ) ----------
 
-private fun findCoin(input: String): Pair<String, String>? {
+private fun findCoin(input: String): Triple<String, String, String>? {
     val low = input.lowercase(Locale.US)
     val map = listOf(
-        "بیت" to ("bitcoin" to "BTC"), "btc" to ("bitcoin" to "BTC"),
-        "اتریوم" to ("ethereum" to "ETH"), "eth" to ("ethereum" to "ETH"),
-        "سولانا" to ("solana" to "SOL"), "sol" to ("solana" to "SOL"),
-        "ریپل" to ("ripple" to "XRP"), "xrp" to ("ripple" to "XRP"),
-        "دوج" to ("dogecoin" to "DOGE"), "doge" to ("dogecoin" to "DOGE"),
-        "شیبا" to ("shiba-inu" to "SHIB"), "shib" to ("shiba-inu" to "SHIB"),
-        "کاردانو" to ("cardano" to "ADA"), "ada" to ("cardano" to "ADA"),
-        "ترون" to ("tron" to "TRX"), "trx" to ("tron" to "TRX"),
-        "لایت" to ("litecoin" to "LTC"), "ltc" to ("litecoin" to "LTC"),
-        "bnb" to ("binancecoin" to "BNB"), "پپه" to ("pepe" to "PEPE"),
-        "نات" to ("notcoin" to "NOT"), "not" to ("notcoin" to "NOT"),
-        "تون" to ("the-open-network" to "TON"), "ton" to ("the-open-network" to "TON")
+        "بیت" to Triple("bitcoin", "BTC", "Bitcoin"), "bitcoin" to Triple("bitcoin", "BTC", "Bitcoin"), "btc" to Triple("bitcoin", "BTC", "Bitcoin"),
+        "اتریوم" to Triple("ethereum", "ETH", "Ethereum"), "ethereum" to Triple("ethereum", "ETH", "Ethereum"), "eth" to Triple("ethereum", "ETH", "Ethereum"),
+        "تتر" to Triple("tether", "USDT", "Tether"), "usdt" to Triple("tether", "USDT", "Tether"),
+        "سولانا" to Triple("solana", "SOL", "Solana"), "solana" to Triple("solana", "SOL", "Solana"), "sol" to Triple("solana", "SOL", "Solana"),
+        "ریپل" to Triple("ripple", "XRP", "XRP"), "xrp" to Triple("ripple", "XRP", "XRP"),
+        "دوج" to Triple("dogecoin", "DOGE", "Dogecoin"), "doge" to Triple("dogecoin", "DOGE", "Dogecoin"),
+        "شیبا" to Triple("shiba-inu", "SHIB", "Shiba"), "shib" to Triple("shiba-inu", "SHIB", "Shiba"),
+        "کاردانو" to Triple("cardano", "ADA", "Cardano"), "ada" to Triple("cardano", "ADA", "Cardano"),
+        "ترون" to Triple("tron", "TRX", "Tron"), "trx" to Triple("tron", "TRX", "Tron"),
+        "لایت" to Triple("litecoin", "LTC", "Litecoin"), "ltc" to Triple("litecoin", "LTC", "Litecoin"),
+        "bnb" to Triple("binancecoin", "BNB", "BNB"),
+        "پپه" to Triple("pepe", "PEPE", "Pepe"), "pepe" to Triple("pepe", "PEPE", "Pepe"),
+        "نات" to Triple("notcoin", "NOT", "Notcoin"), "not" to Triple("notcoin", "NOT", "Notcoin"),
+        "تون" to Triple("the-open-network", "TON", "Toncoin"), "ton" to Triple("the-open-network", "TON", "Toncoin"),
+        "آوالانچ" to Triple("avalanche-2", "AVAX", "Avalanche"), "avax" to Triple("avalanche-2", "AVAX", "Avalanche"),
+        "پولکادات" to Triple("polkadot", "DOT", "Polkadot"), "dot" to Triple("polkadot", "DOT", "Polkadot"),
+        "چین‌لینک" to Triple("chainlink", "LINK", "Chainlink"), "link" to Triple("chainlink", "LINK", "Chainlink"),
+        "یونی‌سواپ" to Triple("uniswap", "UNI", "Uniswap"), "uni" to Triple("uniswap", "UNI", "Uniswap"),
+        "آپتوس" to Triple("aptos", "APT", "Aptos"), "apt" to Triple("aptos", "APT", "Aptos"),
+        "آربیتروم" to Triple("arbitrum", "ARB", "Arbitrum"), "arb" to Triple("arbitrum", "ARB", "Arbitrum"),
+        "اپتیمیزم" to Triple("optimism", "OP", "Optimism"), "op" to Triple("optimism", "OP", "Optimism"),
+        "نیر" to Triple("near", "NEAR", "Near"), "near" to Triple("near", "NEAR", "Near"),
+        "سویی" to Triple("sui", "SUI", "Sui"), "sui" to Triple("sui", "SUI", "Sui"),
+        "اینجکتیو" to Triple("injective-protocol", "INJ", "Injective"), "inj" to Triple("injective-protocol", "INJ", "Injective"),
+        "فایل‌کوین" to Triple("filecoin", "FIL", "Filecoin"), "fil" to Triple("filecoin", "FIL", "Filecoin"),
+        "استلار" to Triple("stellar", "XLM", "Stellar"), "xlm" to Triple("stellar", "XLM", "Stellar"),
+        "مونرو" to Triple("monero", "XMR", "Monero"), "xmr" to Triple("monero", "XMR", "Monero"),
+        "کازماس" to Triple("cosmos", "ATOM", "Cosmos"), "atom" to Triple("cosmos", "ATOM", "Cosmos"),
+        "بونک" to Triple("bonk", "BONK", "Bonk"), "bonk" to Triple("bonk", "BONK", "Bonk"),
+        "فلوکی" to Triple("floki", "FLOKI", "Floki"), "floki" to Triple("floki", "FLOKI", "Floki")
     )
-    for ((key, pair) in map) {
-        if (low.contains(key)) return pair
+    for ((key, triple) in map) {
+        if (low.contains(key)) return triple
     }
     return null
 }
 
-// ---------- تحلیل یک ارز ----------
+// ---------- تحلیل کامل + اخبار ----------
 
-private suspend fun analyzeCoin(id: String, symbol: String): String {
+private suspend fun analyzeCoin(id: String, symbol: String, name: String): CoinReply {
     val c30 = ApiClient.getCoinChart(id, days = 30)
     val closes = c30.prices.map { it[1] }
-    if (closes.size < 60) return "😅 داده کافی برای تحلیل $symbol ندارم."
+    if (closes.size < 60) return CoinReply("😅 داده کافی برای تحلیل $symbol ندارم.", 0.0)
 
     val price = closes.last()
     val rsi = rsiOf(closes)
@@ -162,14 +182,28 @@ private suspend fun analyzeCoin(id: String, symbol: String): String {
         else -> "⏸️ فعلاً بدون معامله"
     }
 
-    return "📊 تحلیل $symbol:\n\n" +
-            "سیگنال: $sigText (اطمینان $conf٪)\n" +
-            "💵 قیمت: ${fmt(price)}\n" +
-            "🎯 ورود: ${fmt(price)}\n" +
-            "🛑 استاپ: ${fmt(stop)}\n" +
-            "🎯 هدف۱: ${fmt(t1)} | هدف۲: ${fmt(t2)}\n" +
-            "📌 RSI: ${String.format(Locale.US, "%.0f", rsi)} | روند: ${if (up) "صعودی 🟢" else if (dn) "نزولی 🔴" else "خنثی ⚪"}\n" +
-            "💡 ${if (rsi > 75) "قیمت داغه! دنبال کردن پامپ خطرناکه." else if (rsi < 25) "اشباع فروش — منتظر برگشت باش." else "شرایط متعادله، با مدیریت ریسک وارد شو."}"
+    val newsLines = try {
+        NewsClient.api.news(symbol).data?.take(2)?.mapNotNull { n ->
+            if (n.title.isNullOrBlank()) null else "📰 ${n.title}"
+        } ?: emptyList()
+    } catch (_: Exception) { emptyList() }
+
+    val sb = StringBuilder()
+    sb.append("📊 تحلیل $name ($symbol):\n\n")
+    sb.append("سیگنال: $sigText (اطمینان $conf٪)\n")
+    sb.append("💵 قیمت: ${fmt(price)}\n")
+    sb.append("🎯 ورود: ${fmt(price)}\n")
+    sb.append("🛑 استاپ: ${fmt(stop)}\n")
+    sb.append("🎯 هدف۱: ${fmt(t1)} | هدف۲: ${fmt(t2)}\n")
+    sb.append("📌 RSI: ${String.format(Locale.US, "%.0f", rsi)} | روند: ${if (up) "صعودی 🟢" else if (dn) "نزولی 🔴" else "خنثی ⚪"}\n")
+    sb.append("💡 ${if (rsi > 75) "قیمت داغه! دنبال کردن پامپ خطرناکه." else if (rsi < 25) "اشباع فروش — منتظر برگشت باش." else "شرایط متعادله، با مدیریت ریسک وارد شو."}\n")
+    if (newsLines.isNotEmpty()) {
+        sb.append("\n📰 اخبار اخیر:\n")
+        newsLines.forEach { sb.append(it).append("\n") }
+    }
+    sb.append("\n👇 برای نمودار کندلی + تایم‌فریم‌ها + نقاط B/S دکمه زیر رو بزن!")
+
+    return CoinReply(sb.toString(), price)
 }
 
 // ---------- بهترین امروز ----------
@@ -192,17 +226,17 @@ private fun bestPick(context: android.content.Context): String {
 private fun teach(low: String): String = when {
     "rsi" in low -> "📚 RSI یعنی قدرت خریدار/فروشنده (۰ تا ۱۰۰):\n• زیر ۳۰ = اشباع فروش (فرصت خرید پله‌ای)\n• بالای ۷۰ = اشباع خرید (احتیاط!)\n• ۴۵ تا ۶۵ = منطقه قدرت برای ادامه روند"
     "macd" in low -> "📚 MACD تقاطع دو میانگین رو نشون می‌ده:\n• خط MACD بالای سیگنال = مومنتوم صعودی 🟢\n• پایین = نزولی 🔴\n• بهترین سیگنال: تقاطع + تأیید حجم"
-    "استاپ" in low || "stop" in low -> "📚 استاپ‌لاس = کمربند ایمنی! 🛑\nهمیشه ۱.۵ تا ۲ برابر ATR پایین‌تر از ورود (برای خرید). بدون استاپ = قمار، نه معامله!"
+    "استاپ" in low || "stop" in low -> "📚 استاپ‌لاس = کمربند ایمنی! 🛑\nهمیشه ۱.۵ تا  برابر ATR پایین‌تر از ورود (برای خرید). بدون استاپ = قمار، نه معامله!"
     "اهرم" in low || "لوریج" in low -> "📚 اهرم = تیغ دو لبه! ⚔️\nاهرم ۱۰ یعنی سود و ضرر ۱۰ برابر. تازه‌کارها حداکثر ۳-۵. حرفه‌ای‌ها اول ریسک، بعد سود."
     "فاندینگ" in low || "funding" in low -> "📚 فاندینگ ریت = هزینه نگه‌داشتن پوزیشن:\n• منفی شدید = شورت‌ها شلوغن → پتانسیل اسکوییز صعودی 🚀\n• مثبت شدید = لانگ‌ها شلوغن → احتمال اصلاح 🩸"
     "بولینگر" in low -> "📚 بولینگر = نوار نوسان قیمت:\n• قیمت زیر باند پایین + RSI پایین = فرصت\n• بیرون زد از باند = حرکت شدید، منتظر برگشت باش"
-    else -> "📚 چی یاد بگیرم؟ بپرس: RSI / MACD / استاپ / اهرم / فاندینگ / بولینگر"
+    else -> "📚 چی یاد بگیرم؟ بپرس: RSI / MACD / استاپ / اهرم / فاندینگ / بولینگر\n\nیا بنویس: تحلیل بیت‌کوین 📊"
 }
 
 // ---------- صفحه دستیار ----------
 
 @Composable
-fun AssistantScreen() {
+fun AssistantScreen(onOpenCoin: (CoinMarket) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -218,6 +252,8 @@ fun AssistantScreen() {
     }
     var input by remember { mutableStateOf("") }
     var thinking by remember { mutableStateOf(false) }
+    var lastCoin by remember { mutableStateOf<Triple<String, String, String>?>(null) }
+    var lastPrice by remember { mutableStateOf(0.0) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size, thinking) {
@@ -235,11 +271,19 @@ fun AssistantScreen() {
                 val low = t.lowercase(Locale.US)
                 when {
                     "بهترین" in low || "پیشنهاد" in low -> bestPick(context)
-                    "چی" in low && ("rsi" in low || "macd" in low) || "آموزش" in low || "یاد" in low || "چیه" in low -> teach(low)
+                    ("چی" in low || "چیه" in low || "آموزش" in low || "یاد" in low) -> teach(low)
                     else -> {
                         val coin = findCoin(low)
-                        if (coin != null) analyzeCoin(coin.first, coin.second)
-                        else "🤔 متوجه نشدم. یکی از این‌ها رو بنویس:\n• تحلیل بیت‌کوین\n• بهترین ارز امروز\n• RSI چیه؟"
+                        if (coin != null) {
+                            val r = analyzeCoin(coin.first, coin.second, coin.third)
+                            if (r.price > 0) {
+                                lastCoin = coin
+                                lastPrice = r.price
+                            }
+                            r.text
+                        } else {
+                            "🤔 ارز یا دستور رو نشناختم. نمونه‌ها:\n• تحلیل بیت‌کوین / اتریوم / سولانا / دوج / پپه...\n• بهترین ارز امروز\n• RSI چیه؟"
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -277,10 +321,7 @@ fun AssistantScreen() {
             if (thinking) {
                 item {
                     Row {
-                        Surface(
-                            color = CBubbleAi,
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
+                        Surface(color = CBubbleAi, shape = RoundedCornerShape(16.dp)) {
                             Text(
                                 "🤖 در حال تحلیل...",
                                 modifier = Modifier.padding(12.dp),
@@ -294,6 +335,29 @@ fun AssistantScreen() {
         }
 
         Spacer(Modifier.height(6.dp))
+
+        // ---------- دکمه نمودار کامل ----------
+        if (lastCoin != null) {
+            Button(
+                onClick = {
+                    val c = lastCoin!!
+                    onOpenCoin(
+                        CoinMarket(
+                            id = c.first, symbol = c.second, name = c.third, image = "",
+                            current_price = lastPrice, market_cap = 0.0, total_volume = 0.0,
+                            price_change_percentage_24h = null, market_cap_rank = null,
+                            change1h = null, change7d = null, high24h = null, low24h = null
+                        )
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = CGreen.copy(alpha = 0.2f)),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text("📈 نمودار کامل ${lastCoin!!.second} + تایم‌فریم‌ها + نقاط B/S + اخبار", fontSize = 12.sp, color = CGreen)
+            }
+            Spacer(Modifier.height(6.dp))
+        }
 
         // ---------- میان‌برها ----------
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
