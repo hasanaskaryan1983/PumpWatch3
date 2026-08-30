@@ -31,9 +31,13 @@ object MemeRadar {
 
     private val CHAINS = listOf("solana", "bsc", "base", "ethereum")
 
+    // آیا اسکن به‌خاطر قطعی اتصال خالی بود؟
+    var lastScanFailed = false
+
     suspend fun scan(
         onProgress: (Int, String) -> Unit = { _, _ -> }
     ): List<MemeSignal> {
+        lastScanFailed = false
 
         // ---------- ۱) توکن‌های ترند/بوست‌شده ----------
         onProgress(5, "دریافت توکن‌های ترند DexScreener...")
@@ -41,6 +45,11 @@ object MemeRadar {
             DexClient.api.topBoosts()
         } catch (_: Exception) {
             emptyList()
+        }
+
+        if (boosts.isEmpty()) {
+            lastScanFailed = true
+            return emptyList()
         }
 
         val valid = boosts.filter {
@@ -73,6 +82,11 @@ object MemeRadar {
             }
         }
 
+        if (pairs.isEmpty()) {
+            lastScanFailed = true
+            return emptyList()
+        }
+
         // ---------- ۳) بهترین جفت‌ارز هر توکن ----------
         onProgress(55, "تحلیل معیارهای تریدرهای برتر...")
         val bestByToken = pairs
@@ -92,7 +106,7 @@ object MemeRadar {
         return results.sortedByDescending { it.score }.take(20)
     }
 
-    // ---------- تحلیل یک جفت‌ارز ----------
+    // ---------- تحلیل یک جفت‌ارز (فیلترهای متعادل) ----------
 
     private fun analyze(p: DexPair, boosts: Double): MemeSignal? {
         val price = p.priceUsd?.toDoubleOrNull() ?: return null
@@ -108,11 +122,11 @@ object MemeRadar {
         val h24 = p.priceChange?.h24 ?: 0.0
         val ageH = (System.currentTimeMillis() - (p.pairCreatedAt ?: 0L)) / 3_600_000.0
 
-        // ---------- فیلترهای ایمنی (ضد راگ) ----------
-        if (liq < 50_000) return null
-        if (vol24 < 100_000) return null
+        // ---------- فیلترهای ایمنی (متعادل‌تر) ----------
+        if (liq < 20_000) return null
+        if (vol24 < 50_000) return null
         if (sells <= 0) return null        // مشکوک به هانی‌پات
-        if (ageH < 6) return null          // خیلی نو = ریسک راگ
+        if (ageH < 1) return null          // زیر ۱ ساعت = ریسک راگ
 
         var score = 0
         val reasons = mutableListOf<String>()
@@ -128,7 +142,7 @@ object MemeRadar {
         }
 
         // ۲) شتاب حجم — پول هوشمند
-        if (vol1 * 6 > vol24 * 1.5 && vol1 > 50_000) {
+        if (vol1 * 6 > vol24 * 1.5 && vol1 > 30_000) {
             score += 20
             reasons.add("شتاب حجم در ساعت اخیر 💥")
         } else if (vol1 * 6 > vol24) {
@@ -158,12 +172,13 @@ object MemeRadar {
         }
         if (h24 > 200) score -= 15
 
-        // ۶) سن توکن
+        // ۶) سن توکن (از ۱ ساعت به بالا قبوله)
         if (ageH in 24.0..720.0) {
             score += 10
-            reasons.add("توکن جاافتاده (۱-۳۰ روز) ⏰")
-        } else if (ageH >= 6) {
+            reasons.add("توکن جاافتاده (۱-۳۰ روز) ")
+        } else if (ageH >= 1) {
             score += 5
+            reasons.add("توکن تازه ولی فعال 🌱")
         }
 
         // ۷) توجه جامعه
@@ -174,7 +189,7 @@ object MemeRadar {
             score += 5
         }
 
-        if (score < 40) return null
+        if (score < 30) return null
 
         return MemeSignal(
             symbol = p.baseToken?.symbol ?: "?",
