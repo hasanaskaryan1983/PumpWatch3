@@ -2,6 +2,7 @@ package com.pumpwatch.app.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,11 +11,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +37,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pumpwatch.app.data.ApiClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -47,10 +51,21 @@ private val PCyan = Color(0xFF26C6DA)
 private val PPurple = Color(0xFFAB47BC)
 private val PGray = Color(0xFF8B949E)
 private val PBg = Color(0xFF0B0F14)
+private val PBlue = Color(0xFF40C4FF)
 
 private data class Candle(val o: Double, val h: Double, val l: Double, val c: Double)
 
-// ---------- ساخت کندل ----------
+// ---------- استراتژی‌های اندیکاتور ----------
+
+enum class IndicatorMode(val label: String, val emoji: String) {
+    EMA("EMA 7/30", "📊"),
+    RSI("RSI", "📈"),
+    MACD("MACD", "📉"),
+    BOLL("بولینگر", "🎯"),
+    NONE("بدون اندیکاتور", "⚪")
+}
+
+// ---------- ساخت کندل (سریع، on-demand) ----------
 
 private fun chunkEvery(v: List<Double>, n: Int): List<Double> =
     if (n <= 1) v else v.filterIndexed { i, _ -> (i + 1) % n == 0 }
@@ -63,8 +78,7 @@ private fun candlesFrom(prices: List<Double>): List<Candle> {
         val c = prices[i]
         out.add(
             Candle(
-                o = o,
-                c = c,
+                o = o, c = c,
                 h = max(o, c) * 1.0015,
                 l = min(o, c) * 0.9985
             )
@@ -73,8 +87,8 @@ private fun candlesFrom(prices: List<Double>): List<Candle> {
     return out
 }
 
-private suspend fun buildCandles(coinId: String, tf: String): List<Candle> {
-    return when (tf) {
+private suspend fun buildCandles(coinId: String, tf: String): List<Candle> = withContext(Dispatchers.IO) {
+    when (tf) {
         "15m" -> {
             val p = ApiClient.getCoinChart(coinId, 1).prices.map { it[1] }
             candlesFrom(chunkEvery(p, 3))
@@ -98,7 +112,7 @@ private suspend fun buildCandles(coinId: String, tf: String): List<Candle> {
     }
 }
 
-// ---------- سری‌های اندیکاتور ----------
+// ---------- سری‌های اندیکاتور (محاسبه سریع در background) ----------
 
 private fun emaSeries(v: List<Double>, p: Int): List<Double> {
     if (v.size < p) return emptyList()
@@ -152,9 +166,36 @@ private fun macdSeries(v: List<Double>): MacdSeries {
     return MacdSeries(dif, dea, hist)
 }
 
-// ---------- نقاط خرید/فروش (کراس EMA) ----------
+private fun bollingerSeries(v: List<Double>, p: Int = 20): Triple<List<Double>, List<Double>, List<Double>> {
+    if (v.size < p) return Triple(emptyList(), emptyList(), emptyList())
+    val mid = ArrayList<Double>()
+    val upper = ArrayList<Double>()
+    val lower = ArrayList<Double>()
+    for (i in p - 1 until v.size) {
+        val slice = v.subList(i - p + 1, i + 1)
+        val m = slice.average()
+        val sd = kotlin.math.sqrt(slice.map { (it - m) * (it - m) }.average())
+        mid.add(m)
+        upper.add(m + 2 * sd)
+        lower.add(m - 2 * sd)
+    }
+    return Triple(upper, mid, lower)
+}
 
-private fun bsPoints(closes: List<Double>): List<Pair<Int, Boolean>> {
+// ---------- نقاط خرید/فروش بر اساس استراتژی انتخابی ----------
+
+private fun bsPoints(closes: List<Double>, mode: IndicatorMode): List<Pair<Int, Boolean>> {
+    if (closes.isEmpty()) return emptyList()
+    return when (mode) {
+        IndicatorMode.EMA -> bsFromEma(closes)
+        IndicatorMode.RSI -> bsFromRsi(closes)
+        IndicatorMode.MACD -> bsFromMacd(closes)
+        IndicatorMode.BOLL -> bsFromBoll(closes)
+        IndicatorMode.NONE -> emptyList()
+    }
+}
+
+private fun bsFromEma(closes: List<Double>): List<Pair<Int, Boolean>> {
     val e20 = emaSeries(closes, 20)
     val e50 = emaSeries(closes, 50)
     if (e20.isEmpty() || e50.isEmpty()) return emptyList()
@@ -171,6 +212,69 @@ private fun bsPoints(closes: List<Double>): List<Pair<Int, Boolean>> {
     return out
 }
 
+private fun bsFromRsi(closes: List<Double>): List<Pair<Int, Boolean>> {
+    val rsi = rsiSeries(closes)
+    if (rsi.isEmpty()) return emptyList()
+    val off = closes.size - rsi.size
+    val out = mutableListOf<Pair<Int, Boolean>>()
+    var lastSignal: Boolean? = null
+    for (i in 1 until rsi.size) {
+        val prev = rsi[i - 1]
+        val cur = rsi[i]
+        val idx = i + off
+        if (prev < 30 && cur >= 30 && lastSignal != true) {
+            out.add(idx to true)
+            lastSignal = true
+        } else if (prev > 70 && cur <= 70 && lastSignal != false) {
+            out.add(idx to false)
+            lastSignal = false
+        }
+    }
+    return out
+}
+
+private fun bsFromMacd(closes: List<Double>): List<Pair<Int, Boolean>> {
+    val m = macdSeries(closes)
+    if (m.dif.isEmpty() || m.dea.isEmpty()) return emptyList()
+    val offDif = closes.size - m.dif.size
+    val offDea = m.dif.size - m.dea.size
+    val out = mutableListOf<Pair<Int, Boolean>>()
+    for (i in 1 until m.dif.size) {
+        val b = i - offDea
+        if (b < 1) continue
+        val prevDif = m.dif[i - 1]
+        val curDif = m.dif[i]
+        val prevDea = m.dea[b - 1]
+        val curDea = m.dea[b]
+        val idx = i + offDif
+        if (prevDif <= prevDea && curDif > curDea) out.add(idx to true)
+        if (prevDif >= prevDea && curDif < curDea) out.add(idx to false)
+    }
+    return out
+}
+
+private fun bsFromBoll(closes: List<Double>): List<Pair<Int, Boolean>> {
+    val (upper, mid, lower) = bollingerSeries(closes)
+    if (upper.isEmpty()) return emptyList()
+    val off = closes.size - upper.size
+    val out = mutableListOf<Pair<Int, Boolean>>()
+    var lastSignal: Boolean? = null
+    for (i in 1 until upper.size) {
+        val idx = i + off
+        if (idx >= closes.size) continue
+        val c = closes[idx]
+        val prevC = closes[idx - 1]
+        if (prevC <= lower[i - 1] && c > lower[i] && lastSignal != true) {
+            out.add(idx to true)
+            lastSignal = true
+        } else if (prevC >= upper[i - 1] && c < upper[i] && lastSignal != false) {
+            out.add(idx to false)
+            lastSignal = false
+        }
+    }
+    return out
+}
+
 // ---------- بوم نمودار ----------
 
 @Composable
@@ -178,38 +282,37 @@ private fun ChartCanvas(
     candles: List<Candle>,
     closes: List<Double>,
     signals: List<Pair<Int, Boolean>>,
+    mode: IndicatorMode,
     modifier: Modifier
 ) {
-    val e7 = remember(closes) { emaSeries(closes, 7) }
-    val e30 = remember(closes) { emaSeries(closes, 30) }
-    val e200 = remember(closes) { emaSeries(closes, 200) }
-    val rsiS = remember(closes) { rsiSeries(closes) }
-    val macd = remember(closes) { macdSeries(closes) }
+    val e7 = remember(closes, mode) { if (mode == IndicatorMode.EMA) emaSeries(closes, 7) else emptyList() }
+    val e30 = remember(closes, mode) { if (mode == IndicatorMode.EMA) emaSeries(closes, 30) else emptyList() }
+    val rsiS = remember(closes, mode) { if (mode == IndicatorMode.RSI) rsiSeries(closes) else emptyList() }
+    val macd = remember(closes, mode) { if (mode == IndicatorMode.MACD) macdSeries(closes) else MacdSeries(emptyList(), emptyList(), emptyList()) }
+    val (bUpper, bMid, bLower) = remember(closes, mode) {
+        if (mode == IndicatorMode.BOLL) bollingerSeries(closes) else Triple(emptyList(), emptyList(), emptyList())
+    }
 
     Canvas(modifier = modifier.fillMaxWidth()) {
         val w = size.width
         val h = size.height
         if (candles.size < 5) return@Canvas
 
+        val hasSubpanel = mode == IndicatorMode.RSI || mode == IndicatorMode.MACD
+        val mainH = if (hasSubpanel) h * 0.52f else h * 0.78f
+        val subTop = h * 0.58f
+        val subH = h * 0.38f
+
         val n = min(70, candles.size)
-        val start = candles.size - n
         val vis = candles.takeLast(n)
         val cw = w / n
         val bodyW = cw * 0.55f
 
-        val mainH = h * 0.52f
-        val rsiTop = h * 0.56f
-        val rsiH = h * 0.16f
-        val macdTop = h * 0.76f
-        val macdH = h * 0.22f
-
-        var min = vis.minOf { it.l }
-        var max = vis.maxOf { it.h }
+        val min = vis.minOf { it.l }
+        val max = vis.maxOf { it.h }
         val range = if (max > min) max - min else 1.0
 
-        fun yMain(v: Double): Float {
-            return (mainH - ((v - min) / range * (mainH * 0.9f) + mainH * 0.05f)).toFloat()
-        }
+        fun yMain(v: Double): Float = (mainH - ((v - min) / range * (mainH * 0.9f) + mainH * 0.05f)).toFloat()
 
         // ---------- کندل‌ها ----------
         vis.forEachIndexed { i, c ->
@@ -223,8 +326,8 @@ private fun ChartCanvas(
             drawRect(col, topLeft = Offset(x - bodyW / 2, top), size = Size(bodyW, bh))
         }
 
-        // ---------- خطوط MA ----------
-        fun drawMA(series: List<Double>, color: Color) {
+        // ---------- خطوط اندیکاتور روی کندل‌ها ----------
+        fun drawLineOnMain(series: List<Double>, color: Color) {
             if (series.isEmpty()) return
             var prev: Offset? = null
             for (i in 0 until n) {
@@ -237,9 +340,16 @@ private fun ChartCanvas(
                 prev = cur
             }
         }
-        drawMA(e7, POrange)
-        drawMA(e30, PCyan)
-        drawMA(e200, PPurple)
+
+        if (mode == IndicatorMode.EMA) {
+            drawLineOnMain(e7, POrange)
+            drawLineOnMain(e30, PCyan)
+        }
+        if (mode == IndicatorMode.BOLL) {
+            drawLineOnMain(bUpper, PRed)
+            drawLineOnMain(bMid, PGray)
+            drawLineOnMain(bLower, PGreen)
+        }
 
         // ---------- نقاط B / S ----------
         val paint = android.graphics.Paint().apply {
@@ -248,8 +358,9 @@ private fun ChartCanvas(
         }
         signals.forEach { (idx, isBuy) ->
             val r = closes.size - 1 - idx
-            if (r >= n) return@forEach
+            if (r >= n || r < 0) return@forEach
             val i = n - 1 - r
+            if (i >= vis.size) return@forEach
             val c = vis[i]
             val x = i * cw + cw / 2
             if (isBuy) {
@@ -266,9 +377,9 @@ private fun ChartCanvas(
         }
 
         // ---------- پنل RSI ----------
-        drawLine(PGray, Offset(0f, rsiTop), Offset(w, rsiTop), strokeWidth = 1f)
-        if (rsiS.isNotEmpty()) {
-            fun yRsi(v: Double): Float = (rsiTop + rsiH - (v / 100.0 * rsiH)).toFloat()
+        if (mode == IndicatorMode.RSI && rsiS.isNotEmpty()) {
+            drawLine(PGray, Offset(0f, subTop), Offset(w, subTop), strokeWidth = 1f)
+            fun yRsi(v: Double): Float = (subTop + subH - (v / 100.0 * subH)).toFloat()
             drawLine(PGray, Offset(0f, yRsi(70.0)), Offset(w, yRsi(70.0)), strokeWidth = 1f)
             drawLine(PGray, Offset(0f, yRsi(30.0)), Offset(w, yRsi(30.0)), strokeWidth = 1f)
             var prev: Offset? = null
@@ -282,13 +393,13 @@ private fun ChartCanvas(
         }
 
         // ---------- پنل MACD ----------
-        drawLine(PGray, Offset(0f, macdTop), Offset(w, macdTop), strokeWidth = 1f)
-        if (macd.hist.isNotEmpty()) {
+        if (mode == IndicatorMode.MACD && macd.hist.isNotEmpty()) {
+            drawLine(PGray, Offset(0f, subTop), Offset(w, subTop), strokeWidth = 1f)
             val all = macd.hist + macd.dif + macd.dea
             val mMax = all.maxOrNull() ?: 1.0
             val mMin = all.minOrNull() ?: -1.0
             val mRange = if (mMax > mMin) mMax - mMin else 1.0
-            fun yM(v: Double): Float = (macdTop + macdH - ((v - mMin) / mRange * macdH)).toFloat()
+            fun yM(v: Double): Float = (subTop + subH - ((v - mMin) / mRange * subH)).toFloat()
             val zero = yM(0.0)
             for (i in 0 until n) {
                 val r = n - 1 - i
@@ -298,12 +409,10 @@ private fun ChartCanvas(
                 val y = yM(v)
                 drawLine(
                     if (v >= 0) PGreen else PRed,
-                    Offset(x, zero),
-                    Offset(x, y),
-                    strokeWidth = bodyW
+                    Offset(x, zero), Offset(x, y), strokeWidth = bodyW
                 )
             }
-            fun drawLine2(series: List<Double>, color: Color) {
+            fun drawL(series: List<Double>, color: Color) {
                 var prev: Offset? = null
                 for (i in 0 until n) {
                     val r = n - 1 - i
@@ -313,8 +422,8 @@ private fun ChartCanvas(
                     prev = cur
                 }
             }
-            drawLine2(macd.dif, POrange)
-            drawLine2(macd.dea, PPurple)
+            drawL(macd.dif, POrange)
+            drawL(macd.dea, PPurple)
         }
     }
 }
@@ -322,28 +431,34 @@ private fun ChartCanvas(
 // ---------- بدنه نمودار ----------
 
 @Composable
-private fun ChartBody(coinId: String, tf: String, candles: List<Candle>, loading: Boolean, height: androidx.compose.ui.unit.Dp?) {
+private fun ChartBody(
+    coinId: String,
+    tf: String,
+    candles: List<Candle>,
+    loading: Boolean,
+    mode: IndicatorMode,
+    height: androidx.compose.ui.unit.Dp?
+) {
     val closes = remember(candles) { candles.map { it.c } }
-    val signals = remember(closes) { bsPoints(closes) }
-    val e7 = remember(closes) { emaSeries(closes, 7).lastOrNull() ?: 0.0 }
-    val e30 = remember(closes) { emaSeries(closes, 30).lastOrNull() ?: 0.0 }
-    val rsiLast = remember(closes) { rsiSeries(closes).lastOrNull() ?: 50.0 }
+    val signals = remember(closes, mode) { bsPoints(closes, mode) }
+    val buys = signals.count { it.second }
+    val sells = signals.count { !it.second }
 
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("MA(7): ${String.format(java.util.Locale.US, "%.4f", e7)}", fontSize = 10.sp, color = POrange)
-            Text("MA(30): ${String.format(java.util.Locale.US, "%.4f", e30)}", fontSize = 10.sp, color = PCyan)
-            Text("RSI: ${String.format(java.util.Locale.US, "%.0f", rsiLast)}", fontSize = 10.sp, color = POrange)
+            Text(mode.label, fontSize = 11.sp, color = PBlue, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            Text("🟢 $buys", fontSize = 11.sp, color = PGreen)
+            Text("🔴 $sells", fontSize = 11.sp, color = PRed)
         }
         Spacer(Modifier.height(4.dp))
         when {
             loading -> Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(height ?: 300.dp),
+                    .height(height ?: 340.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) { CircularProgressIndicator(color = PGreen) }
@@ -351,21 +466,19 @@ private fun ChartBody(coinId: String, tf: String, candles: List<Candle>, loading
             candles.isEmpty() -> Text("داده نمودار در دسترس نیست", color = PRed, fontSize = 12.sp)
 
             else -> {
-                val mod = if (height != null)
-                    Modifier.height(height)
-                else
-                    Modifier.weight(1f)
-                ChartCanvas(candles, closes, signals, mod)
+                val mod = if (height != null) Modifier.height(height) else Modifier.weight(1f)
+                ChartCanvas(candles, closes, signals, mode, mod)
             }
         }
     }
 }
 
-// ---------- کامپوننت اصلی ----------
+// ---------- کامپوننت اصلی با انتخاب اندیکاتور ----------
 
 @Composable
 fun ProChart(coinId: String) {
     var tf by remember { mutableStateOf("1h") }
+    var mode by remember { mutableStateOf(IndicatorMode.EMA) }
     var full by remember { mutableStateOf(false) }
     var candles by remember { mutableStateOf<List<Candle>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -399,25 +512,39 @@ fun ProChart(coinId: String) {
                     colors = ButtonDefaults.buttonColors(containerColor = PGreen.copy(alpha = 0.2f))
                 ) { Text("⛶", fontSize = 14.sp) }
             }
+
             Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("⏱️ تایم‌فریم:", fontSize = 11.sp, color = PGray)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 tfs.forEach { (key, label) ->
-                    Surface(
+                    FilterChip(
+                        selected = tf == key,
                         onClick = { tf = key },
-                        color = if (tf == key) PGreen.copy(alpha = 0.25f) else Color(0xFF1A2230),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text(
-                            label,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            fontSize = 11.sp,
-                            color = if (tf == key) PGreen else PGray
-                        )
-                    }
+                        label = { Text(label, fontSize = 11.sp) }
+                    )
                 }
             }
+
+            Spacer(Modifier.height(6.dp))
+            Text("🧠 اندیکاتور:", fontSize = 11.sp, color = PGray)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                IndicatorMode.values().forEach { m ->
+                    FilterChip(
+                        selected = mode == m,
+                        onClick = { mode = m },
+                        label = { Text("${m.emoji} ${m.label}", fontSize = 11.sp) }
+                    )
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
-            ChartBody(coinId, tf, candles, loading, height = 300.dp)
+            ChartBody(coinId, tf, candles, loading, mode, height = 340.dp)
         }
     }
 
@@ -439,24 +566,38 @@ fun ProChart(coinId: String) {
                     Button(onClick = { full = false }) { Text("✕ بستن") }
                 }
                 Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+
+                Text("⏱️ تایم‌فریم:", fontSize = 11.sp, color = PGray)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     tfs.forEach { (key, label) ->
-                        Surface(
+                        FilterChip(
+                            selected = tf == key,
                             onClick = { tf = key },
-                            color = if (tf == key) PGreen.copy(alpha = 0.25f) else Color(0xFF1A2230),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text(
-                                label,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                fontSize = 11.sp,
-                                color = if (tf == key) PGreen else PGray
-                            )
-                        }
+                            label = { Text(label, fontSize = 11.sp) }
+                        )
                     }
                 }
+
+                Spacer(Modifier.height(6.dp))
+                Text("🧠 اندیکاتور:", fontSize = 11.sp, color = PGray)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IndicatorMode.values().forEach { m ->
+                        FilterChip(
+                            selected = mode == m,
+                            onClick = { mode = m },
+                            label = { Text("${m.emoji} ${m.label}", fontSize = 11.sp) }
+                        )
+                    }
+                }
+
                 Spacer(Modifier.height(8.dp))
-                ChartBody(coinId, tf, candles, loading, height = null)
+                ChartBody(coinId, tf, candles, loading, mode, height = null)
             }
         }
     }
