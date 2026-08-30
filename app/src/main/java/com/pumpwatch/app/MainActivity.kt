@@ -243,7 +243,7 @@ fun MainApp() {
     }
 }
 
-// ---------- صفحه بازار + نبض بازار ----------
+// ---------- صفحه بازار + نبض بازار + لود سریع ----------
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
@@ -259,7 +259,18 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             errorMsg = null
             try {
                 val mode = prefs.getString("mode", "SPOT")
-                coins = if (mode == "FUTURES") ApiClient.getTop100Coins() else ApiClient.getTop1000Coins()
+                if (mode == "FUTURES") {
+                    coins = ApiClient.getTop100Coins()
+                } else {
+                    // مرحله ۱: نمایش فوری (کش یا ۲۵۰ ارز)
+                    coins = ApiClient.getQuickCoins()
+                    loading = false
+                    // مرحله ۲: تکمیل ۱۰۰۰ ارز در پس‌زمینه
+                    try {
+                        val full = ApiClient.getTop1000Coins()
+                        if (full.size > coins.size) coins = full
+                    } catch (_: Exception) { }
+                }
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -286,7 +297,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             TextButton(onClick = { load() }) { Text("بروزرسانی") }
         }
 
-        // ---------- نبض بازار (جدید) ----------
+        // ---------- نبض بازار ----------
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             MarketPulseHeader()
         }
