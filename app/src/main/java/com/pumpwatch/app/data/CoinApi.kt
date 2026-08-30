@@ -43,6 +43,13 @@ interface CoinGeckoApi {
         @Query("price_change_percentage") pcp: String = "1h,24h,7d"
     ): List<CoinMarket>
 
+    @GET("coins/{id}/ohlc")
+    suspend fun getOhlc(
+        @Path("id") id: String,
+        @Query("vs_currency") vsCurrency: String = "usd",
+        @Query("days") days: String
+    ): List<List<Double>>
+
     @GET("coins/{id}/market_chart")
     suspend fun getMarketChart(
         @Path("id") id: String,
@@ -51,12 +58,9 @@ interface CoinGeckoApi {
     ): MarketChart
 }
 
-// ---------- ترافیک‌شکن سریع‌تر ----------
-
 object ThrottledHttp {
 
-    // کاهش از ۱۱۰۰ به ۴۰۰ میلی‌ثانیه (CoinGecko رایگان ۱۰-۳۰ call/min مجازه)
-    private const val MIN_INTERVAL_MS = 400L
+    private const val MIN_INTERVAL_MS = 250L
     private var lastRequestMs = 0L
     private val lock = Any()
 
@@ -68,12 +72,11 @@ object ThrottledHttp {
                 lastRequestMs = System.currentTimeMillis()
             }
             var retries = 0
-            while (retries < 5) {
+            while (retries < 4) {
                 val response = chain.proceed(chain.request())
                 if (response.code != 429) return response
                 response.close()
                 retries++
-                // انتظار نمایی: ۲، ۴، ۸، ۱۶، ۳۲ ثانیه
                 Thread.sleep(2000L * (1L shl (retries - 1)))
                 synchronized(lock) { lastRequestMs = System.currentTimeMillis() }
             }
@@ -90,21 +93,22 @@ object ThrottledHttp {
     }
 }
 
-// ---------- کلاینت با کش دیسک + cache-then-network ----------
-
 object ApiClient {
 
-    private var app: Context? = null
-    private val gson = Gson()
-
-    fun init(context: Context) {
-        app = context.applicationContext
+    private val app: Context? by lazy {
+        try {
+            val cl = Class.forName("android.app.ActivityThread")
+            cl.getMethod("currentApplication").invoke(null) as? Context
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    // کش درون‌حافظه: ۲ دقیقه (قبلاً ۹۰ ثانیه بود)
+    private val gson = Gson()
+
     private const val MEM_CACHE_TTL = 120_000L
-    // کش دیسک: ۳۰ دقیقه (برای نمایش فوری وقتی کش حافظه منقضی شده)
-    private const val DISK_CACHE_MAX_AGE = 1_800_000L
+    private const val DISK_FRESH_MS = 1_800_000L
+    private const val CHART_FRESH_MS = 300_000L
 
     private var cache1000: List<CoinMarket> = emptyList()
     private var cache1000Time = 0L
@@ -120,23 +124,31 @@ object ApiClient {
             .create(CoinGeckoApi::class.java)
     }
 
-    // ---------- ۱۰۰۰ ارز با نمایش فوری از کش دیسک ----------
+    // ---------- نمایش فوری: کش یا فقط ۱ صفحه ----------
+
+    suspend fun getQuickCoins(): List<CoinMarket> {
+        if (cache1000.isNotEmpty()) return cache1000
+        loadList("m250")?.let { return it }
+        val p1 = api.getMarkets(perPage = 250, page = 1)
+        OfflineCache.save(app, "m250", gson.toJson(p1))
+        return p1
+    }
+
+    // ---------- ۱۰۰۰ ارز کامل ----------
 
     suspend fun getTop1000Coins(forceRefresh: Boolean = false): List<CoinMarket> {
         if (!forceRefresh && cache1000.isNotEmpty() &&
             System.currentTimeMillis() - cache1000Time < MEM_CACHE_TTL
         ) return cache1000
 
-        // اگه کش حافظه نداریم، سریع از دیسک بخون
-        if (cache1000.isEmpty()) {
+        if (!forceRefresh && cache1000.isEmpty()) {
             val disk = loadList("m1000")
-            if (disk != null) {
-                val age = System.currentTimeMillis() - (OfflineCache.time(app, "m1000"))
-                if (age < DISK_CACHE_MAX_AGE) {
-                    cache1000 = disk
-                    cache1000Time = System.currentTimeMillis()
-                    return disk
-                }
+            if (disk != null &&
+                System.currentTimeMillis() - OfflineCache.time(app, "m1000") < DISK_FRESH_MS
+            ) {
+                cache1000 = disk
+                cache1000Time = System.currentTimeMillis()
+                return disk
             }
         }
 
@@ -144,36 +156,37 @@ object ApiClient {
             val results = mutableListOf<CoinMarket>()
             for (page in 1..4) {
                 results.addAll(api.getMarkets(perPage = 250, page = page))
-                if (page < 4) delay(500)  // کاهش از ۱۵۰۰ به ۵۰۰
+                if (page < 4) delay(300)
             }
             cache1000 = results.sortedBy { it.market_cap_rank ?: 9999 }
             cache1000Time = System.currentTimeMillis()
             OfflineCache.save(app, "m1000", gson.toJson(cache1000))
             cache1000
         } catch (e: Exception) {
-            // حتی اگه کش دیسک قدیمی باشه، بهتر از خطاست
-            val disk = loadList("m1000")
+            val disk = loadList("m1000") ?: loadList("m250")
             if (disk != null) {
                 cache1000 = disk
+                cache1000Time = System.currentTimeMillis()
                 disk
             } else throw e
         }
     }
+
+    // ---------- ۱۰۰ ارز ----------
 
     suspend fun getTop100Coins(forceRefresh: Boolean = false): List<CoinMarket> {
         if (!forceRefresh && cache100.isNotEmpty() &&
             System.currentTimeMillis() - cache100Time < MEM_CACHE_TTL
         ) return cache100
 
-        if (cache100.isEmpty()) {
+        if (!forceRefresh && cache100.isEmpty()) {
             val disk = loadList("m100")
-            if (disk != null) {
-                val age = System.currentTimeMillis() - (OfflineCache.time(app, "m100"))
-                if (age < DISK_CACHE_MAX_AGE) {
-                    cache100 = disk
-                    cache100Time = System.currentTimeMillis()
-                    return disk
-                }
+            if (disk != null &&
+                System.currentTimeMillis() - OfflineCache.time(app, "m100") < DISK_FRESH_MS
+            ) {
+                cache100 = disk
+                cache100Time = System.currentTimeMillis()
+                return disk
             }
         }
 
@@ -186,33 +199,29 @@ object ApiClient {
             val disk = loadList("m100")
             if (disk != null) {
                 cache100 = disk
+                cache100Time = System.currentTimeMillis()
                 disk
             } else throw e
         }
     }
 
-    // ---------- نمودار با کش دیسک (هر ارز یه بار) ----------
+    // ---------- نمودار با کش ۵ دقیقه ----------
 
     suspend fun getCoinChart(id: String, days: Int = 90): MarketChart {
         val key = "chart_${id}_$days"
-
-        // اول دیسک رو بخون
         val cachedJson = OfflineCache.load(app, key)
-        val cachedAge = System.currentTimeMillis() - OfflineCache.time(app, key)
-
-        // اگه کمتر از ۵ دقیقه قدیمیه، همون رو برگردون (برای نمودارها عالیه)
-        if (cachedJson != null && cachedAge < 300_000) {
+        if (cachedJson != null &&
+            System.currentTimeMillis() - OfflineCache.time(app, key) < CHART_FRESH_MS
+        ) {
             try {
                 return gson.fromJson(cachedJson, MarketChart::class.java)
             } catch (_: Exception) { }
         }
-
         return try {
             val chart = api.getMarketChart(id, days = days)
             OfflineCache.save(app, key, gson.toJson(chart))
             chart
         } catch (e: Exception) {
-            // حتی کش قدیمی‌تر هم بهتر از خطاست
             if (cachedJson != null) {
                 try {
                     gson.fromJson(cachedJson, MarketChart::class.java)
@@ -222,8 +231,6 @@ object ApiClient {
             } else throw e
         }
     }
-
-    // ---------- فقط برای refresh دستی ----------
 
     fun clearMemoryCache() {
         cache1000 = emptyList()
