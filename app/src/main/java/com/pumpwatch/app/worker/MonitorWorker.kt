@@ -13,7 +13,7 @@ import java.util.Locale
 
 /**
  * MonitorWorker — پایش پس‌زمینه سبک
- * هر بار اجرا: اسکن ۳۰ ارز برتر + نوتیفیکیشن برای سیگنال‌های داغ
+ * هر بار اجرا: اسکن ۲۵ ارز برتر + نوتیفیکیشن برای سیگنال‌های داغ
  */
 class MonitorWorker(
     context: Context,
@@ -28,11 +28,16 @@ class MonitorWorker(
     override suspend fun doWork(): Result {
         return try {
             val prefs = applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
-            val mode = prefs.getString("mode", "SPOT") ?: "SPOT"
+            val modeRaw = prefs.getString("mode", "SPOT") ?: "SPOT"
+            val mode = if (modeRaw == "FUTURES") "FUT" else "SPOT"
 
-            // اسکن سبک در پس‌زمینه (فقط ۳۰ ارز برتر)
-            val results = BatchScanner.scan(mode, SignalParams(), limit = 30)
-            val hot = results.filter { it.score >= MIN_SCORE }.take(3)
+            // اسکن سبک در پس‌زمینه (فقط ۲۵ ارز برتر)
+            val results = BatchScanner.scan(
+                mode = mode,
+                params = SignalParams(),
+                limit = 25
+            )
+            val hot = results.filter { it.side != "NONE" && it.score >= MIN_SCORE }.take(3)
 
             hot.forEachIndexed { i, r ->
                 showNotification(
@@ -48,7 +53,6 @@ class MonitorWorker(
 
             Result.success()
         } catch (e: Exception) {
-            // اگه خطا بود (مثلاً 429)، چند بار تلاش کن
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
     }
