@@ -348,7 +348,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 }
 
                 // ---------- نمودار حرفه‌ای ----------
-                ProChart(coin.id)
+                ProChart(coin.id, coin.symbol)
 
                 // ---------- نقاط دقیق ----------
                 Surface(
