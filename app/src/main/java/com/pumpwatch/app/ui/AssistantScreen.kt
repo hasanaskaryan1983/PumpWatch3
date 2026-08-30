@@ -36,7 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.NewsClient
-import com.pumpwatch.app.store.PicksStore
+import com.pumpwatch.app.ui.TodayPicksCache
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -97,7 +97,7 @@ private fun fmt(v: Double): String =
     if (v >= 1) String.format(Locale.US, "$%,.4f", v)
     else String.format(Locale.US, "$%.6f", v)
 
-// ---------- شناسایی ارز (لیست بزرگ) ----------
+// ---------- شناسایی ارز ----------
 
 private fun findCoin(input: String): Triple<String, String, String>? {
     val low = input.lowercase(Locale.US)
@@ -206,13 +206,12 @@ private suspend fun analyzeCoin(id: String, symbol: String, name: String): CoinR
     return CoinReply(sb.toString(), price)
 }
 
-// ---------- بهترین امروز ----------
+// ---------- بهترین امروز (از کش سریع TopPicks) ----------
 
 private fun bestPick(context: android.content.Context): String {
-    val picks = (PicksStore.loadToday(context, "SPOT")?.picks ?: emptyList()) +
-            (PicksStore.loadToday(context, "FUT")?.picks ?: emptyList())
-    val top = picks.maxByOrNull { it.score }
-        ?: return "🤷 هنوز اسکن امروز انجام نشده. از تب «برترین‌ها 🏆» اسکن کن، بعد ازم بپرس!"
+    val all = TodayPicksCache.spot + TodayPicksCache.fut
+    val top = all.maxByOrNull { it.score }
+        ?: return "🤷 هنوز اسکن امروز انجام نشده!\n\nبرای پاسخ سریع:\n۱. برو تب «🏆 برترین‌ها»\n۲. دکمه «اسکن مجدد» رو بزن\n۳. برگرد اینجا و بپرس: بهترین ارز امروز"
     return "🏆 بهترین امروز: ${top.symbol}\n\n" +
             "${if (top.side == "PUMP") "🚀 پامپ" else "🩸 دامپ"} | امتیاز ${top.score}/100 ${if (top.golden) "| 🏅 طلایی" else ""}\n" +
             "💵 ورود: ${fmt(top.entry)}\n" +
@@ -226,7 +225,7 @@ private fun bestPick(context: android.content.Context): String {
 private fun teach(low: String): String = when {
     "rsi" in low -> "📚 RSI یعنی قدرت خریدار/فروشنده (۰ تا ۱۰۰):\n• زیر ۳۰ = اشباع فروش (فرصت خرید پله‌ای)\n• بالای ۷۰ = اشباع خرید (احتیاط!)\n• ۴۵ تا ۶۵ = منطقه قدرت برای ادامه روند"
     "macd" in low -> "📚 MACD تقاطع دو میانگین رو نشون می‌ده:\n• خط MACD بالای سیگنال = مومنتوم صعودی 🟢\n• پایین = نزولی 🔴\n• بهترین سیگنال: تقاطع + تأیید حجم"
-    "استاپ" in low || "stop" in low -> "📚 استاپ‌لاس = کمربند ایمنی! 🛑\nهمیشه ۱.۵ تا  برابر ATR پایین‌تر از ورود (برای خرید). بدون استاپ = قمار، نه معامله!"
+    "استاپ" in low || "stop" in low -> "📚 استاپ‌لاس = کمربند ایمنی! 🛑\nهمیشه ۱.۵ تا ۲ برابر ATR پایین‌تر از ورود (برای خرید). بدون استاپ = قمار، نه معامله!"
     "اهرم" in low || "لوریج" in low -> "📚 اهرم = تیغ دو لبه! ⚔️\nاهرم ۱۰ یعنی سود و ضرر ۱۰ برابر. تازه‌کارها حداکثر ۳-۵. حرفه‌ای‌ها اول ریسک، بعد سود."
     "فاندینگ" in low || "funding" in low -> "📚 فاندینگ ریت = هزینه نگه‌داشتن پوزیشن:\n• منفی شدید = شورت‌ها شلوغن → پتانسیل اسکوییز صعودی 🚀\n• مثبت شدید = لانگ‌ها شلوغن → احتمال اصلاح 🩸"
     "بولینگر" in low -> "📚 بولینگر = نوار نوسان قیمت:\n• قیمت زیر باند پایین + RSI پایین = فرصت\n• بیرون زد از باند = حرکت شدید، منتظر برگشت باش"
