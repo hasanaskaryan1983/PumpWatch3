@@ -64,6 +64,8 @@ fun MemeRadarScreen() {
                 }
                 scanned = true
             } catch (_: Exception) {
+                MemeRadar.lastScanFailed = true
+                scanned = true
             } finally {
                 loading = false
             }
@@ -118,8 +120,9 @@ fun MemeRadarScreen() {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    if (scanned) "😴 الان میم‌کوین مستعدی پیدا نشد\nبعداً دوباره اسکن کن"
-                    else "در حال اسکن ترندهای DexScreener...",
+                    if (!scanned) "در حال اسکن ترندهای DexScreener..."
+                    else if (MemeRadar.lastScanFailed) "⚠️ اتصال به DexScreener برقرار نشد\nاینترنت/فیلترشکن رو چک کن و دوباره اسکن کن"
+                    else "😴 الان میم‌کوین مستعدی پیدا نشد\nبعداً دوباره اسکن کن",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.padding(24.dp)
