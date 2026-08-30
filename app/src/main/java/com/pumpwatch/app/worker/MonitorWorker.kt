@@ -11,10 +11,6 @@ import com.pumpwatch.app.engine.BatchScanner
 import com.pumpwatch.app.engine.SignalParams
 import java.util.Locale
 
-/**
- * MonitorWorker — پایش پس‌زمینه سبک
- * هر بار اجرا: اسکن ۲۵ ارز برتر + نوتیفیکیشن برای سیگنال‌های داغ
- */
 class MonitorWorker(
     context: Context,
     params: WorkerParameters
@@ -31,12 +27,7 @@ class MonitorWorker(
             val modeRaw = prefs.getString("mode", "SPOT") ?: "SPOT"
             val mode = if (modeRaw == "FUTURES") "FUT" else "SPOT"
 
-            // اسکن سبک در پس‌زمینه (فقط ۲۵ ارز برتر)
-            val results = BatchScanner.scan(
-                mode = mode,
-                params = SignalParams(),
-                limit = 25
-            )
+            val results = BatchScanner.scan(mode, SignalParams(), limit = 25)
             val hot = results.filter { it.side != "NONE" && it.score >= MIN_SCORE }.take(3)
 
             hot.forEachIndexed { i, r ->
