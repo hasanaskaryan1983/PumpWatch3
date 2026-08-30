@@ -1,12 +1,23 @@
 package com.pumpwatch.app.data
 
 import com.google.gson.annotations.SerializedName
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
+import java.util.concurrent.TimeUnit
 
-// ---------- شاخص ترس و طمع (alternative.me — بدون کلید) ----------
+// ---------- کلاینت سریع و مستقل برای نبض بازار ----------
+
+private val pulseClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
+}
+
+// ---------- ترس و طمع ----------
 
 data class FngData(
     val value: String?,
@@ -25,14 +36,14 @@ object FngClient {
     val api: FngApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.alternative.me/")
-            .client(ThrottledHttp.client)
+            .client(pulseClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(FngApi::class.java)
     }
 }
 
-// ---------- داده جهانی + ترندها (CoinGecko — بدون کلید) ----------
+// ---------- جهانی + ترندها ----------
 
 data class GlobalData(
     @SerializedName("market_cap_percentage") val marketCapPercentage: Map<String, Double>?,
@@ -65,7 +76,7 @@ object PulseClient {
     val api: PulseApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.coingecko.com/api/v3/")
-            .client(ThrottledHttp.client)
+            .client(pulseClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(PulseApi::class.java)
