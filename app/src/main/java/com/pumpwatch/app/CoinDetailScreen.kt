@@ -1,4 +1,4 @@
-package com.pumpwatch.app.ui
+package com.pumpwatch.app
 
 import android.content.Intent
 import android.net.Uri
@@ -43,21 +43,22 @@ import com.pumpwatch.app.data.Derivative
 import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.data.NewsItem
 import com.pumpwatch.app.data.ScanClient
-import com.pumpwatch.app.formatMarketCap
+import com.pumpwatch.app.ui.ProChart
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.sqrt
+import kotlin.math.max
+import kotlin.math.min
 
 private val Green = Color(0xFF00E676)
 private val Red = Color(0xFFFF5252)
 private val Yellow = Color(0xFFFFC107)
+private val Gray = Color(0xFF8B949E)
 private val Blue = Color(0xFF40C4FF)
-private val Gray = Color(0xFF9E9E9E)
 
-// ---------- مدل تحلیل ----------
+// ---------- مدل‌های تحلیل ----------
 
-private data class TfRow(
+private data class TfInfo(
     val name: String,
     val trend: String,
     val rsi: Double
@@ -72,7 +73,6 @@ private data class DetailAnalysis(
     val target2: Double,
     val zoneLow: Double,
     val zoneHigh: Double,
-    val tfs: List<TfRow>,
     val rsi1h: Double,
     val macdUp: Boolean,
     val ema20: Double,
@@ -80,18 +80,20 @@ private data class DetailAnalysis(
     val atr: Double,
     val bbUpper: Double,
     val bbLower: Double,
+    val tfs: List<TfInfo>,
     val explanation: String
 )
 
 // ---------- توابع محاسباتی ----------
 
+private fun chunkEvery(v: List<Double>, n: Int): List<Double> =
+    if (n <= 1) v else v.filterIndexed { i, _ -> (i + 1) % n == 0 }
+
 private fun emaLast(data: List<Double>, period: Int): Double {
     if (data.size < period) return data.lastOrNull() ?: 0.0
     val k = 2.0 / (period + 1)
     var ema = data.take(period).average()
-    for (i in period until data.size) {
-        ema = data[i] * k + ema * (1 - k)
-    }
+    for (i in period until data.size) ema = data[i] * k + ema * (1 - k)
     return ema
 }
 
@@ -107,8 +109,8 @@ private fun rsiOf(data: List<Double>, period: Int = 14): Double {
     var al = l / period
     for (i in period + 1 until data.size) {
         val d = data[i] - data[i - 1]
-        ag = (ag * (period - 1) + maxOf(d, 0.0)) / period
-        al = (al * (period - 1) + maxOf(-d, 0.0)) / period
+        ag = (ag * (period - 1) + max(d, 0.0)) / period
+        al = (al * (period - 1) + max(-d, 0.0)) / period
     }
     if (al == 0.0) return 100.0
     return 100.0 - 100.0 / (1.0 + ag / al)
@@ -116,122 +118,118 @@ private fun rsiOf(data: List<Double>, period: Int = 14): Double {
 
 private fun macdUp(data: List<Double>): Boolean {
     if (data.size < 35) return false
-    val ef = emaLast(data, 12)
-    val es = emaLast(data, 26)
     val prev = data.dropLast(1)
-    val pf = emaLast(prev, 12)
-    val ps = emaLast(prev, 26)
-    return (ef - es) > (pf - ps)
+    return (emaLast(data, 12) - emaLast(data, 26)) > (emaLast(prev, 12) - emaLast(prev, 26))
 }
 
 private fun atrOf(data: List<Double>, period: Int = 14): Double {
     if (data.size <= period) return 0.0
-    var sum = 0.0
-    for (i in 1..period) sum += abs(data[i] - data[i - 1])
-    return sum / period
+    var s = 0.0
+    for (i in 1..period) s += abs(data[i] - data[i - 1])
+    return s / period
 }
 
-private fun bollOf(data: List<Double>, period: Int = 20): Pair<Double, Double> {
+private fun bollinger(data: List<Double>, period: Int = 20): Pair<Double, Double> {
     if (data.size < period) return Pair(0.0, 0.0)
     val win = data.takeLast(period)
-    val mid = win.average()
-    val sd = sqrt(win.map { (it - mid) * (it - mid) }.average())
-    return Pair(mid + 2 * sd, mid - 2 * sd)
+    val m = win.average()
+    val sd = kotlin.math.sqrt(win.map { (it - m) * (it - m) }.average())
+    return Pair(m + 2 * sd, m - 2 * sd)
 }
-
-private fun takeNth(data: List<Double>, n: Int): List<Double> =
-    data.filterIndexed { i, _ -> (i + 1) % n == 0 }
 
 private fun trendOf(closes: List<Double>): String {
-    if (closes.size < 60) return "خنثی"
+    if (closes.size < 50) return "خنثی"
     val e20 = emaLast(closes, 20)
     val e50 = emaLast(closes, 50)
-    val last = closes.last()
-    return when {
-        last > e20 && e20 > e50 -> "صعودی"
-        last < e20 && e20 < e50 -> "نزولی"
-        else -> "خنثی"
-    }
+    return if (e20 > e50) "صعودی" else if (e20 < e50) "نزولی" else "خنثی"
 }
 
-// ---------- ساخت تحلیل کامل ----------
+// ---------- ساخت تحلیل ----------
 
 private fun buildAnalysis(
-    p5: List<List<Double>>,
-    p1: List<List<Double>>,
+    prices1d: List<List<Double>>,
+    prices30: List<List<Double>>,
     price: Double
 ): DetailAnalysis {
-    val c5 = p5.map { it[1] }
-    val c1 = p1.map { it[1] }
-    val c15 = takeNth(c5, 3)
-    val c4 = takeNth(c1, 4)
-    val c12 = takeNth(c1, 12)
+    val closes1h = prices30.map { it[1] }
+    val c4h = chunkEvery(closes1h, 4)
+    val cD = chunkEvery(closes1h, 24)
 
-    val tfs = listOf(
-        TfRow("۵ دقیقه", trendOf(c5), rsiOf(c5)),
-        TfRow("۱۵ دقیقه", trendOf(c15), rsiOf(c15)),
-        TfRow("۱ ساعت", trendOf(c1), rsiOf(c1)),
-        TfRow("۴ ساعت", trendOf(c4), rsiOf(c4)),
-        TfRow("۱۲ ساعت", trendOf(c12), rsiOf(c12))
-    )
+    val rsi1h = rsiOf(closes1h)
+    val e20 = emaLast(closes1h, 20)
+    val e50 = emaLast(closes1h, 50)
+    val mUp = macdUp(closes1h)
+    val atr = atrOf(closes1h)
+    val (bbU, bbL) = bollinger(closes1h)
 
-    val ups = tfs.count { it.trend == "صعودی" }
-    val dns = tfs.count { it.trend == "نزولی" }
+    val up = price > e20 && e20 > e50
+    val dn = price < e20 && e20 < e50
 
-    val rsi1 = rsiOf(c1)
-    val mUp = macdUp(c1)
-    val e20 = emaLast(c1, 20)
-    val e50 = emaLast(c1, 50)
-    val atr = atrOf(c1)
-    val bb = bollOf(c1)
-
-    val risk = atr * 1.5
-
-    val signal: String = when {
-        ups >= 4 && rsi1 > 75 -> "WAIT_BUY"
-        ups >= 4 && rsi1 in 40.0..75.0 -> "BUY"
-        dns >= 4 && rsi1 < 25 -> "WAIT_SELL"
-        dns >= 4 && rsi1 in 25.0..60.0 -> "SELL"
+    val signal = when {
+        up && mUp && rsi1h in 40.0..75.0 -> "BUY"
+        up && mUp && rsi1h > 75.0 -> "WAIT_BUY"
+        dn && !mUp && rsi1h in 25.0..60.0 -> "SELL"
+        dn && rsi1h < 25.0 -> "WAIT_SELL"
         else -> "HOLD"
     }
 
-    val confidence = (40 + maxOf(ups, dns) * 10 + if (mUp && ups > dns) 5 else 0)
-        .coerceIn(10, 95)
+    val confidence = (40 +
+            (if (up || dn) 20 else 0) +
+            (if (mUp == up) 15 else 0) +
+            (if (rsi1h in 40.0..60.0) 10 else 5)).coerceIn(10, 95)
 
-    val entry = price
-    val stop: Double
-    val t1: Double
-    val t2: Double
-    if (signal == "SELL" || signal == "WAIT_SELL") {
-        stop = price + risk
-        t1 = price - risk * 1.5
-        t2 = price - risk * 2.5
-    } else {
-        stop = price - risk
-        t1 = price + risk * 1.5
-        t2 = price + risk * 2.5
+    val risk = if (atr > 0) atr * 1.5 else price * 0.03
+    val isSell = signal == "SELL" || signal == "WAIT_SELL"
+    val stop = if (isSell) price + risk else price - risk
+    val t1 = if (isSell) price - risk * 1.5 else price + risk * 1.5
+    val t2 = if (isSell) price - risk * 2.5 else price + risk * 2.5
+    val zoneLow = if (isSell) price + risk * 0.4 else price - risk * 1.2
+    val zoneHigh = if (isSell) price + risk * 1.2 else price - risk * 0.4
+
+    val tfs = listOf(
+        TfInfo("۱ ساعته", trendOf(closes1h), rsiOf(closes1h)),
+        TfInfo("۴ ساعته", trendOf(c4h), rsiOf(c4h)),
+        TfInfo("روزانه", trendOf(cD), rsiOf(cD))
+    )
+
+    val explanation = buildString {
+        append("روند ۱ ساعته: ${trendOf(closes1h)} | RSI: ${String.format(Locale.US, "%.0f", rsi1h)}\n")
+        append(if (mUp) "MACD صعودیه و مومنتوم مثبته.\n" else "MACD نزولیه و مومنتوم منفیه.\n")
+        when (signal) {
+            "BUY" -> append("✅ شرایط خرید مهیاست: روند + مومنتوم + RSI سالم. با مدیریت ریسک وارد شو.")
+            "SELL" -> append("✅ شرایط فروش/شورت مهیاست: روند نزولی + مومنتوم منفی.")
+            "WAIT_BUY" -> append("🟡 قیمت داغه (RSI بالا). منتظر پولبک به منطقه زرد بمون بعد وارد شو.")
+            "WAIT_SELL" -> append("🟡 اشباع فروش. عجولانه شورت نزن — منتظر برگشت باش.")
+            else -> append("⏸️ سیگنال واضحی نیست. بهتره فعلاً فقط تماشا کنی.")
+        }
     }
 
-    val zoneLow = e20
-    val zoneHigh = price * 0.985
-
-    val parts = mutableListOf<String>()
-    parts.add("${ups} تایم‌فریم صعودی / ${dns} نزولی")
-    parts.add("RSI یک‌ساعته: ${String.format(Locale.US, "%.1f", rsi1)}")
-    if (rsi1 > 75) parts.add("⚠️ اشباع خرید — ورود الان دیره")
-    if (rsi1 < 25) parts.add("⚠️ اشباع فروش — دنبال کردن نزول خطرناکه")
-    parts.add(if (mUp) "MACD صعودی" else "MACD نزولی")
-    if (price > bb.first) parts.add("قیمت بالای باند بولینگر")
-    if (price < bb.second) parts.add("قیمت زیر باند بولینگر")
-
     return DetailAnalysis(
-        signal, confidence, entry, stop, t1, t2, zoneLow, zoneHigh,
-        tfs, rsi1, mUp, e20, e50, atr, bb.first, bb.second,
-        parts.joinToString(" • ")
+        signal = signal,
+        confidence = confidence,
+        entry = price,
+        stop = stop,
+        target1 = t1,
+        target2 = t2,
+        zoneLow = zoneLow,
+        zoneHigh = zoneHigh,
+        rsi1h = rsi1h,
+        macdUp = mUp,
+        ema20 = e20,
+        ema50 = e50,
+        atr = atr,
+        bbUpper = bbU,
+        bbLower = bbL,
+        tfs = tfs,
+        explanation = explanation
     )
 }
 
-// ---------- صفحه جزئیات حرفه‌ای ----------
+private fun fmt(v: Double): String =
+    if (v >= 1) String.format(Locale.US, "$%,.4f", v)
+    else String.format(Locale.US, "$%.6f", v)
+
+// ---------- صفحه جزئیات ----------
 
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
@@ -260,26 +258,33 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     error = "داده کافی برای تحلیل نیست (کندل‌ها: ${c1d.prices.size}/${c30.prices.size})"
                 } else {
                     a = buildAnalysis(c1d.prices, c30.prices, coin.current_price)
-                    try {
-                        info = CoinInfoClient.api.info(coin.id)
-                    } catch (_: Exception) { }
-                    if (isFutures) {
+                    loading = false
+                    scope.launch {
                         try {
-                            val ders = ScanClient.api.derivatives()
-                            deriv = ders.find {
-                                it.base.equals(coin.symbol, true) ||
-                                        it.symbol.equals(coin.symbol, true)
-                            }
+                            info = CoinInfoClient.api.info(coin.id)
                         } catch (_: Exception) { }
                     }
-                    try {
-                        val sym = coin.symbol.uppercase(Locale.US)
-                        val specific = NewsClient.api.news(sym).data ?: emptyList()
-                        val general = if (specific.isEmpty()) {
-                            NewsClient.api.news(null).data ?: emptyList()
-                        } else specific
-                        news = general.take(3)
-                    } catch (_: Exception) { }
+                    scope.launch {
+                        if (isFutures) {
+                            try {
+                                val ders = ScanClient.api.derivatives()
+                                deriv = ders.find {
+                                    it.base.equals(coin.symbol, true) ||
+                                            it.symbol.equals(coin.symbol, true)
+                                }
+                            } catch (_: Exception) { }
+                        }
+                    }
+                    scope.launch {
+                        try {
+                            val sym = coin.symbol.uppercase(Locale.US)
+                            val specific = NewsClient.api.news(sym).data ?: emptyList()
+                            val general = if (specific.isEmpty()) {
+                                NewsClient.api.news(null).data ?: emptyList()
+                            } else specific
+                            news = general.take(3)
+                        } catch (_: Exception) { }
+                    }
                 }
             } catch (e: Exception) {
                 error = e.message
@@ -490,7 +495,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     }
                 }
 
-                // ---------- اخبار فاندامنتال ----------
+                // ---------- اخبار ----------
                 if (news.isNotEmpty()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
@@ -553,8 +558,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
     }
 }
 
-// ---------- ردیف اندیکاتور ----------
-
 @Composable
 private fun IndRow(label: String, value: String, color: Color) {
     Row(
@@ -562,12 +565,6 @@ private fun IndRow(label: String, value: String, color: Color) {
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label, fontSize = 12.sp, color = Gray)
-        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(value, fontSize = 12.sp, color = color, fontWeight = FontWeight.Bold)
     }
 }
-
-// ---------- فرمت قیمت ----------
-
-private fun fmt(v: Double): String =
-    if (v >= 1) String.format(Locale.US, "$%,.4f", v)
-    else String.format(Locale.US, "$%.6f", v)
