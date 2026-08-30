@@ -1,6 +1,5 @@
 package com.pumpwatch.app.ui
 
-import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,8 +13,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,71 +29,142 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pumpwatch.app.engine.BatchScanner
-import com.pumpwatch.app.engine.SignalResult
-import com.pumpwatch.app.store.PicksStore
+import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.CoinMarket
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-private val Green = Color(0xFF00E676)
-private val Red = Color(0xFFFF5252)
-private val Gold = Color(0xFFFFC107)
+private val TGreen = Color(0xFF00E676)
+private val TRed = Color(0xFFFF5252)
+private val TGold = Color(0xFFFFC107)
+private val TGray = Color(0xFF8B949E)
 
-// ---------- صفحه برترین‌های روز ----------
+// ---------- مدل سیگنال ----------
+
+data class TPick(
+    val symbol: String,
+    val name: String,
+    val side: String,
+    val score: Int,
+    val golden: Boolean,
+    val entry: Double,
+    val stopLoss: Double,
+    val target1: Double,
+    val reasons: List<String>,
+    val change1h: Double,
+    val change24h: Double
+)
+
+// ---------- کش نتایج برای ربات دستیار ----------
+
+object TodayPicksCache {
+    var spot: List<TPick> = emptyList()
+    var fut: List<TPick> = emptyList()
+}
+
+// ---------- امتیازدهی سریع (بدون درخواست اضافه) ----------
+
+private fun evalPick(c: CoinMarket): TPick? {
+    val c1 = c.change1h ?: 0.0
+    val c24 = c.price_change_percentage_24h ?: 0.0
+    val c7 = c.change7d ?: 0.0
+    val cap = c.market_cap
+    val turnover = if (cap > 0) c.total_volume / cap else 0.0
+    val high = c.high24h ?: 0.0
+    val low = c.low24h ?: 0.0
+    val rangePos = if (high > low) (c.current_price - low) / (high - low) else 0.5
+
+    var pump = 0
+    val pr = mutableListOf<String>()
+    if (c1 >= 1.0) { pump += 25; pr.add("شتاب ۱ ساعته 🚀 (1-hour acceleration 🚀)") }
+    if (c1 >= 3.0) pump += 15
+    if (c24 in 2.0..35.0) { pump += 20; pr.add("حرکت مثبت ۲۴ ساعته (positive 24h move)") }
+    if (turnover >= 0.15) { pump += 20; pr.add("حجم غیرعادی 💥 (abnormal volume 💥)") }
+    if (rangePos >= 0.85) { pump += 20; pr.add("شکست سقف ۲۴س 📈 (24h high break 📈)") }
+    if (c7 > 10) pump += 5
+
+    var dump = 0
+    val dr = mutableListOf<String>()
+    if (c1 <= -1.0) { dump += 25; dr.add("ریزش ۱ ساعته 🩸 (1-hour drop 🩸)") }
+    if (c1 <= -3.0) dump += 15
+    if (c24 in -35.0..-2.0) { dump += 20; dr.add("حرکت منفی ۲۴ ساعته (negative 24h move)") }
+    if (turnover >= 0.15) { dump += 20; dr.add("حجم غیرعادی 💥 (abnormal volume 💥)") }
+    if (rangePos <= 0.15) { dump += 20; dr.add("شکست کف ۲۴س 📉 (24h low break 📉)") }
+    if (c7 < -10) dump += 5
+
+    val side = if (pump >= dump) "PUMP" else "DUMP"
+    val score = maxOf(pump, dump).coerceAtMost(100)
+    if (score < 40) return null
+
+    val price = c.current_price
+    val risk = if (high > low) (high - low) * 0.3 else price * 0.03
+    val (stop, target) = if (side == "PUMP")
+        Pair(price - risk, price + risk * 2)
+    else
+        Pair(price + risk, price - risk * 2)
+
+    return TPick(
+        symbol = c.symbol.uppercase(Locale.US),
+        name = c.name,
+        side = side,
+        score = score,
+        golden = score >= 80 && turnover >= 0.2,
+        entry = price,
+        stopLoss = stop,
+        target1 = target,
+        reasons = if (side == "PUMP") pr else dr,
+        change1h = c1,
+        change24h = c24
+    )
+}
+
+// ---------- صفحه برترین‌ها ----------
 
 @Composable
 fun TopPicksScreen(mode: String) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    var picks by remember { mutableStateOf<List<SignalResult>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var progress by remember { mutableStateOf(0) }
-    var progressText by remember { mutableStateOf("") }
+    var picks by remember { mutableStateOf<List<TPick>>(emptyList()) }
+    var scanning by remember { mutableStateOf(false) }
+    var step by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("ALL") }
-    var lastScan by remember { mutableStateOf(0L) }
 
-    fun reload() {
-        picks = PicksStore.loadToday(context, mode)?.picks ?: emptyList()
-        lastScan = PicksStore.lastScan(context, mode)
-    }
-
-    LaunchedEffect(mode) { reload() }
-
-    fun refresh() {
-        if (loading) return
+    fun scan() {
         scope.launch {
-            loading = true
+            scanning = true
+            step = "دریافت لیست ارزها... (fetching coin list...)"
             try {
-                val params = PicksStore.loadParams(context, mode)
-                val result = BatchScanner.scan(mode, params) { p, t ->
-                    progress = p
-                    progressText = t
-                }
-                PicksStore.saveScan(context, mode, result)
-                reload()
-            } catch (_: Exception) {
-            } finally {
-                loading = false
+                val coins = if (mode == "FUT") ApiClient.getTop100Coins() else ApiClient.getTop1000Coins()
+                step = "امتیازدهی به ${coins.size} ارز... (scoring ${coins.size} coins...)"
+                val result = coins.mapNotNull { evalPick(it) }.sortedByDescending { it.score }
+                if (mode == "FUT") TodayPicksCache.fut = result else TodayPicksCache.spot = result
+                picks = result
+                step = ""
+            } catch (e: Exception) {
+                step = "خطا: ${e.message} (error: ${e.message})"
             }
+            scanning = false
         }
     }
 
-    val shown = when (filter) {
-        "PUMP" -> picks.filter { it.side == "PUMP" }
-        "DUMP" -> picks.filter { it.side == "DUMP" }
-        "GOLDEN" -> picks.filter { it.golden }
-        else -> picks
+    LaunchedEffect(mode) {
+        val cached = if (mode == "FUT") TodayPicksCache.fut else TodayPicksCache.spot
+        if (cached.isNotEmpty()) picks = cached else scan()
+    }
+
+    val shown = picks.filter { p ->
+        when (filter) {
+            "PUMP" -> p.side == "PUMP"
+            "DUMP" -> p.side == "DUMP"
+            "GOLD" -> p.golden
+            else -> true
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-
-        // ---------- سربرگ ----------
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -102,81 +172,54 @@ fun TopPicksScreen(mode: String) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                if (mode == "SPOT") "🏆 برترین‌های اسپات" else "⚡ برترین‌های فیوچرز",
+                "🏆 برترین‌های ${if (mode == "FUT") "فیوچرز (Futures)" else "اسپات (Spot)"}",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { refresh() }, enabled = !loading) {
-                Text(if (loading) "در حال اسکن..." else "اسکن اکنون 🔄")
-            }
+            if (scanning) Text("در حال اسکن... (scanning...)", fontSize = 11.sp, color = TGray)
+            else TextButton(onClick = { scan() }) { Text("اسکن مجدد (rescan)") }
         }
 
-        // ---------- زمان آخرین اسکن ----------
-        Text(
-            text = if (lastScan > 0)
-                "آخرین اسکن: ${DateUtils.getRelativeTimeSpanString(lastScan)}"
-            else "هنوز اسکنی انجام نشده",
-            modifier = Modifier.padding(horizontal = 16.dp),
-            fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-        )
-
-        // ---------- فیلترها ----------
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            FilterChip(
-                selected = filter == "ALL",
-                onClick = { filter = "ALL" },
-                label = { Text("همه ${picks.size}") }
-            )
-            FilterChip(
-                selected = filter == "PUMP",
-                onClick = { filter = "PUMP" },
-                label = { Text("🚀 ${picks.count { it.side == "PUMP" }}") }
-            )
-            FilterChip(
-                selected = filter == "DUMP",
-                onClick = { filter = "DUMP" },
-                label = { Text("🩸 ${picks.count { it.side == "DUMP" }}") }
-            )
-            FilterChip(
-                selected = filter == "GOLDEN",
-                onClick = { filter = "GOLDEN" },
-                label = { Text("🏆 ${picks.count { it.golden }}") }
+            FilterChip(selected = filter == "ALL", onClick = { filter = "ALL" },
+                label = { Text("همه ${picks.size} (all ${picks.size})") })
+            FilterChip(selected = filter == "PUMP", onClick = { filter = "PUMP" },
+                label = { Text("🚀 ${picks.count { it.side == "PUMP" }}") })
+            FilterChip(selected = filter == "DUMP", onClick = { filter = "DUMP" },
+                label = { Text("🩸 ${picks.count { it.side == "DUMP" }}") })
+            FilterChip(selected = filter == "GOLD", onClick = { filter = "GOLD" },
+                label = { Text("🏆 ${picks.count { it.golden }}") })
+        }
+
+        if (step.isNotEmpty()) {
+            Text(
+                step,
+                modifier = Modifier.padding(horizontal = 16.dp),
+                fontSize = 12.sp,
+                color = TGreen
             )
         }
 
-        // ---------- نوار پیشرفت اسکن ----------
-        if (loading) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Green
-                )
-                Spacer(Modifier.height(4.dp))
-                Text("$progress% — $progressText", fontSize = 11.sp, color = Green)
-                Spacer(Modifier.height(8.dp))
-            }
-        }
-
-        // ---------- محتوا ----------
         when {
-            shown.isEmpty() && !loading -> Box(
+            scanning && picks.isEmpty() -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) { CircularProgressIndicator(color = TGreen) }
+
+            shown.isEmpty() && !scanning -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "😴 هنوز سیگنالی ثبت نشده",
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                    TextButton(onClick = { refresh() }) { Text("اولین اسکن رو شروع کن 🚀") }
-                }
+                Text(
+                    "فعلاً سیگنال قوی نیست — بازار آرومه 😴 (no strong signal right now — market is calm 😴)",
+                    color = TGray,
+                    modifier = Modifier.padding(16.dp),
+                    textAlign = TextAlign.Center
+                )
             }
 
             else -> LazyColumn(
@@ -184,7 +227,7 @@ fun TopPicksScreen(mode: String) {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(shown) { s -> SignalCard(s) }
+                items(shown) { p -> PickCard(p) }
             }
         }
     }
@@ -193,8 +236,8 @@ fun TopPicksScreen(mode: String) {
 // ---------- کارت سیگنال ----------
 
 @Composable
-fun SignalCard(s: SignalResult) {
-    val sideColor = if (s.side == "PUMP") Green else Red
+private fun PickCard(p: TPick) {
+    val sideColor = if (p.side == "PUMP") TGreen else TRed
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(16.dp),
@@ -204,83 +247,46 @@ fun SignalCard(s: SignalResult) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // ---------- ردیف اول ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (s.side == "PUMP") "🚀" else "🩸", fontSize = 22.sp)
+                Text(if (p.side == "PUMP") "🚀" else "🩸", fontSize = 22.sp)
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(s.symbol, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        if (s.golden) {
+                        Text(p.symbol, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        if (p.golden) {
                             Spacer(Modifier.width(6.dp))
-                            Text("🏆 طلایی", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("🏅 طلایی (golden)", fontSize = 10.sp, color = TGold)
                         }
                     }
-                    Text(
-                        s.name,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
+                    Text(p.name, fontSize = 12.sp, color = TGray)
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("${s.score}/100", color = sideColor, fontWeight = FontWeight.Black, fontSize = 16.sp)
-                    Text(priceText(s.price), fontSize = 12.sp)
-                }
+                Text("${p.score}/100", color = sideColor, fontWeight = FontWeight.Black, fontSize = 16.sp)
             }
 
-            // ---------- برنامه معامله ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("ورود: ${priceText(s.entry)}", fontSize = 11.sp)
-                Text("هدف۱: ${priceText(s.target1)}", fontSize = 11.sp, color = Green)
-                Text("استاپ: ${priceText(s.stopLoss)}", fontSize = 11.sp, color = Red)
+                Text("۱س (1h): ${String.format(Locale.US, "%+.2f%%", p.change1h)}", fontSize = 11.sp,
+                    color = if (p.change1h >= 0) TGreen else TRed)
+                Text("۲۴س (24h): ${String.format(Locale.US, "%+.2f%%", p.change24h)}", fontSize = 11.sp,
+                    color = if (p.change24h >= 0) TGreen else TRed)
             }
 
-            // ---------- اندیکاتورها ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    "RSI ${String.format(Locale.US, "%.0f", s.rsi)}",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-                Text(
-                    "ADX ${String.format(Locale.US, "%.0f", s.adx)}",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-                Text(
-                    "حجم ${String.format(Locale.US, "%.1f", s.volumeRatio)}x",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-                Text(
-                    "MTF: ${s.mtfTrend}",
-                    fontSize = 11.sp,
-                    color = if (s.mtfAligned) Green
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
+                Text("ورود (entry): ${String.format(Locale.US, "$%.6f", p.entry)}", fontSize = 11.sp)
+                Text("استاپ (stop): ${String.format(Locale.US, "$%.6f", p.stopLoss)}", fontSize = 11.sp, color = TRed)
+                Text("هدف (target): ${String.format(Locale.US, "$%.6f", p.target1)}", fontSize = 11.sp, color = TGreen)
             }
 
-            // ---------- دلایل ----------
-            s.reasons.take(3).forEach { r ->
-                Text(
-                    "• $r",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-            }
+            Text(
+                p.reasons.take(2).joinToString(" • "),
+                fontSize = 10.sp,
+                color = TGray
+            )
         }
     }
-}
-
-// ---------- فرمت قیمت ----------
-
-private fun priceText(price: Double): String {
-    return if (price >= 1) String.format(Locale.US, "$%,.2f", price)
-    else String.format(Locale.US, "$%.6f", price)
 }
