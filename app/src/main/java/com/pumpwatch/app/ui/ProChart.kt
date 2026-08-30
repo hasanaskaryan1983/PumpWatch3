@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.BinanceClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,8 +56,6 @@ private val PBlue = Color(0xFF40C4FF)
 
 private data class Candle(val o: Double, val h: Double, val l: Double, val c: Double)
 
-// ---------- استراتژی‌های اندیکاتور ----------
-
 enum class IndicatorMode(val label: String, val emoji: String) {
     EMA("EMA 7/30", "📊"),
     RSI("RSI", "📈"),
@@ -64,8 +63,6 @@ enum class IndicatorMode(val label: String, val emoji: String) {
     BOLL("بولینگر", "🎯"),
     NONE("بدون اندیکاتور", "⚪")
 }
-
-// ---------- ساخت کندل (سریع، on-demand) ----------
 
 private fun chunkEvery(v: List<Double>, n: Int): List<Double> =
     if (n <= 1) v else v.filterIndexed { i, _ -> (i + 1) % n == 0 }
@@ -87,32 +84,44 @@ private fun candlesFrom(prices: List<Double>): List<Candle> {
     return out
 }
 
-private suspend fun buildCandles(coinId: String, tf: String): List<Candle> = withContext(Dispatchers.IO) {
-    when (tf) {
-        "15m" -> {
-            val p = ApiClient.getCoinChart(coinId, 1).prices.map { it[1] }
-            candlesFrom(chunkEvery(p, 3))
+// ---------- ساخت کندل: اول Binance واقعی، بعد fallback ----------
+
+private suspend fun buildCandles(coinId: String, tf: String, symbol: String): List<Candle> =
+    withContext(Dispatchers.IO) {
+        // ۱) کندل واقعی از Binance
+        if (symbol.isNotEmpty()) {
+            try {
+                val real = BinanceClient.candles(symbol, tf)
+                if (real.size >= 50) {
+                    return@withContext real.map { Candle(o = it.open, h = it.high, l = it.low, c = it.close) }
+                }
+            } catch (_: Exception) { }
         }
-        "1h" -> {
-            val p = ApiClient.getCoinChart(coinId, 30).prices.map { it[1] }
-            candlesFrom(p.takeLast(200))
-        }
-        "4h" -> {
-            val p = ApiClient.getCoinChart(coinId, 90).prices.map { it[1] }
-            candlesFrom(chunkEvery(p, 4).takeLast(200))
-        }
-        "1d" -> {
-            val p = ApiClient.getCoinChart(coinId, 365).prices.map { it[1] }
-            candlesFrom(p.takeLast(200))
-        }
-        else -> {
-            val p = ApiClient.getCoinChart(coinId, 365).prices.map { it[1] }
-            candlesFrom(chunkEvery(p, 7).takeLast(200))
+
+        // ۲) fallback سنتزی از CoinGecko
+        when (tf) {
+            "15m" -> {
+                val p = ApiClient.getCoinChart(coinId, 1).prices.map { it[1] }
+                candlesFrom(chunkEvery(p, 3))
+            }
+            "1h" -> {
+                val p = ApiClient.getCoinChart(coinId, 30).prices.map { it[1] }
+                candlesFrom(p.takeLast(200))
+            }
+            "4h" -> {
+                val p = ApiClient.getCoinChart(coinId, 90).prices.map { it[1] }
+                candlesFrom(chunkEvery(p, 4).takeLast(200))
+            }
+            "1d" -> {
+                val p = ApiClient.getCoinChart(coinId, 365).prices.map { it[1] }
+                candlesFrom(p.takeLast(200))
+            }
+            else -> {
+                val p = ApiClient.getCoinChart(coinId, 365).prices.map { it[1] }
+                candlesFrom(chunkEvery(p, 7).takeLast(200))
+            }
         }
     }
-}
-
-// ---------- سری‌های اندیکاتور (محاسبه سریع در background) ----------
 
 private fun emaSeries(v: List<Double>, p: Int): List<Double> {
     if (v.size < p) return emptyList()
@@ -182,8 +191,6 @@ private fun bollingerSeries(v: List<Double>, p: Int = 20): Triple<List<Double>, 
     return Triple(upper, mid, lower)
 }
 
-// ---------- نقاط خرید/فروش بر اساس استراتژی انتخابی ----------
-
 private fun bsPoints(closes: List<Double>, mode: IndicatorMode): List<Pair<Int, Boolean>> {
     if (closes.isEmpty()) return emptyList()
     return when (mode) {
@@ -242,13 +249,9 @@ private fun bsFromMacd(closes: List<Double>): List<Pair<Int, Boolean>> {
     for (i in 1 until m.dif.size) {
         val b = i - offDea
         if (b < 1) continue
-        val prevDif = m.dif[i - 1]
-        val curDif = m.dif[i]
-        val prevDea = m.dea[b - 1]
-        val curDea = m.dea[b]
         val idx = i + offDif
-        if (prevDif <= prevDea && curDif > curDea) out.add(idx to true)
-        if (prevDif >= prevDea && curDif < curDea) out.add(idx to false)
+        if (m.dif[i - 1] <= m.dea[b - 1] && m.dif[i] > m.dea[b]) out.add(idx to true)
+        if (m.dif[i - 1] >= m.dea[b - 1] && m.dif[i] < m.dea[b]) out.add(idx to false)
     }
     return out
 }
@@ -274,8 +277,6 @@ private fun bsFromBoll(closes: List<Double>): List<Pair<Int, Boolean>> {
     }
     return out
 }
-
-// ---------- بوم نمودار ----------
 
 @Composable
 private fun ChartCanvas(
@@ -314,7 +315,6 @@ private fun ChartCanvas(
 
         fun yMain(v: Double): Float = (mainH - ((v - min) / range * (mainH * 0.9f) + mainH * 0.05f)).toFloat()
 
-        // ---------- کندل‌ها ----------
         vis.forEachIndexed { i, c ->
             val x = i * cw + cw / 2
             val col = if (c.c >= c.o) PGreen else PRed
@@ -326,7 +326,6 @@ private fun ChartCanvas(
             drawRect(col, topLeft = Offset(x - bodyW / 2, top), size = Size(bodyW, bh))
         }
 
-        // ---------- خطوط اندیکاتور روی کندل‌ها ----------
         fun drawLineOnMain(series: List<Double>, color: Color) {
             if (series.isEmpty()) return
             var prev: Offset? = null
@@ -351,7 +350,6 @@ private fun ChartCanvas(
             drawLineOnMain(bLower, PGreen)
         }
 
-        // ---------- نقاط B / S ----------
         val paint = android.graphics.Paint().apply {
             textSize = 30f
             isFakeBoldText = true
@@ -376,7 +374,6 @@ private fun ChartCanvas(
             }
         }
 
-        // ---------- پنل RSI ----------
         if (mode == IndicatorMode.RSI && rsiS.isNotEmpty()) {
             drawLine(PGray, Offset(0f, subTop), Offset(w, subTop), strokeWidth = 1f)
             fun yRsi(v: Double): Float = (subTop + subH - (v / 100.0 * subH)).toFloat()
@@ -392,7 +389,6 @@ private fun ChartCanvas(
             }
         }
 
-        // ---------- پنل MACD ----------
         if (mode == IndicatorMode.MACD && macd.hist.isNotEmpty()) {
             drawLine(PGray, Offset(0f, subTop), Offset(w, subTop), strokeWidth = 1f)
             val all = macd.hist + macd.dif + macd.dea
@@ -428,12 +424,11 @@ private fun ChartCanvas(
     }
 }
 
-// ---------- بدنه نمودار ----------
-
 @Composable
 private fun ChartBody(
     coinId: String,
     tf: String,
+    symbol: String,
     candles: List<Candle>,
     loading: Boolean,
     mode: IndicatorMode,
@@ -473,10 +468,8 @@ private fun ChartBody(
     }
 }
 
-// ---------- کامپوننت اصلی با انتخاب اندیکاتور ----------
-
 @Composable
-fun ProChart(coinId: String) {
+fun ProChart(coinId: String, symbol: String = "") {
     var tf by remember { mutableStateOf("1h") }
     var mode by remember { mutableStateOf(IndicatorMode.EMA) }
     var full by remember { mutableStateOf(false) }
@@ -488,7 +481,7 @@ fun ProChart(coinId: String) {
         scope.launch {
             loading = true
             try {
-                candles = buildCandles(coinId, tf)
+                candles = buildCandles(coinId, tf, symbol)
             } catch (_: Exception) {
                 candles = emptyList()
             }
@@ -544,11 +537,10 @@ fun ProChart(coinId: String) {
             }
 
             Spacer(Modifier.height(8.dp))
-            ChartBody(coinId, tf, candles, loading, mode, height = 340.dp)
+            ChartBody(coinId, tf, symbol, candles, loading, mode, height = 340.dp)
         }
     }
 
-    // ---------- تمام‌صفحه ----------
     if (full) {
         Dialog(
             onDismissRequest = { full = false },
@@ -597,7 +589,7 @@ fun ProChart(coinId: String) {
                 }
 
                 Spacer(Modifier.height(8.dp))
-                ChartBody(coinId, tf, candles, loading, mode, height = null)
+                ChartBody(coinId, tf, symbol, candles, loading, mode, height = null)
             }
         }
     }
