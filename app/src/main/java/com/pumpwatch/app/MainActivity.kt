@@ -51,8 +51,8 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.ui.AssistantScreen
-import com.pumpwatch.app.ui.CoinDetailScreen
 import com.pumpwatch.app.ui.HistoryScreen
+import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.MemeRadarScreen
 import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.SmartAlertsScreen
@@ -227,7 +227,6 @@ fun MainApp() {
             }
 
             // ---------- لایه رویی: جزئیات ارز ----------
-            // لیست بازار/هشدارها زیرش زنده می‌مونه و بعد از برگشتن حذف نمی‌شه
             if (selectedCoin != null) {
                 Surface(
                     color = DarkBackground,
@@ -243,7 +242,7 @@ fun MainApp() {
     }
 }
 
-// ---------- صفحه بازار ----------
+// ---------- صفحه بازار + نبض بازار ----------
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
@@ -284,6 +283,11 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             )
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { load() }) { Text("بروزرسانی") }
+        }
+
+        // ---------- نبض بازار (جدید) ----------
+        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+            MarketPulseHeader()
         }
 
         when {
