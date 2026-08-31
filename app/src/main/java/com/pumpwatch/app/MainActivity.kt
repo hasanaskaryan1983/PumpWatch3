@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.geckoPoolUrl
 import com.pumpwatch.app.ui.AssistantScreen
 import com.pumpwatch.app.ui.HistoryScreen
 import com.pumpwatch.app.ui.MarketPulseHeader
@@ -246,7 +247,7 @@ fun MainApp() {
     }
 }
 
-// ---------- صفحه بازار + نبض بازار + سرچ + لود سریع ----------
+// ---------- صفحه بازار ----------
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
@@ -304,7 +305,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             TextButton(onClick = { load() }) { Text("بروزرسانی") }
         }
 
-        // ---------- سرچ ----------
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
             TextField(
                 value = query,
@@ -315,7 +315,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             )
         }
 
-        // ---------- نبض بازار ----------
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
             MarketPulseHeader()
         }
@@ -356,6 +355,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 @Composable
 fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val change = coin.price_change_percentage_24h ?: 0.0
     val isUp = change >= 0
     val rank = coin.market_cap_rank ?: 0
@@ -386,17 +386,19 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
                 )
             }
 
-            // ---------- دکمه GeckoTerminal ----------
+            // ---------- 📊 نمودار GeckoTerminal ----------
             Text(
                 "📊",
                 fontSize = 18.sp,
                 modifier = Modifier
                     .clickable {
-                        try {
-                            val url = "https://www.geckoterminal.com/search?query=" +
-                                    coin.symbol.uppercase(Locale.US)
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        } catch (_: Exception) { }
+                        scope.launch {
+                            val url = geckoPoolUrl(coin.symbol)
+                                ?: ("https://www.coingecko.com/en/coins/" + coin.id)
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            } catch (_: Exception) { }
+                        }
                     }
                     .padding(8.dp)
             )
