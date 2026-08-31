@@ -58,6 +58,7 @@ import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.SmartAlertsScreen
 import com.pumpwatch.app.ui.TopPicksScreen
 import com.pumpwatch.app.ui.TradesScreen
+import com.pumpwatch.app.ui.WhaleRadarScreen
 import com.pumpwatch.app.worker.MonitorScheduler
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -75,6 +76,7 @@ private val TextSecondary = Color(0xFF8B949E)
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
     ALERTS("هشدارها", "🔔"),
+    WHALE("نهنگ‌ها", "🐳"),
     ASSISTANT("دستیار", "🤖"),
     BACKTEST("بک‌تست", "🧪"),
     TOP("برترین‌ها", "🏆"),
@@ -216,6 +218,7 @@ fun MainApp() {
                     when (selectedTab) {
                         Tab.MARKET -> MarketScreen(onCoinClick = { selectedCoin = it })
                         Tab.ALERTS -> SmartAlertsScreen(onCoinClick = { selectedCoin = it })
+                        Tab.WHALE -> WhaleRadarScreen()
                         Tab.ASSISTANT -> AssistantScreen(onOpenCoin = { selectedCoin = it })
                         Tab.BACKTEST -> BacktestScreen()
                         Tab.TOP -> TopPicksScreen(if (isFutures) "FUT" else "SPOT")
