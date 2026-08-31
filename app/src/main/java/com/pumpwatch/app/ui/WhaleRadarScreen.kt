@@ -36,14 +36,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
@@ -57,6 +60,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.math.abs
+import kotlin.math.max
 
 private val WGreen = Color(0xFF00E676)
 private val WRed = Color(0xFFFF5252)
@@ -68,7 +73,7 @@ private val CardB = Color(0xFF141B25)
 
 private val CHAINS = listOf("solana", "bsc", "base", "ethereum")
 
-private data class ChartCandle(val o: Double, val c: Double, val marker: Int)
+private data class ChartCandle(val o: Double, val h: Double, val l: Double, val c: Double, val marker: Int)
 
 private data class FlowRow(val label: String, val buy: Double, val sell: Double)
 
@@ -107,7 +112,6 @@ private data class WhalePick(
 // ---------- توابع کمکی ----------
 
 private fun compact(v: Double): String = when {
-    v >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", v / 1_000_000_000_000)
     v >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", v / 1_000_000_000)
     v >= 1_000_000 -> String.format(Locale.US, "$%.1fM", v / 1_000_000)
     v >= 1_000 -> String.format(Locale.US, "$%.0fK", v / 1_000)
@@ -165,6 +169,16 @@ private fun marketPosText(rank: Int?, cap: Double?): String {
     } else {
         "🏦 جایگاه در بازار: بدون رتبه — فقط در DEX"
     }
+}
+
+private fun tfNameOf(k: String): String = when (k) {
+    "1h" -> "۱ ساعته"
+    "6h" -> "۶ ساعته"
+    "24h" -> "روزانه"
+    "4h" -> "۴ ساعته"
+    "12h" -> "۱۲ ساعته"
+    "3d" -> "۳ روزه"
+    else -> "هفتگی"
 }
 
 // ---------- ۷ بررسی اعتماد ----------
@@ -225,63 +239,67 @@ private fun poolStats(p: GeckoPool): WhalePick? {
     val addr = p.id?.substringAfter('_') ?: ""
 
     return WhalePick(
-        symbol = symbol,
-        name = name,
-        chain = network,
-        price = price,
+        symbol = symbol, name = name, chain = network, price = price,
         volH1 = a.volume?.h1 ?: 0.0,
-        buysH1 = b1, sellsH1 = s1,
-        buysH6 = b6, sellsH6 = s6,
+        buysH1 = b1, sellsH1 = s1, buysH6 = b6, sellsH6 = s6,
         buysH24 = b24, sellsH24 = s24,
-        volH6 = a.volume?.h6 ?: 0.0,
-        volH24 = a.volume?.h24 ?: 0.0,
-        liquidity = liq,
-        changeH1 = a.priceChange?.h1 ?: 0.0,
-        ageHours = age,
-        fdv = fdv,
-        credScore = score.coerceAtMost(100),
-        rank = null,
-        marketCap = null,
+        volH6 = a.volume?.h6 ?: 0.0, volH24 = a.volume?.h24 ?: 0.0,
+        liquidity = liq, changeH1 = a.priceChange?.h1 ?: 0.0,
+        ageHours = age, fdv = fdv, credScore = score.coerceAtMost(100),
+        rank = null, marketCap = null,
         poolUrl = "https://www.geckoterminal.com/$network/pools/$addr"
     )
 }
 
-// ---------- نمودار ردپای نهنگ‌ها ----------
+// ---------- نمودار کندلی واضح ----------
 
 @Composable
 private fun WhaleFlowChart(candles: List<ChartCandle>, zone: Double?) {
-    Canvas(modifier = Modifier.fillMaxWidth().height(170.dp)) {
+    Canvas(modifier = Modifier.fillMaxWidth().height(190.dp)) {
         if (candles.size < 2) return@Canvas
-        val vals = candles.flatMap { listOf(it.o, it.c) }
+        val vals = candles.flatMap { listOf(it.h, it.l) }
         val min = vals.min()
         val max = vals.max()
         val range = if (max > min) max - min else 1.0
         val w = size.width
         val h = size.height
+        val n = candles.size
+        val cw = w / n
+        val bodyW = cw * 0.55f
 
-        fun x(i: Int) = i.toFloat() / (candles.size - 1) * w
-        fun y(v: Double) = (h - ((v - min) / range * h * 0.9 + h * 0.05)).toFloat()
-
-        for (i in 1 until candles.size) {
-            val c = candles[i]
-            val col = if (c.c >= c.o) WGreen else WRed
-            drawLine(col, Offset(x(i - 1), y(c.o)), Offset(x(i), y(c.c)), strokeWidth = 3f)
-        }
+        fun y(v: Double) = (h - ((v - min) / range * h * 0.86 + h * 0.07)).toFloat()
 
         candles.forEachIndexed { i, c ->
-            if (c.marker == 1) drawCircle(WGreen, radius = 8f, center = Offset(x(i), y(c.c)))
-            else if (c.marker == -1) drawCircle(WRed, radius = 6f, center = Offset(x(i), y(c.c)))
+            val x = i * cw + cw / 2
+            val col = if (c.c >= c.o) WGreen else WRed
+            drawLine(col, Offset(x, y(c.h)), Offset(x, y(c.l)), strokeWidth = 2f)
+            val yO = y(c.o)
+            val yC = y(c.c)
+            val top = minOf(yO, yC)
+            val bh = maxOf(3f, abs(yO - yC))
+            drawRect(col, topLeft = Offset(x - bodyW / 2, top), size = Size(bodyW, bh))
+            if (c.marker == 1) drawCircle(WGreen, radius = 7f, center = Offset(x, y(c.l) + 18f))
+            else if (c.marker == -1) drawCircle(WRed, radius = 6f, center = Offset(x, y(c.h) - 18f))
         }
 
         if (zone != null && zone in min..max) {
             drawLine(
-                WGold,
-                Offset(0f, y(zone)),
-                Offset(w, y(zone)),
+                WGold, Offset(0f, y(zone)), Offset(w, y(zone)),
                 strokeWidth = 2f,
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
             )
         }
+
+        val paint = android.graphics.Paint().apply {
+            textSize = 26f
+            color = android.graphics.Color.GRAY
+        }
+        drawContext.canvas.nativeCanvas.drawText(
+            String.format(Locale.US, "$%,.4f", max), 4f, 32f, paint
+        )
+        drawContext.canvas.nativeCanvas.drawText(
+            String.format(Locale.US, "$%,.4f", min), 4f, h - 6f, paint
+        )
     }
 }
 
@@ -307,7 +325,7 @@ private fun FlowLine(label: String, b: Double, s: Double, vol: Double) {
     }
 }
 
-// ---------- کارت شفافیت و اعتماد اپ ----------
+// ---------- کارت شفافیت ----------
 
 @Composable
 private fun MethodCard() {
@@ -322,7 +340,7 @@ private fun MethodCard() {
         ) {
             Text("🛡️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
             Text(
-                "هر ارز قبل از نمایش، ۷ بررسی آن‌چین می‌شه: نقدینگی، حجم واقعی، معامله دوطرفه، فشار خرید، سن استخر، FDV سالم و لیست‌بودن در CoinGecko. در بخش تازه‌واردها فقط ارزهایی با حداقل ۵ از ۷ نمایش داده می‌شن.",
+                "هر ارز قبل از نمایش، ۷ بررسی آن‌چین می‌شه: نقدینگی، حجم واقعی، معامله دوطرفه، فشار خرید، سن استخر، FDV سالم و لیست‌بودن در CoinGecko. در بخش تازه‌واردها فقط ارزهایی با حداقل ۵ از  نمایش داده می‌شن.",
                 fontSize = 10.sp, color = WGray, lineHeight = 16.sp
             )
             Text(
@@ -333,15 +351,38 @@ private fun MethodCard() {
     }
 }
 
-// ---------- کارت نهنگ ----------
+// ---------- کارت نهنگ (با تایم‌فریم انتخابی) ----------
 
 @Composable
-private fun LeaderCard(l: WhalePick, index: Int) {
+private fun LeaderCard(
+    l: WhalePick,
+    index: Int,
+    leaderTf: String,
+    bFlows: Map<String, Pair<Double, Double>>
+) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     val r1 = ratio(l.buysH1, l.sellsH1)
     val checks = trustChecks(l)
     val passed = checks.count { it.second }
+
+    val (buyV, sellV, tfName) = when (leaderTf) {
+        "1h" -> Triple(l.volH1 * r1, l.volH1 * (1 - r1), tfNameOf("1h"))
+        "6h" -> {
+            val r6 = ratio(l.buysH6, l.sellsH6)
+            Triple(l.volH6 * r6, l.volH6 * (1 - r6), tfNameOf("6h"))
+        }
+        "24h" -> {
+            val r24 = ratio(l.buysH24, l.sellsH24)
+            Triple(l.volH24 * r24, l.volH24 * (1 - r24), tfNameOf("24h"))
+        }
+        else -> {
+            val f = bFlows[l.symbol]
+            if (f != null) Triple(f.first, f.second, tfNameOf(leaderTf))
+            else Triple(l.volH1 * r1, l.volH1 * (1 - r1), "۱ ساعته")
+        }
+    }
+    val rSel = ratio(buyV, sellV)
 
     Surface(
         color = if (index % 2 == 0) CardA else CardB,
@@ -358,7 +399,6 @@ private fun LeaderCard(l: WhalePick, index: Int) {
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            // ---------- ردیف اصلی ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(chainEmoji(l.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
@@ -373,10 +413,9 @@ private fun LeaderCard(l: WhalePick, index: Int) {
                 )
             }
 
-            // ---------- خلاصه اصلی + فلش ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "🐳 ۱س: خرید ${compact(l.volH1 * r1)} / فروش ${compact(l.volH1 * (1 - r1))}",
+                    "🐳 $tfName: خرید ${compact(buyV)} / فروش ${compact(sellV)}",
                     fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
@@ -385,11 +424,10 @@ private fun LeaderCard(l: WhalePick, index: Int) {
                 }
             }
 
-            // ---------- خلاصه همیشه‌دیده: حکم + اعتماد + جایگاه بازار ----------
             Text(
-                verdictText(r1),
+                verdictText(rSel),
                 fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                color = verdictColor(r1)
+                color = verdictColor(rSel)
             )
             Text(
                 "🛡️ بررسی اعتماد: $passed از ${checks.size}",
@@ -400,11 +438,14 @@ private fun LeaderCard(l: WhalePick, index: Int) {
                 fontSize = 10.sp, color = WGray
             )
 
-            // ---------- جزئیات بازشو ----------
             if (expanded) {
                 FlowLine("۱ ساعته", l.buysH1, l.sellsH1, l.volH1)
                 FlowLine("۶ ساعته", l.buysH6, l.sellsH6, l.volH6)
                 FlowLine("روزانه", l.buysH24, l.sellsH24, l.volH24)
+                if (leaderTf !in listOf("1h", "6h", "24h") && bFlows[l.symbol] != null) {
+                    val f = bFlows[l.symbol]!!
+                    FlowLine(tfNameOf(leaderTf), f.first, f.second, f.first + f.second)
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -415,7 +456,7 @@ private fun LeaderCard(l: WhalePick, index: Int) {
                 }
                 TrustRows(checks)
                 Text(
-                    "📊 برای بازه‌های ۴س/۱۲س/هفتگی روی کارت بزن تا نمودار کامل در GeckoTerminal باز بشه",
+                    "📊 برای بازه‌های بیشتر روی کارت بزن تا نمودار کامل در GeckoTerminal باز بشه",
                     fontSize = 9.sp, color = WGold
                 )
             }
@@ -512,6 +553,8 @@ fun WhaleRadarScreen() {
     var leaders by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
     var fresh by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
     var threshold by remember { mutableStateOf(100_000.0) }
+    var leaderTf by remember { mutableStateOf("1h") }
+    var bFlows by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
     var loadingList by remember { mutableStateOf(true) }
     var lastUpdate by remember { mutableStateOf("") }
 
@@ -547,10 +590,12 @@ fun WhaleRadarScreen() {
                 for (c in chunked) {
                     val o = c.first()
                     val cl = c.last()
+                    val hh = c.max()
+                    val ll = c.min()
                     val body = if (o > 0) (cl - o) / o else 0.0
                     val marker = if (body > th) 1 else if (body < -th) -1 else 0
                     if (marker == 1) buyZones.add(cl)
-                    candles.add(ChartCandle(o, cl, marker))
+                    candles.add(ChartCandle(o, hh, ll, cl, marker))
                 }
                 val shown = candles.takeLast(take)
                 val zone = if (buyZones.isNotEmpty()) buyZones.average() else null
@@ -591,6 +636,41 @@ fun WhaleRadarScreen() {
             }
             analyzing = false
         }
+    }
+
+    // ---------- جریان تهاجمی بایننس برای تایم‌فریم‌های بلند ----------
+    LaunchedEffect(leaderTf, leaders) {
+        if (leaderTf in listOf("1h", "6h", "24h")) return@LaunchedEffect
+        val (interval, limit) = when (leaderTf) {
+            "4h" -> "5m" to 48
+            "12h" -> "15m" to 48
+            "3d" -> "1h" to 72
+            else -> "4h" to 42
+        }
+        val map = mutableMapOf<String, Pair<Double, Double>>()
+        try {
+            coroutineScope {
+                leaders.take(12).map { l ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val kl = BinanceClient.api.klines(l.symbol + "USDT", interval, limit)
+                            var bq = 0.0
+                            var sq = 0.0
+                            for (k in kl) {
+                                val qv = k[7].asDouble
+                                val tb = k[10].asDouble
+                                bq += tb
+                                sq += (qv - tb)
+                            }
+                            l.symbol to (bq to sq)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                }.awaitAll().filterNotNull().forEach { (s, p) -> map[s] = p }
+            }
+        } catch (_: Exception) { }
+        bFlows = map
     }
 
     // ---------- مهمترین نهنگ‌ها + تازه‌واردها ----------
@@ -701,7 +781,6 @@ fun WhaleRadarScreen() {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
 
-            // ================= کارت شفافیت =================
             item { MethodCard() }
 
             // ================= ۱) تحلیل ارز دلخواه =================
@@ -775,7 +854,7 @@ fun WhaleRadarScreen() {
                                 val an = analysis!!
 
                                 Text(
-                                    "📈 نمودار $analysisSymbol — 🟢 شروع خرید نهنگ‌ها / 🔴 فروش سنگین / خط‌چین زرد = منطقه ورود نهنگ‌ها",
+                                    "📈 نمودار کندلی $analysisSymbol — 🟢/🔴 کندل‌ها • دایره سبز = شروع خرید نهنگ‌ها • خط‌چین زرد = منطقه ورود • اعداد خاکستری = سقف/کف بازه",
                                     fontSize = 10.sp, color = WGray
                                 )
                                 WhaleFlowChart(an.candles, an.zone)
@@ -846,11 +925,28 @@ fun WhaleRadarScreen() {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 },
                             label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 },
-                            label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
+                            label = { Text("۱۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 },
                             label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 },
                             label = { Text("۱ میلیون", fontSize = 10.sp) })
+                    }
+
+                    // ---------- تایم‌فریم دستی خرید نهنگ‌ها ----------
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            "1h" to "۱ ساعته", "6h" to "۶ ساعته", "24h" to "روزانه",
+                            "4h" to "۴ ساعته", "12h" to "۱۲ ساعته", "3d" to "۳ روزه", "1w" to "هفتگی"
+                        ).forEach { (k, label) ->
+                            FilterChip(
+                                selected = leaderTf == k,
+                                onClick = { leaderTf = k },
+                                label = { Text("⏱ $label", fontSize = 10.sp) }
+                            )
+                        }
                     }
 
                     Text(
@@ -865,15 +961,15 @@ fun WhaleRadarScreen() {
             } else if (leaders.isEmpty()) {
                 item { Text("😴 فعلاً خرید نهنگی سنگینی ثبت نشده", fontSize = 11.sp, color = WGray) }
             } else {
-                itemsIndexed(leaders) { i, l -> LeaderCard(l, i) }
+                itemsIndexed(leaders) { i, l -> LeaderCard(l, i, leaderTf, bFlows) }
             }
 
-            // ================= ۳) تازه‌واردهای مورد تأیید =================
+            // ================= ۳) تازه‌واردها =================
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("🌱 تازه‌واردهایی که نهنگ‌ها حمله کردن — با تأیید ایمنی", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Text(
-                        "فقط ارزهایی با حداقل ۵ از ۷ بررسی اعتماد 🛡️",
+                        "فقط ارزهایی با حداقل ۵ از  بررسی اعتماد 🛡️",
                         fontSize = 9.sp, color = WGray
                     )
                 }
