@@ -7,6 +7,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private val radarClient: OkHttpClient by lazy {
@@ -69,7 +70,7 @@ object GeckoTerminal {
     }
 }
 
-// ---------- آدرس نمودار GeckoTerminal (با جستجوی دقیق) ----------
+// ---------- آدرس استخر GeckoTerminal ----------
 
 suspend fun geckoPoolUrl(query: String): String? {
     return try {
@@ -84,7 +85,43 @@ suspend fun geckoPoolUrl(query: String): String? {
     }
 }
 
-// ---------- آدرس نمودار CoinMarketCap (با slug درست) ----------
+// ---------- جستجوی CoinGecko (رتبه + اسم دقیق) ----------
+
+data class GeckoSearchCoin(
+    val id: String?,
+    val name: String?,
+    val symbol: String?,
+    @SerializedName("market_cap_rank") val rank: Int?
+)
+
+data class GeckoSearchResponse(val coins: List<GeckoSearchCoin>?)
+
+interface CoinGeckoSearchApi {
+    @GET("api/v3/search")
+    suspend fun search(@Query("query") query: String): GeckoSearchResponse
+}
+
+object CoinGeckoSearch {
+    val api: CoinGeckoSearchApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.coingecko.com/")
+            .client(radarClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(CoinGeckoSearchApi::class.java)
+    }
+}
+
+// ---------- آدرس CMC از روی اسم (اسلاگ درست) ----------
+
+fun cmcUrlByName(coinName: String): String {
+    val slug = coinName.lowercase(Locale.US)
+        .replace(Regex("[^a-z0-9]+"), "-")
+        .trim('-')
+    return "https://coinmarketcap.com/currencies/$slug/"
+}
+
+// ---------- آدرس CMC از روی id (برای ارزهای بزرگ) ----------
 
 fun cmcUrl(geckoId: String): String {
     val slug = when (geckoId) {
@@ -101,9 +138,6 @@ fun cmcUrl(geckoId: String): String {
         "sei-network" -> "sei"
         "blockstack" -> "stacks"
         "gatechain-token" -> "gatetoken"
-        "wrapped-bitcoin" -> "wrapped-bitcoin"
-        "staked-ether" -> "staked-ether"
-        "shiba-inu" -> "shiba-inu"
         else -> geckoId
     }
     return "https://coinmarketcap.com/currencies/$slug/"
