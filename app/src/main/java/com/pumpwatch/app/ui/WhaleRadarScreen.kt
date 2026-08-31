@@ -340,7 +340,7 @@ private fun MethodCard() {
         ) {
             Text("🛡️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
             Text(
-                "هر ارز قبل از نمایش، ۷ بررسی آن‌چین می‌شه: نقدینگی، حجم واقعی، معامله دوطرفه، فشار خرید، سن استخر، FDV سالم و لیست‌بودن در CoinGecko. در بخش تازه‌واردها فقط ارزهایی با حداقل ۵ از  نمایش داده می‌شن.",
+                "هر ارز قبل از نمایش، ۷ بررسی آن‌چین می‌شه: نقدینگی، حجم واقعی، معامله دوطرفه، فشار خرید، سن استخر، FDV سالم و لیست‌بودن در CoinGecko. در بخش تازه‌واردها فقط ارزهایی با حداقل ۵ از ۷ نمایش داده می‌شن.",
                 fontSize = 10.sp, color = WGray, lineHeight = 16.sp
             )
             Text(
@@ -351,7 +351,7 @@ private fun MethodCard() {
     }
 }
 
-// ---------- کارت نهنگ (با تایم‌فریم انتخابی) ----------
+// ---------- کارت نهنگ ----------
 
 @Composable
 private fun LeaderCard(
@@ -379,7 +379,7 @@ private fun LeaderCard(
         else -> {
             val f = bFlows[l.symbol]
             if (f != null) Triple(f.first, f.second, tfNameOf(leaderTf))
-            else Triple(l.volH1 * r1, l.volH1 * (1 - r1), "۱ ساعته")
+            else Triple(l.volH1 * r1, l.volH1 * (1 - r1), tfNameOf("1h"))
         }
     }
     val rSel = ratio(buyV, sellV)
@@ -673,7 +673,7 @@ fun WhaleRadarScreen() {
         bFlows = map
     }
 
-    // ---------- مهمترین نهنگ‌ها + تازه‌واردها ----------
+    // ---------- دریافت لیست‌ها ----------
     fun fetchLists() {
         scope.launch {
             loadingList = true
@@ -918,6 +918,7 @@ fun WhaleRadarScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("👑 مهمترین نهنگ‌ها — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
+                    // ---------- آستانه (اصلاح: ۱۰۰ هزار) ----------
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -925,21 +926,26 @@ fun WhaleRadarScreen() {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 },
                             label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 },
-                            label = { Text("۱۰ هزار", fontSize = 10.sp) })
+                            label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 },
-                            label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
+                            label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 },
                             label = { Text("۱ میلیون", fontSize = 10.sp) })
                     }
 
-                    // ---------- تایم‌فریم دستی خرید نهنگ‌ها ----------
+                    // ---------- تایم‌فریم‌ها (اصلاح: ترتیب درست) ----------
                     Row(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         listOf(
-                            "1h" to "۱ ساعته", "6h" to "۶ ساعته", "24h" to "روزانه",
-                            "4h" to "۴ ساعته", "12h" to "۱۲ ساعته", "3d" to "۳ روزه", "1w" to "هفتگی"
+                            "1h" to "۱ ساعته",
+                            "4h" to "۴ ساعته",
+                            "6h" to "۶ ساعته",
+                            "12h" to "۱۲ ساعته",
+                            "24h" to "روزانه",
+                            "3d" to "۳ روزه",
+                            "1w" to "هفتگی"
                         ).forEach { (k, label) ->
                             FilterChip(
                                 selected = leaderTf == k,
@@ -969,7 +975,7 @@ fun WhaleRadarScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("🌱 تازه‌واردهایی که نهنگ‌ها حمله کردن — با تأیید ایمنی", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Text(
-                        "فقط ارزهایی با حداقل ۵ از  بررسی اعتماد 🛡️",
+                        "فقط ارزهایی با حداقل ۵ از ۷ بررسی اعتماد 🛡️",
                         fontSize = 9.sp, color = WGray
                     )
                 }
