@@ -16,7 +16,7 @@ private val radarClient: OkHttpClient by lazy {
         .build()
 }
 
-// ---------- GeckoTerminal (استخرهای داغ + جدید) ----------
+// ---------- GeckoTerminal ----------
 
 data class GeckoPriceChange(val h1: Double?, val h6: Double?, val h24: Double?)
 data class GeckoBuysSells(val buys: Double?, val sells: Double?)
@@ -53,6 +53,9 @@ interface GeckoApi {
 
     @GET("api/v2/networks/{network}/new_pools")
     suspend fun newPools(@Path("network") network: String): GeckoPoolsResponse
+
+    @GET("api/v2/search/pools")
+    suspend fun searchPools(@Query("query") query: String): GeckoPoolsResponse
 }
 
 object GeckoTerminal {
@@ -66,7 +69,7 @@ object GeckoTerminal {
     }
 }
 
-// ---------- بایننس اسپات (معاملات + کندل) ----------
+// ---------- بایننس (فقط پشتیبان اختیاری) ----------
 
 data class Ticker24(
     val symbol: String?,
@@ -88,40 +91,5 @@ object RadarBinance {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(RadarBinanceApi::class.java)
-    }
-}
-
-// ---------- بایننس فیوچرز (ردپای نهنگ‌های بزرگ) ----------
-
-data class TopRatio(
-    val symbol: String?,
-    @SerializedName("longShortRatio") val ratio: String?,
-    @SerializedName("longAccount") val longAccount: String?
-)
-
-data class PremiumIdx(
-    @SerializedName("lastFundingRate") val funding: String?
-)
-
-interface FuturesRadarApi {
-    @GET("futures/data/topLongShortPositionRatio")
-    suspend fun topRatio(
-        @Query("symbol") symbol: String,
-        @Query("period") period: String,
-        @Query("limit") limit: Int
-    ): List<TopRatio>
-
-    @GET("fapi/v1/premiumIndex")
-    suspend fun premium(@Query("symbol") symbol: String): PremiumIdx
-}
-
-object FuturesRadar {
-    val api: FuturesRadarApi by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://fapi.binance.com/")
-            .client(radarClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(FuturesRadarApi::class.java)
     }
 }
