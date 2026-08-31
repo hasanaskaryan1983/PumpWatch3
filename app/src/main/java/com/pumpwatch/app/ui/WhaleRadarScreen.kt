@@ -1,5 +1,6 @@
 package com.pumpwatch.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +31,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.data.FuturesRadar
 import com.pumpwatch.app.data.WhaleClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -50,7 +54,6 @@ private val WRed = Color(0xFFFF5252)
 private val WBlue = Color(0xFF40C4FF)
 private val WGold = Color(0xFFFFC107)
 private val WGray = Color(0xFF8B949E)
-private val WCard = Color(0xFF1A2230)
 
 private data class WhaleTrade(
     val symbol: String,
@@ -60,12 +63,22 @@ private data class WhaleTrade(
     val time: Long
 )
 
+private data class KlineStat(val close: Double, val ratio: Double)
+
 private data class FlowStats(
     val buyQuote: Double,
     val sellQuote: Double,
     val changePct: Double,
     val whaleBuys: Int,
-    val whaleSells: Int
+    val whaleSells: Int,
+    val zone: Double?
+)
+
+private data class WhaleLeader(
+    val symbol: String,
+    val longPct: Double,
+    val ratio: Double,
+    val funding: Double
 )
 
 private fun compact(v: Double): String = when {
@@ -84,6 +97,46 @@ private fun timeAgo(t: Long): String {
     }
 }
 
+// ---------- نمودار ردپای نهنگ‌ها ----------
+
+@Composable
+private fun WhaleFlowChart(stats: List<KlineStat>, zone: Double?) {
+    Canvas(modifier = Modifier.fillMaxWidth().height(160.dp)) {
+        if (stats.size < 2) return@Canvas
+        val closes = stats.map { it.close }
+        val min = closes.min()
+        val max = closes.max()
+        val range = if (max > min) max - min else 1.0
+        val w = size.width
+        val h = size.height
+
+        fun x(i: Int) = i.toFloat() / (stats.size - 1) * w
+        fun y(v: Double) = (h - ((v - min) / range * h * 0.9 + h * 0.05)).toFloat()
+
+        var prev: Offset? = null
+        for (i in stats.indices) {
+            val cur = Offset(x(i), y(closes[i]))
+            if (prev != null) drawLine(WBlue, prev!!, cur, strokeWidth = 3f)
+            prev = cur
+        }
+
+        stats.forEachIndexed { i, s ->
+            if (s.ratio >= 0.65) drawCircle(WGreen, radius = 7f, center = Offset(x(i), y(s.close)))
+            else if (s.ratio <= 0.35) drawCircle(WRed, radius = 5f, center = Offset(x(i), y(s.close)))
+        }
+
+        if (zone != null && zone in min..max) {
+            drawLine(
+                WGold,
+                Offset(0f, y(zone)),
+                Offset(w, y(zone)),
+                strokeWidth = 2f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
+            )
+        }
+    }
+}
+
 @Composable
 fun WhaleRadarScreen() {
     val scope = rememberCoroutineScope()
@@ -93,13 +146,41 @@ fun WhaleRadarScreen() {
     var maxAge by remember { mutableStateOf(3_600_000.0) }
     var lastUpdate by remember { mutableStateOf("") }
 
-    // ---------- تحلیل ارز دلخواه ----------
     var searchInput by remember { mutableStateOf("") }
     var analysisSymbol by remember { mutableStateOf("BTC") }
     var window by remember { mutableStateOf("4h") }
     var flow by remember { mutableStateOf<FlowStats?>(null) }
+    var chartStats by remember { mutableStateOf<List<KlineStat>>(emptyList()) }
     var analyzing by remember { mutableStateOf(false) }
     var analysisError by remember { mutableStateOf<String?>(null) }
+
+    var leaders by remember { mutableStateOf<List<WhaleLeader>>(emptyList()) }
+
+    fun fetchLeaders() {
+        scope.launch {
+            try {
+                val symbols = listOf("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "BNBUSDT")
+                leaders = coroutineScope {
+                    symbols.map { sym ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val r = FuturesRadar.api.topRatio(sym, "1h", 1).firstOrNull()
+                                val f = FuturesRadar.api.premium(sym)
+                                WhaleLeader(
+                                    symbol = sym.removeSuffix("USDT"),
+                                    longPct = (r?.longAccount?.toDoubleOrNull() ?: 0.5) * 100,
+                                    ratio = r?.ratio?.toDoubleOrNull() ?: 1.0,
+                                    funding = f.funding?.toDoubleOrNull() ?: 0.0
+                                )
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                    }.awaitAll()
+                }.filterNotNull().sortedByDescending { it.ratio }
+            } catch (_: Exception) { }
+        }
+    }
 
     fun analyze(symbol: String, win: String) {
         scope.launch {
@@ -119,13 +200,20 @@ fun WhaleRadarScreen() {
                 }
                 val kl = BinanceClient.api.klines(sym, interval, limit)
                 if (kl.isEmpty()) throw Exception("empty")
+
                 var buyQ = 0.0
                 var sellQ = 0.0
+                val stats = mutableListOf<KlineStat>()
+                val buyCloses = mutableListOf<Double>()
                 for (k in kl) {
                     val qv = k[7].asDouble
                     val tb = k[10].asDouble
                     buyQ += tb
                     sellQ += (qv - tb)
+                    val c = k[4].asDouble
+                    val ratio = if (qv > 0) tb / qv else 0.5
+                    stats.add(KlineStat(c, ratio))
+                    if (ratio >= 0.65) buyCloses.add(c)
                 }
                 val first = kl.first()[1].asDouble
                 val last = kl.last()[4].asDouble
@@ -144,10 +232,15 @@ fun WhaleRadarScreen() {
                     }
                 } catch (_: Exception) { }
 
+                chartStats = stats
                 analysisSymbol = sym.removeSuffix("USDT")
-                flow = FlowStats(buyQ, sellQ, chg, wb, ws)
+                flow = FlowStats(
+                    buyQ, sellQ, chg, wb, ws,
+                    if (buyCloses.isNotEmpty()) buyCloses.average() else null
+                )
             } catch (_: Exception) {
                 flow = null
+                chartStats = emptyList()
                 analysisError = "ارز پیدا نشد یا اتصال برقرار نشد 🤔"
             }
             analyzing = false
@@ -200,6 +293,7 @@ fun WhaleRadarScreen() {
     LaunchedEffect(Unit) {
         scan()
         analyze("BTC", "4h")
+        fetchLeaders()
     }
 
     LaunchedEffect(Unit) {
@@ -218,7 +312,6 @@ fun WhaleRadarScreen() {
 
     Column(modifier = Modifier.fillMaxSize()) {
 
-        // ---------- سربرگ ----------
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -239,10 +332,10 @@ fun WhaleRadarScreen() {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            // ================= بخش تحلیل ارز دلخواه =================
+            // ================= تحلیل ارز دلخواه + نمودار =================
             item {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
@@ -255,7 +348,6 @@ fun WhaleRadarScreen() {
                     ) {
                         Text("🔍 تحلیل نهنگی ارز دلخواه", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
-                        // جستجو
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextField(
                                 value = searchInput,
@@ -275,7 +367,6 @@ fun WhaleRadarScreen() {
                             ) { Text("تحلیل", fontSize = 12.sp) }
                         }
 
-                        // میان‌بر ارزها
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf("BTC", "ETH", "SOL", "XRP", "DOGE", "PEPE").forEach { s ->
                                 FilterChip(
@@ -286,7 +377,6 @@ fun WhaleRadarScreen() {
                             }
                         }
 
-                        // بازه زمانی
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(
                                 "1h" to "۱ ساعته", "4h" to "۴ ساعته", "12h" to "۱۲ ساعته",
@@ -303,7 +393,6 @@ fun WhaleRadarScreen() {
                             }
                         }
 
-                        // نتیجه
                         when {
                             analyzing -> Text("⏳ در حال تحلیل...", color = WGray, fontSize = 12.sp)
                             analysisError != null -> Text(analysisError ?: "", color = WRed, fontSize = 12.sp)
@@ -311,6 +400,18 @@ fun WhaleRadarScreen() {
                                 val f = flow!!
                                 val total = f.buyQuote + f.sellQuote
                                 val ratio = if (total > 0) f.buyQuote / total else 0.5
+
+                                Text(
+                                    "📈 نمودار قیمت + نقاط خرید نهنگ‌ها (🟢 خرید سنگین / 🔴 فروش سنگین / خط‌چین زرد = منطقه ورود نهنگ‌ها)",
+                                    fontSize = 10.sp, color = WGray
+                                )
+                                WhaleFlowChart(chartStats, f.zone)
+                                if (f.zone != null) {
+                                    Text(
+                                        "🐳 نهنگ‌ها حوالی ${String.format(Locale.US, "$%,.4f", f.zone)} شروع به خرید کردن",
+                                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WGold
+                                    )
+                                }
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -320,11 +421,8 @@ fun WhaleRadarScreen() {
                                     Text("🔴 فروش: ${compact(f.sellQuote)}", fontSize = 12.sp, color = WRed, fontWeight = FontWeight.Bold)
                                 }
 
-                                // نوار فشار خرید
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp),
+                                    modifier = Modifier.fillMaxWidth().height(8.dp),
                                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
                                     Box(modifier = Modifier.weight(if (ratio > 0.01) ratio.toFloat() else 0.01f)) {
@@ -334,10 +432,6 @@ fun WhaleRadarScreen() {
                                         Surface(color = WRed, shape = RoundedCornerShape(4.dp), modifier = Modifier.fillMaxSize()) { }
                                     }
                                 }
-                                Text(
-                                    "فشار خرید: ${String.format(Locale.US, "%.0f", ratio * 100)}٪",
-                                    fontSize = 11.sp, color = WGray
-                                )
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -345,19 +439,18 @@ fun WhaleRadarScreen() {
                                 ) {
                                     Text(
                                         "جریان خالص: ${if (f.buyQuote >= f.sellQuote) "+" else "-"}${compact(kotlin.math.abs(f.buyQuote - f.sellQuote))}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
                                         color = if (f.buyQuote >= f.sellQuote) WGreen else WRed
                                     )
                                     Text(
-                                        "تغییر قیمت: ${String.format(Locale.US, "%+.2f%%", f.changePct)}",
+                                        "تغییر: ${String.format(Locale.US, "%+.2f%%", f.changePct)}",
                                         fontSize = 12.sp,
                                         color = if (f.changePct >= 0) WGreen else WRed
                                     )
                                 }
 
                                 Text(
-                                    "🐳 معاملات نهنگی (۱ ساعت اخیر): خرید ${f.whaleBuys} / فروش ${f.whaleSells}",
+                                    "🐳 معاملات نهنگی (۱س اخیر): خرید ${f.whaleBuys} / فروش ${f.whaleSells}",
                                     fontSize = 11.sp, color = WBlue
                                 )
 
@@ -367,8 +460,7 @@ fun WhaleRadarScreen() {
                                         ratio <= 0.4 -> "💡 فشار فروش نهنگی سنگینه — احتیاط 🩸"
                                         else -> "💡 تعادل خرید/فروش — منتظر شکست بمون ⚖️"
                                     },
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp, fontWeight = FontWeight.Bold,
                                     color = if (ratio >= 0.6) WGreen else if (ratio <= 0.4) WRed else WGold
                                 )
                             }
@@ -377,7 +469,60 @@ fun WhaleRadarScreen() {
                 }
             }
 
-            // ================= بخش لیست زنده =================
+            // ================= مهمترین نهنگ‌ها (فیوچرز) =================
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("👑 مهمترین نهنگ‌ها (پوزیشن تریدرهای بزرگ فیوچرز)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        if (leaders.isEmpty()) {
+                            Text("⏳ در حال دریافت...", fontSize = 11.sp, color = WGray)
+                        } else {
+                            leaders.forEach { l ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(l.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.width(56.dp))
+                                    Text(
+                                        "لانگ: ${String.format(Locale.US, "%.0f", l.longPct)}٪",
+                                        fontSize = 11.sp,
+                                        color = if (l.longPct >= 50) WGreen else WRed
+                                    )
+                                    Spacer(Modifier.weight(1f))
+                                    Text(
+                                        when {
+                                            l.ratio >= 1.5 -> "لانگ سنگین 🐂"
+                                            l.ratio <= 0.7 -> "شورت سنگین 🐻"
+                                            else -> "خنثی ⚖️"
+                                        },
+                                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                        color = if (l.ratio >= 1.5) WGreen else if (l.ratio <= 0.7) WRed else WGray
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        String.format(Locale.US, "%.4f", l.funding),
+                                        fontSize = 10.sp,
+                                        color = if (l.funding <= -0.0003) WGold else WGray
+                                    )
+                                }
+                            }
+                            Text(
+                                "💡 فاندینگ زرد = شورت‌ها شلوغن → پتانسیل اسکوییز 🚀",
+                                fontSize = 10.sp, color = WGray
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ================= لیست زنده =================
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("📡 معاملات زنده نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -397,7 +542,7 @@ fun WhaleRadarScreen() {
                         FilterChip(selected = maxAge == 300_000.0, onClick = { maxAge = 300_000.0 },
                             label = { Text("⏱ ۵ دقیقه", fontSize = 10.sp) })
                         FilterChip(selected = maxAge == 900_000.0, onClick = { maxAge = 900_000.0 },
-                            label = { Text("⏱ ۵ دقیقه", fontSize = 10.sp) })
+                            label = { Text("⏱ ۱۵ دقیقه", fontSize = 10.sp) })
                         FilterChip(selected = maxAge == 3_600_000.0, onClick = { maxAge = 3_600_000.0 },
                             label = { Text("⏱ ۱ ساعت", fontSize = 10.sp) })
                     }
@@ -420,9 +565,7 @@ fun WhaleRadarScreen() {
                         "😴 فعلاً معامله‌ای بالای این آستانه در این بازه ثبت نشده\nرادار هر ۲۰ ثانیه خودکار آپدیت می‌شه",
                         textAlign = TextAlign.Center,
                         color = WGray,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
+                        modifier = Modifier.fillMaxWidth().padding(16.dp)
                     )
                 }
             }
@@ -455,21 +598,18 @@ private fun WhaleCard(t: WhaleTrade) {
                     Spacer(Modifier.width(8.dp))
                     Text(
                         if (isBuy) "خرید نهنگی 🟢" else "فروش نهنگی 🔴",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
                         color = if (isBuy) WGreen else WRed
                     )
                 }
                 Text(
                     "قیمت: ${String.format(Locale.US, "$%,.4f", t.price)} • ${timeAgo(t.time)}",
-                    fontSize = 10.sp,
-                    color = WGray
+                    fontSize = 10.sp, color = WGray
                 )
             }
             Text(
                 compact(t.value),
-                fontWeight = FontWeight.Black,
-                fontSize = 16.sp,
+                fontWeight = FontWeight.Black, fontSize = 16.sp,
                 color = if (mega) WGold else WBlue
             )
         }
