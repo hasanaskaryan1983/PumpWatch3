@@ -17,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,22 +74,13 @@ private fun candlesFrom(prices: List<Double>): List<Candle> {
     for (i in 1 until prices.size) {
         val o = prices[i - 1]
         val c = prices[i]
-        out.add(
-            Candle(
-                o = o, c = c,
-                h = max(o, c) * 1.0015,
-                l = min(o, c) * 0.9985
-            )
-        )
+        out.add(Candle(o = o, c = c, h = max(o, c) * 1.0015, l = min(o, c) * 0.9985))
     }
     return out
 }
 
-// ---------- ساخت کندل: اول Binance واقعی، بعد fallback ----------
-
 private suspend fun buildCandles(coinId: String, tf: String, symbol: String): List<Candle> =
     withContext(Dispatchers.IO) {
-        // ۱) کندل واقعی از Binance
         if (symbol.isNotEmpty()) {
             try {
                 val real = BinanceClient.candles(symbol, tf)
@@ -97,8 +89,6 @@ private suspend fun buildCandles(coinId: String, tf: String, symbol: String): Li
                 }
             } catch (_: Exception) { }
         }
-
-        // ۲) fallback سنتزی از CoinGecko
         when (tf) {
             "15m" -> {
                 val p = ApiClient.getCoinChart(coinId, 1).prices.map { it[1] }
@@ -229,13 +219,8 @@ private fun bsFromRsi(closes: List<Double>): List<Pair<Int, Boolean>> {
         val prev = rsi[i - 1]
         val cur = rsi[i]
         val idx = i + off
-        if (prev < 30 && cur >= 30 && lastSignal != true) {
-            out.add(idx to true)
-            lastSignal = true
-        } else if (prev > 70 && cur <= 70 && lastSignal != false) {
-            out.add(idx to false)
-            lastSignal = false
-        }
+        if (prev < 30 && cur >= 30 && lastSignal != true) { out.add(idx to true); lastSignal = true }
+        else if (prev > 70 && cur <= 70 && lastSignal != false) { out.add(idx to false); lastSignal = false }
     }
     return out
 }
@@ -267,13 +252,8 @@ private fun bsFromBoll(closes: List<Double>): List<Pair<Int, Boolean>> {
         if (idx >= closes.size) continue
         val c = closes[idx]
         val prevC = closes[idx - 1]
-        if (prevC <= lower[i - 1] && c > lower[i] && lastSignal != true) {
-            out.add(idx to true)
-            lastSignal = true
-        } else if (prevC >= upper[i - 1] && c < upper[i] && lastSignal != false) {
-            out.add(idx to false)
-            lastSignal = false
-        }
+        if (prevC <= lower[i - 1] && c > lower[i] && lastSignal != true) { out.add(idx to true); lastSignal = true }
+        else if (prevC >= upper[i - 1] && c < upper[i] && lastSignal != false) { out.add(idx to false); lastSignal = false }
     }
     return out
 }
@@ -403,10 +383,7 @@ private fun ChartCanvas(
                 val v = macd.hist[macd.hist.size - 1 - r]
                 val x = i * cw + cw / 2
                 val y = yM(v)
-                drawLine(
-                    if (v >= 0) PGreen else PRed,
-                    Offset(x, zero), Offset(x, y), strokeWidth = bodyW
-                )
+                drawLine(if (v >= 0) PGreen else PRed, Offset(x, zero), Offset(x, y), strokeWidth = bodyW)
             }
             fun drawL(series: List<Double>, color: Color) {
                 var prev: Offset? = null
@@ -469,7 +446,12 @@ private fun ChartBody(
 }
 
 @Composable
-fun ProChart(coinId: String, symbol: String = "") {
+fun ProChart(
+    coinId: String,
+    symbol: String = "",
+    onTfChange: ((String) -> Unit)? = null,
+    onModeChange: ((IndicatorMode) -> Unit)? = null
+) {
     var tf by remember { mutableStateOf("1h") }
     var mode by remember { mutableStateOf(IndicatorMode.EMA) }
     var full by remember { mutableStateOf(false) }
@@ -492,7 +474,7 @@ fun ProChart(coinId: String, symbol: String = "") {
     val tfs = listOf("15m" to "۱۵د", "1h" to "۱س", "4h" to "۴س", "1d" to "روزانه", "1w" to "هفتگی")
 
     Surface(
-        color = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -515,7 +497,10 @@ fun ProChart(coinId: String, symbol: String = "") {
                 tfs.forEach { (key, label) ->
                     FilterChip(
                         selected = tf == key,
-                        onClick = { tf = key },
+                        onClick = {
+                            tf = key
+                            onTfChange?.invoke(key)
+                        },
                         label = { Text(label, fontSize = 11.sp) }
                     )
                 }
@@ -530,7 +515,10 @@ fun ProChart(coinId: String, symbol: String = "") {
                 IndicatorMode.values().forEach { m ->
                     FilterChip(
                         selected = mode == m,
-                        onClick = { mode = m },
+                        onClick = {
+                            mode = m
+                            onModeChange?.invoke(m)
+                        },
                         label = { Text("${m.emoji} ${m.label}", fontSize = 11.sp) }
                     )
                 }
@@ -567,7 +555,10 @@ fun ProChart(coinId: String, symbol: String = "") {
                     tfs.forEach { (key, label) ->
                         FilterChip(
                             selected = tf == key,
-                            onClick = { tf = key },
+                            onClick = {
+                                tf = key
+                                onTfChange?.invoke(key)
+                            },
                             label = { Text(label, fontSize = 11.sp) }
                         )
                     }
@@ -582,7 +573,10 @@ fun ProChart(coinId: String, symbol: String = "") {
                     IndicatorMode.values().forEach { m ->
                         FilterChip(
                             selected = mode == m,
-                            onClick = { mode = m },
+                            onClick = {
+                                mode = m
+                                onModeChange?.invoke(m)
+                            },
                             label = { Text("${m.emoji} ${m.label}", fontSize = 11.sp) }
                         )
                     }
