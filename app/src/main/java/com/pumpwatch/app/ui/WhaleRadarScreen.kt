@@ -237,7 +237,6 @@ fun WhaleRadarScreen() {
                 val last = prices.last()
                 val chg = if (first > 0) (last - first) / first * 100 else 0.0
 
-                // جریان خرید/فروش واقعی از استخر GeckoTerminal
                 var poolName: String? = null
                 val flows = mutableListOf<FlowRow>()
                 try {
