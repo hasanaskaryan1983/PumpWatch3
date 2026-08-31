@@ -99,6 +99,23 @@ fun TopPicksScreen(mode: String) {
                     }
                     Pick(c, score.coerceAtMost(100), pump, reasons)
                 }.sortedByDescending { it.score }
+
+                // ---------- پر کردن کش برای دستیار 🤖 ----------
+                val cache = picks.map { p ->
+                    val price = p.coin.current_price
+                    TodayPick(
+                        symbol = p.coin.symbol.uppercase(Locale.US),
+                        side = if (p.isPump) "PUMP" else "DUMP",
+                        score = p.score,
+                        golden = p.score >= 80,
+                        entry = price,
+                        stopLoss = if (p.isPump) price * 0.93 else price * 1.07,
+                        target1 = if (p.isPump) price * 1.15 else price * 0.85,
+                        reasons = p.reasons
+                    )
+                }
+                if (mode == "FUT") TodayPicksCache.fut = cache
+                else TodayPicksCache.spot = cache
             } catch (_: Exception) { }
             loading = false
         }
@@ -196,7 +213,6 @@ private fun PickCard(p: Pick, mode: String) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // ---------- ردیف عنوان ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -214,7 +230,6 @@ private fun PickCard(p: Pick, mode: String) {
                 )
             }
 
-            // ---------- نوع ستاپ (شفاف) ----------
             Surface(
                 color = (if (p.isPump) TGreen else TRed).copy(alpha = 0.12f),
                 shape = RoundedCornerShape(10.dp)
@@ -227,7 +242,6 @@ private fun PickCard(p: Pick, mode: String) {
                 )
             }
 
-            // ---------- تغییرات ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -242,7 +256,6 @@ private fun PickCard(p: Pick, mode: String) {
                 )
             }
 
-            // ---------- اعداد ستاپ ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -261,7 +274,6 @@ private fun PickCard(p: Pick, mode: String) {
                 )
             }
 
-            // ---------- مخاطب چه کار کنه ----------
             Text(
                 if (p.isPump) {
                     "💡 چه کار کنی: اسپات = خرید پله‌ای • فیوچرز = لانگ — حتماً با استاپ زیر ورود"
@@ -274,7 +286,6 @@ private fun PickCard(p: Pick, mode: String) {
                 color = if (p.isPump) TGreen else TGold
             )
 
-            // ---------- دلایل ----------
             Text(
                 p.reasons.joinToString(" • "),
                 fontSize = 10.sp, color = TGray
