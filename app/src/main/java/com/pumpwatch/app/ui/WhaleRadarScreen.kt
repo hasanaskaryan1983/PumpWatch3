@@ -100,12 +100,14 @@ private data class WhalePick(
     val fdv: Double,
     val credScore: Int,
     val rank: Int?,
+    val marketCap: Double?,
     val poolUrl: String
 )
 
 // ---------- توابع کمکی ----------
 
 private fun compact(v: Double): String = when {
+    v >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", v / 1_000_000_000_000)
     v >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", v / 1_000_000_000)
     v >= 1_000_000 -> String.format(Locale.US, "$%.1fM", v / 1_000_000)
     v >= 1_000 -> String.format(Locale.US, "$%.0fK", v / 1_000)
@@ -142,6 +144,27 @@ private fun ageHours(createdAt: String?): Double {
 private fun ratio(b: Double, s: Double): Double {
     val t = b + s
     return if (t > 0) b / t else 0.5
+}
+
+private fun verdictText(r1: Double): String = when {
+    r1 >= 0.6 -> "🐳 نهنگ‌ها در حال جمع‌کردن این ارزن 🚀"
+    r1 <= 0.4 -> "🩸 فشار فروش نهنگی — احتیاط"
+    else -> "⚖️ خرید معمولی"
+}
+
+private fun verdictColor(r1: Double): Color = when {
+    r1 >= 0.6 -> WGreen
+    r1 <= 0.4 -> WRed
+    else -> WGray
+}
+
+private fun marketPosText(rank: Int?, cap: Double?): String {
+    return if (rank != null) {
+        val capText = if (cap != null) " • کپ ${compact(cap)}" else ""
+        "🏦 جایگاه در بازار: رتبه #${rank}$capText"
+    } else {
+        "🏦 جایگاه در بازار: بدون رتبه — فقط در DEX"
+    }
 }
 
 // ---------- ۷ بررسی اعتماد ----------
@@ -218,6 +241,7 @@ private fun poolStats(p: GeckoPool): WhalePick? {
         fdv = fdv,
         credScore = score.coerceAtMost(100),
         rank = null,
+        marketCap = null,
         poolUrl = "https://www.geckoterminal.com/$network/pools/$addr"
     )
 }
@@ -309,13 +333,15 @@ private fun MethodCard() {
     }
 }
 
-// ---------- کارت نهنگ (با فلش بازشو + رنگ یک‌درمیون) ----------
+// ---------- کارت نهنگ ----------
 
 @Composable
 private fun LeaderCard(l: WhalePick, index: Int) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     val r1 = ratio(l.buysH1, l.sellsH1)
+    val checks = trustChecks(l)
+    val passed = checks.count { it.second }
 
     Surface(
         color = if (index % 2 == 0) CardA else CardB,
@@ -332,15 +358,11 @@ private fun LeaderCard(l: WhalePick, index: Int) {
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
+            // ---------- ردیف اصلی ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(chainEmoji(l.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
                 Text(l.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    if (l.rank != null) "رتبه #${l.rank}" else "بدون رتبه",
-                    fontSize = 9.sp, color = WGray
-                )
                 Spacer(Modifier.weight(1f))
                 Text(String.format(Locale.US, "$%.6f", l.price), fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.width(6.dp))
@@ -351,6 +373,7 @@ private fun LeaderCard(l: WhalePick, index: Int) {
                 )
             }
 
+            // ---------- خلاصه اصلی + فلش ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "🐳 ۱س: خرید ${compact(l.volH1 * r1)} / فروش ${compact(l.volH1 * (1 - r1))}",
@@ -362,6 +385,22 @@ private fun LeaderCard(l: WhalePick, index: Int) {
                 }
             }
 
+            // ---------- خلاصه همیشه‌دیده: حکم + اعتماد + جایگاه بازار ----------
+            Text(
+                verdictText(r1),
+                fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                color = verdictColor(r1)
+            )
+            Text(
+                "🛡️ بررسی اعتماد: $passed از ${checks.size}",
+                fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue
+            )
+            Text(
+                marketPosText(l.rank, l.marketCap),
+                fontSize = 10.sp, color = WGray
+            )
+
+            // ---------- جزئیات بازشو ----------
             if (expanded) {
                 FlowLine("۱ ساعته", l.buysH1, l.sellsH1, l.volH1)
                 FlowLine("۶ ساعته", l.buysH6, l.sellsH6, l.volH6)
@@ -374,23 +413,7 @@ private fun LeaderCard(l: WhalePick, index: Int) {
                     Text("FDV: ${compact(l.fdv)}", fontSize = 10.sp, color = WGray)
                     Text("سن: ${ageText(l.ageHours)}", fontSize = 10.sp, color = WGray)
                 }
-                Text(
-                    when {
-                        r1 >= 0.6 -> "🐳 نهنگ‌ها در حال جمع‌کردن این ارزن 🚀"
-                        r1 <= 0.4 -> "🩸 فشار فروش نهنگی — احتیاط"
-                        else -> "⚖️ خرید معمولی"
-                    },
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                    color = if (r1 >= 0.6) WGreen else if (r1 <= 0.4) WRed else WGray
-                )
-
-                val checks = trustChecks(l)
-                Text(
-                    "🛡️ بررسی اعتماد: ${checks.count { it.second }} از ${checks.size}",
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, color = WBlue
-                )
                 TrustRows(checks)
-
                 Text(
                     "📊 برای بازه‌های ۴س/۱۲س/هفتگی روی کارت بزن تا نمودار کامل در GeckoTerminal باز بشه",
                     fontSize = 9.sp, color = WGold
@@ -451,17 +474,24 @@ private fun FreshCard(f: WhalePick, index: Int) {
                 "🐳 فشار خرید: ${String.format(Locale.US, "%.0f", r1 * 100)}٪ — نهنگ‌ها در حال خریدن",
                 fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold
             )
+            Text(
+                verdictText(r1),
+                fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                color = verdictColor(r1)
+            )
+            Text(
+                "🛡️ بررسی اعتماد: $passed از ${checks.size}",
+                fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue
+            )
+            Text(
+                marketPosText(f.rank, f.marketCap),
+                fontSize = 10.sp, color = WGray
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (f.liquidity >= 100_000) Text("✅ نقدینگی قوی", fontSize = 9.sp, color = WGreen)
                 if (f.buysH1 > 0 && f.sellsH1 > 0) Text("✅ دوطرفه", fontSize = 9.sp, color = WGreen)
                 if (f.fdv in 100_000.0..10_000_000.0) Text("✅ FDV سالم", fontSize = 9.sp, color = WGreen)
             }
-            Text(
-                if (f.rank != null) "✅ لیست‌شده در CoinGecko (رتبه #${f.rank})"
-                else "⚠️ فقط در DEX — هنوز لیست نشده، با احتیاط",
-                fontSize = 9.sp,
-                color = if (f.rank != null) WGreen else WGold
-            )
         }
     }
 }
@@ -597,13 +627,16 @@ fun WhaleRadarScreen() {
                     Triple(t.await(), n.await(), m.await())
                 }
 
-                fun rankOf(sym: String): Int? =
-                    markets.firstOrNull { it.symbol.equals(sym, true) }?.market_cap_rank
+                fun marketOf(sym: String): CoinMarket? =
+                    markets.firstOrNull { it.symbol.equals(sym, true) }
 
                 leaders = trend
                     .mapNotNull { poolStats(it) }
                     .filter { it.volH1 >= threshold && it.buysH1 > it.sellsH1 && it.sellsH1 > 0 }
-                    .map { it.copy(rank = rankOf(it.symbol)) }
+                    .map {
+                        val mk = marketOf(it.symbol)
+                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
+                    }
                     .sortedByDescending { it.volH1 }
                     .take(12)
 
@@ -617,7 +650,10 @@ fun WhaleRadarScreen() {
                                 p.buysH1 > p.sellsH1 &&
                                 p.credScore >= 50
                     }
-                    .map { it.copy(rank = rankOf(it.symbol)) }
+                    .map {
+                        val mk = marketOf(it.symbol)
+                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
+                    }
                     .sortedByDescending { it.credScore * 1_000_000 + it.volH1 }
                     .take(10)
 
@@ -810,7 +846,7 @@ fun WhaleRadarScreen() {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 },
                             label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 },
-                            label = { Text("۱۰ هزار", fontSize = 10.sp) })
+                            label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 },
                             label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 },
