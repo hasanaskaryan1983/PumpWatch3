@@ -1,17 +1,17 @@
 package com.pumpwatch.app.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
@@ -42,84 +41,25 @@ private val TGreen = Color(0xFF00E676)
 private val TRed = Color(0xFFFF5252)
 private val TGold = Color(0xFFFFC107)
 private val TGray = Color(0xFF8B949E)
+private val TCard = Color(0xFF1A2230)
 
-// ---------- مدل سیگنال ----------
-
-data class TPick(
-    val symbol: String,
-    val name: String,
-    val side: String,
+private data class Pick(
+    val coin: CoinMarket,
     val score: Int,
-    val golden: Boolean,
-    val entry: Double,
-    val stopLoss: Double,
-    val target1: Double,
-    val reasons: List<String>,
-    val change1h: Double,
-    val change24h: Double
+    val isPump: Boolean,
+    val reasons: List<String>
 )
 
-// ---------- کش نتایج برای ربات دستیار ----------
-
-object TodayPicksCache {
-    var spot: List<TPick> = emptyList()
-    var fut: List<TPick> = emptyList()
+private fun medalOf(score: Int): String = when {
+    score >= 80 -> "🏆 طلایی"
+    score >= 60 -> "🥈 نقره‌ای"
+    else -> "🥉 برنزی"
 }
 
-// ---------- امتیازدهی سریع (بدون درخواست اضافه) ----------
-
-private fun evalPick(c: CoinMarket): TPick? {
-    val c1 = c.change1h ?: 0.0
-    val c24 = c.price_change_percentage_24h ?: 0.0
-    val c7 = c.change7d ?: 0.0
-    val cap = c.market_cap
-    val turnover = if (cap > 0) c.total_volume / cap else 0.0
-    val high = c.high24h ?: 0.0
-    val low = c.low24h ?: 0.0
-    val rangePos = if (high > low) (c.current_price - low) / (high - low) else 0.5
-
-    var pump = 0
-    val pr = mutableListOf<String>()
-    if (c1 >= 1.0) { pump += 25; pr.add("شتاب ۱ ساعته 🚀 (1-hour acceleration 🚀)") }
-    if (c1 >= 3.0) pump += 15
-    if (c24 in 2.0..35.0) { pump += 20; pr.add("حرکت مثبت ۲۴ ساعته (positive 24h move)") }
-    if (turnover >= 0.15) { pump += 20; pr.add("حجم غیرعادی 💥 (abnormal volume 💥)") }
-    if (rangePos >= 0.85) { pump += 20; pr.add("شکست سقف ۲۴س 📈 (24h high break 📈)") }
-    if (c7 > 10) pump += 5
-
-    var dump = 0
-    val dr = mutableListOf<String>()
-    if (c1 <= -1.0) { dump += 25; dr.add("ریزش ۱ ساعته 🩸 (1-hour drop 🩸)") }
-    if (c1 <= -3.0) dump += 15
-    if (c24 in -35.0..-2.0) { dump += 20; dr.add("حرکت منفی ۲۴ ساعته (negative 24h move)") }
-    if (turnover >= 0.15) { dump += 20; dr.add("حجم غیرعادی 💥 (abnormal volume 💥)") }
-    if (rangePos <= 0.15) { dump += 20; dr.add("شکست کف ۲۴س 📉 (24h low break 📉)") }
-    if (c7 < -10) dump += 5
-
-    val side = if (pump >= dump) "PUMP" else "DUMP"
-    val score = maxOf(pump, dump).coerceAtMost(100)
-    if (score < 40) return null
-
-    val price = c.current_price
-    val risk = if (high > low) (high - low) * 0.3 else price * 0.03
-    val (stop, target) = if (side == "PUMP")
-        Pair(price - risk, price + risk * 2)
-    else
-        Pair(price + risk, price - risk * 2)
-
-    return TPick(
-        symbol = c.symbol.uppercase(Locale.US),
-        name = c.name,
-        side = side,
-        score = score,
-        golden = score >= 80 && turnover >= 0.2,
-        entry = price,
-        stopLoss = stop,
-        target1 = target,
-        reasons = if (side == "PUMP") pr else dr,
-        change1h = c1,
-        change24h = c24
-    )
+private fun fmtP(price: Double): String = when {
+    price >= 1000 -> String.format(Locale.US, "$%,.2f", price)
+    price >= 1 -> String.format(Locale.US, "$%.4f", price)
+    else -> String.format(Locale.US, "$%.6f", price)
 }
 
 // ---------- صفحه برترین‌ها ----------
@@ -127,44 +67,58 @@ private fun evalPick(c: CoinMarket): TPick? {
 @Composable
 fun TopPicksScreen(mode: String) {
     val scope = rememberCoroutineScope()
-    var picks by remember { mutableStateOf<List<TPick>>(emptyList()) }
-    var scanning by remember { mutableStateOf(false) }
-    var step by remember { mutableStateOf("") }
-    var filter by remember { mutableStateOf("ALL") }
+    var picks by remember { mutableStateOf<List<Pick>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var filter by remember { mutableStateOf("all") }
 
     fun scan() {
         scope.launch {
-            scanning = true
-            step = "دریافت لیست ارزها... (fetching coin list...)"
+            loading = true
             try {
-                val coins = if (mode == "FUT") ApiClient.getTop100Coins() else ApiClient.getTop1000Coins()
-                step = "امتیازدهی به ${coins.size} ارز... (scoring ${coins.size} coins...)"
-                val result = coins.mapNotNull { evalPick(it) }.sortedByDescending { it.score }
-                if (mode == "FUT") TodayPicksCache.fut = result else TodayPicksCache.spot = result
-                picks = result
-                step = ""
-            } catch (e: Exception) {
-                step = "خطا: ${e.message} (error: ${e.message})"
-            }
-            scanning = false
+                val coins = ApiClient.getTop1000Coins()
+                picks = coins.mapNotNull { c ->
+                    val h1 = c.change1h ?: 0.0
+                    val h24 = c.price_change_percentage_24h ?: 0.0
+                    val turnover = if (c.market_cap > 0) c.total_volume / c.market_cap * 100 else 0.0
+                    val pump = h1 >= 1.0 && h24 > 0
+                    val drop = h1 <= -1.0 && h24 < 0
+                    if (!pump && !drop) return@mapNotNull null
+
+                    var score = 0
+                    val reasons = mutableListOf<String>()
+                    if (pump) {
+                        if (h1 >= 1.0) { score += 30; reasons.add("شتاب ۱ ساعته 🚀") }
+                        if (h1 >= 3.0) score += 20
+                        if (h24 >= 5.0) { score += 30; reasons.add("حرکت مثبت ۲۴ ساعته 📈") }
+                        if (turnover >= 10.0) { score += 20; reasons.add("فعالیت/حجم بالا 💥") }
+                    } else {
+                        if (h1 <= -1.0) { score += 30; reasons.add("ریزش ۱ ساعته 🩸") }
+                        if (h1 <= -3.0) score += 20
+                        if (h24 <= -5.0) { score += 30; reasons.add("حرکت منفی ۲۴ ساعته 📉") }
+                        if (turnover >= 10.0) { score += 20; reasons.add("فعالیت/حجم بالا 💥") }
+                    }
+                    Pick(c, score.coerceAtMost(100), pump, reasons)
+                }.sortedByDescending { it.score }
+            } catch (_: Exception) { }
+            loading = false
         }
     }
 
-    LaunchedEffect(mode) {
-        val cached = if (mode == "FUT") TodayPicksCache.fut else TodayPicksCache.spot
-        if (cached.isNotEmpty()) picks = cached else scan()
-    }
+    LaunchedEffect(Unit) { scan() }
 
-    val shown = picks.filter { p ->
-        when (filter) {
-            "PUMP" -> p.side == "PUMP"
-            "DUMP" -> p.side == "DUMP"
-            "GOLD" -> p.golden
-            else -> true
-        }
+    val pumps = picks.count { it.isPump }
+    val drops = picks.size - pumps
+    val golds = picks.count { it.score >= 80 }
+
+    val shown = when (filter) {
+        "pump" -> picks.filter { it.isPump }
+        "drop" -> picks.filter { !it.isPump }
+        "gold" -> picks.filter { it.score >= 80 }
+        else -> picks
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -177,57 +131,46 @@ fun TopPicksScreen(mode: String) {
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.weight(1f))
-            if (scanning) Text("در حال اسکن... (scanning...)", fontSize = 11.sp, color = TGray)
-            else TextButton(onClick = { scan() }) { Text("اسکن مجدد (rescan)") }
+            TextButton(onClick = { scan() }, enabled = !loading) {
+                Text("اسکن مجدد (rescan)")
+            }
         }
 
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            FilterChip(selected = filter == "ALL", onClick = { filter = "ALL" },
-                label = { Text("همه ${picks.size} (all ${picks.size})") })
-            FilterChip(selected = filter == "PUMP", onClick = { filter = "PUMP" },
-                label = { Text("🚀 ${picks.count { it.side == "PUMP" }}") })
-            FilterChip(selected = filter == "DUMP", onClick = { filter = "DUMP" },
-                label = { Text("🩸 ${picks.count { it.side == "DUMP" }}") })
-            FilterChip(selected = filter == "GOLD", onClick = { filter = "GOLD" },
-                label = { Text("🏆 ${picks.count { it.golden }}") })
+            FilterChip(selected = filter == "all", onClick = { filter = "all" },
+                label = { Text("همه ${picks.size}", fontSize = 11.sp) })
+            FilterChip(selected = filter == "pump", onClick = { filter = "pump" },
+                label = { Text("🚀 $pumps", fontSize = 11.sp) })
+            FilterChip(selected = filter == "drop", onClick = { filter = "drop" },
+                label = { Text("🩸 $drops", fontSize = 11.sp) })
+            FilterChip(selected = filter == "gold", onClick = { filter = "gold" },
+                label = { Text("🏆 $golds", fontSize = 11.sp) })
         }
 
-        if (step.isNotEmpty()) {
-            Text(
-                step,
-                modifier = Modifier.padding(horizontal = 16.dp),
-                fontSize = 12.sp,
-                color = TGreen
-            )
-        }
+        Text(
+            "🏆 = قدرت سیگنال در جهت خودش • 🚀 = ستاپ لانگ (خرید) • 🩸 = ستاپ شورت (فروش) — طلاییِ 🩸 یعنی «نخر، یا شورت کن»!",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            fontSize = 9.sp, color = TGray
+        )
 
-        when {
-            scanning && picks.isEmpty() -> Box(
+        if (loading) {
+            Column(
                 modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
             ) { CircularProgressIndicator(color = TGreen) }
-
-            shown.isEmpty() && !scanning -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "فعلاً سیگنال قوی نیست — بازار آرومه 😴 (no strong signal right now — market is calm 😴)",
-                    color = TGray,
-                    modifier = Modifier.padding(16.dp),
-                    textAlign = TextAlign.Center
-                )
-            }
-
-            else -> LazyColumn(
+        } else {
+            LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(shown) { p -> PickCard(p) }
+                items(shown) { p -> PickCard(p, mode) }
             }
         }
     }
@@ -236,10 +179,16 @@ fun TopPicksScreen(mode: String) {
 // ---------- کارت سیگنال ----------
 
 @Composable
-private fun PickCard(p: TPick) {
-    val sideColor = if (p.side == "PUMP") TGreen else TRed
+private fun PickCard(p: Pick, mode: String) {
+    val price = p.coin.current_price
+    val entry = price
+    val stop = if (p.isPump) price * 0.93 else price * 1.07
+    val target = if (p.isPump) price * 1.15 else price * 0.85
+    val h1 = p.coin.change1h ?: 0.0
+    val h24 = p.coin.price_change_percentage_24h ?: 0.0
+
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = TCard,
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -247,45 +196,88 @@ private fun PickCard(p: TPick) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            // ---------- ردیف عنوان ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (p.side == "PUMP") "🚀" else "🩸", fontSize = 22.sp)
-                Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(p.symbol, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        if (p.golden) {
-                            Spacer(Modifier.width(6.dp))
-                            Text("🏅 طلایی (golden)", fontSize = 10.sp, color = TGold)
-                        }
-                    }
-                    Text(p.name, fontSize = 12.sp, color = TGray)
+                    Text(
+                        p.coin.symbol.uppercase(Locale.US),
+                        fontWeight = FontWeight.Black, fontSize = 16.sp
+                    )
+                    Text(p.coin.name, fontSize = 11.sp, color = TGray)
                 }
-                Text("${p.score}/100", color = sideColor, fontWeight = FontWeight.Black, fontSize = 16.sp)
+                Text(medalOf(p.score), fontSize = 11.sp, color = TGold, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "${p.score}/100",
+                    fontSize = 15.sp, fontWeight = FontWeight.Black,
+                    color = if (p.score >= 80) TGreen else if (p.score >= 60) TGold else TGray
+                )
             }
 
+            // ---------- نوع ستاپ (شفاف) ----------
+            Surface(
+                color = (if (p.isPump) TGreen else TRed).copy(alpha = 0.12f),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(
+                    if (p.isPump) "🚀 ستاپ لانگ (خرید)" else "🩸 ستاپ شورت (فروش) — نه خرید!",
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    fontSize = 12.sp, fontWeight = FontWeight.Black,
+                    color = if (p.isPump) TGreen else TRed
+                )
+            }
+
+            // ---------- تغییرات ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("۱س (1h): ${String.format(Locale.US, "%+.2f%%", p.change1h)}", fontSize = 11.sp,
-                    color = if (p.change1h >= 0) TGreen else TRed)
-                Text("۲۴س (24h): ${String.format(Locale.US, "%+.2f%%", p.change24h)}", fontSize = 11.sp,
-                    color = if (p.change24h >= 0) TGreen else TRed)
+                Text(
+                    "۱س: ${String.format(Locale.US, "%+.2f%%", h1)}",
+                    fontSize = 11.sp, color = if (h1 >= 0) TGreen else TRed, fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "۲۴س: ${String.format(Locale.US, "%+.2f%%", h24)}",
+                    fontSize = 11.sp, color = if (h24 >= 0) TGreen else TRed, fontWeight = FontWeight.Bold
+                )
             }
 
+            // ---------- اعداد ستاپ ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("ورود (entry): ${String.format(Locale.US, "$%.6f", p.entry)}", fontSize = 11.sp)
-                Text("استاپ (stop): ${String.format(Locale.US, "$%.6f", p.stopLoss)}", fontSize = 11.sp, color = TRed)
-                Text("هدف (target): ${String.format(Locale.US, "$%.6f", p.target1)}", fontSize = 11.sp, color = TGreen)
+                Text(
+                    "${if (p.isPump) "ورود" else "ورود شورت"}: ${fmtP(entry)}",
+                    fontSize = 11.sp
+                )
+                Text(
+                    "${if (p.isPump) "استاپ" else "استاپ شورت"}: ${fmtP(stop)}",
+                    fontSize = 11.sp, color = TRed, fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "${if (p.isPump) "هدف" else "هدف شورت"}: ${fmtP(target)}",
+                    fontSize = 11.sp, color = TGreen, fontWeight = FontWeight.Bold
+                )
             }
 
+            // ---------- مخاطب چه کار کنه ----------
             Text(
-                p.reasons.take(2).joinToString(" • "),
+                if (p.isPump) {
+                    "💡 چه کار کنی: اسپات = خرید پله‌ای • فیوچرز = لانگ — حتماً با استاپ زیر ورود"
+                } else {
+                    if (mode == "SPOT") "💡 چه کار کنی: کاربر اسپات = این ارز رو الان نخر! 🩸 یعنی ستاپ شورت؛ منتظر نشانه برگشت بمون"
+                    else "💡 چه کار کنی: ستاپ شورت با استاپ بالای ورود — مدیریت ریسک فراموش نشه"
+                },
                 fontSize = 10.sp,
-                color = TGray
+                fontWeight = FontWeight.Bold,
+                color = if (p.isPump) TGreen else TGold
+            )
+
+            // ---------- دلایل ----------
+            Text(
+                p.reasons.joinToString(" • "),
+                fontSize = 10.sp, color = TGray
             )
         }
     }
