@@ -69,7 +69,22 @@ object GeckoTerminal {
     }
 }
 
-// ---------- بایننس (فقط پشتیبان اختیاری) ----------
+// ---------- پیدا کردن آدرس درست نمودار ----------
+
+suspend fun geckoPoolUrl(symbol: String): String? {
+    return try {
+        val pool = GeckoTerminal.api.searchPools(symbol).data?.firstOrNull()
+        val network = pool?.relationships?.network?.data?.id
+        val addr = pool?.id?.substringAfter('_')
+        if (!network.isNullOrEmpty() && !addr.isNullOrEmpty())
+            "https://www.geckoterminal.com/$network/pools/$addr"
+        else null
+    } catch (_: Exception) {
+        null
+    }
+}
+
+// ---------- بایننس (پشتیبان) ----------
 
 data class Ticker24(
     val symbol: String?,
