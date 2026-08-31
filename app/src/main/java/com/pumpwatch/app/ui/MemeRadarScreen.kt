@@ -37,8 +37,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.CoinGeckoSearch
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.cmcUrl
+import com.pumpwatch.app.data.GeckoSearchCoin
+import com.pumpwatch.app.data.cmcUrlByName
 import com.pumpwatch.app.data.geckoPoolUrl
 import com.pumpwatch.app.engine.MemeRadar
 import com.pumpwatch.app.engine.MemeSignal
@@ -73,7 +75,7 @@ private fun ageText(h: Double): String = when {
     else -> "${(h / 24).toInt()} روز"
 }
 
-// ---------- ۷ بررسی اعتماد (هم‌معیار با بخش نهنگ‌ها) ----------
+// ---------- ۷ بررسی اعتماد ----------
 
 private fun memeTrustChecks(s: MemeSignal, listed: Boolean): List<Pair<String, Boolean>> = listOf(
     "نقدینگی ≥ ۱۰K" to (s.liquidity >= 100_000),
@@ -103,6 +105,7 @@ fun MemeRadarScreen() {
     var progressText by remember { mutableStateOf("") }
     var scanned by remember { mutableStateOf(false) }
     var markets by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
+    var extra by remember { mutableStateOf<Map<String, GeckoSearchCoin>>(emptyMap()) }
 
     fun refresh() {
         if (loading) return
@@ -132,6 +135,25 @@ fun MemeRadarScreen() {
         }
     }
 
+    // ---------- رتبه واقعی از جستجوی CoinGecko (مثل KTA #326) ----------
+    LaunchedEffect(signals) {
+        if (signals.isEmpty()) return@LaunchedEffect
+        scope.launch {
+            val missing = signals
+                .map { it.symbol.uppercase(Locale.US) }
+                .distinct()
+                .filter { sym -> markets.none { it.symbol.equals(sym, true) } }
+                .take(8)
+            missing.forEach { sym ->
+                try {
+                    val hit = CoinGeckoSearch.api.search(sym)
+                        .coins?.firstOrNull { it.symbol.equals(sym, true) }
+                    if (hit != null) extra = extra + (sym to hit)
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
 
         // ---------- سربرگ ----------
@@ -155,29 +177,22 @@ fun MemeRadarScreen() {
         Text(
             "شناسایی قبل از پامپ • خروج قبل از دامپ",
             modifier = Modifier.padding(horizontal = 16.dp),
-            fontSize = 11.sp,
-            color = MGray
+            fontSize = 11.sp, color = MGray
         )
         Text(
             "📊 ضربه روی هر کارت = نمودار ارز در CoinMarketCap",
             modifier = Modifier.padding(horizontal = 16.dp),
-            fontSize = 9.sp,
-            color = MGray
+            fontSize = 9.sp, color = MGray
         )
 
-        // ---------- پیشرفت ----------
         if (loading) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MGreen
-                )
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = MGreen)
                 Spacer(Modifier.height(4.dp))
                 Text("$progress% — $progressText", fontSize = 11.sp, color = MGreen)
             }
         }
 
-        // ---------- محتوا ----------
         when {
             signals.isEmpty() && !loading -> Box(
                 modifier = Modifier.fillMaxSize(),
@@ -198,7 +213,7 @@ fun MemeRadarScreen() {
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(signals) { s -> MemeCard(s, markets) }
+                items(signals) { s -> MemeCard(s, markets, extra) }
                 item {
                     Text(
                         "⚠️ میم‌کوین = ریسک بالا | فقط پولی که تحمل از دست دادنش رو داری",
@@ -214,11 +229,23 @@ fun MemeRadarScreen() {
 // ---------- کارت میم‌سیگنال ----------
 
 @Composable
-private fun MemeCard(s: MemeSignal, markets: List<CoinMarket>) {
+private fun MemeCard(
+    s: MemeSignal,
+    markets: List<CoinMarket>,
+    extra: Map<String, GeckoSearchCoin>
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val mk = markets.firstOrNull { it.symbol.equals(s.symbol, true) }
-    val checks = memeTrustChecks(s, mk != null)
+    var expanded by remember { mutableStateOf(false) }
+
+    val symUp = s.symbol.uppercase(Locale.US)
+    val mk = markets.firstOrNull { it.symbol.equals(symUp, true) }
+    val ex = extra[symUp]
+    val listed = mk != null || ex != null
+    val rank = mk?.market_cap_rank ?: ex?.rank
+    val coinName = mk?.name ?: ex?.name ?: s.name
+
+    val checks = memeTrustChecks(s, listed)
     val passed = checks.count { it.second }
     val (credText, credColor) = credLabel(passed)
     val scoreColor = if (s.score >= 80) MGreen else if (s.score >= 60) MGold else MRed
@@ -230,8 +257,8 @@ private fun MemeCard(s: MemeSignal, markets: List<CoinMarket>) {
             .fillMaxWidth()
             .clickable {
                 scope.launch {
-                    val url = if (mk != null) cmcUrl(mk.id)
-                    else (geckoPoolUrl(s.symbol) ?: cmcUrl(s.symbol.lowercase(Locale.US)))
+                    val url = if (listed) cmcUrlByName(coinName)
+                    else (geckoPoolUrl(s.symbol) ?: cmcUrlByName(s.name))
                     try {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                     } catch (_: Exception) { }
@@ -242,7 +269,7 @@ private fun MemeCard(s: MemeSignal, markets: List<CoinMarket>) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // ---------- ردیف اول ----------
+            // ---------- خلاصه: نماد + امتیاز ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(chainEmoji(s.chain), fontSize = 22.sp)
                 Spacer(Modifier.width(8.dp))
@@ -265,7 +292,7 @@ private fun MemeCard(s: MemeSignal, markets: List<CoinMarket>) {
                 }
             }
 
-            // ---------- قیمت + رتبه + مارکت‌کپ ----------
+            // ---------- خلاصه: قیمت + رتبه/مارکت ----------
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -276,91 +303,105 @@ private fun MemeCard(s: MemeSignal, markets: List<CoinMarket>) {
                     fontSize = 13.sp, fontWeight = FontWeight.Bold
                 )
                 Text(
-                    if (mk != null) "🏦 رتبه #${mk.market_cap_rank ?: "-"} • کپ ${formatMarketCap(mk.market_cap)}"
-                    else "🏦 بدون رتبه — فقط در DEX",
+                    if (rank != null) {
+                        val capText = if (mk?.market_cap != null) " • کپ ${formatMarketCap(mk.market_cap)}" else ""
+                        "🏦 رتبه #${rank}$capText"
+                    } else "🏦 بدون رتبه — فقط در DEX",
                     fontSize = 10.sp, color = MBlue
                 )
             }
 
-            // ---------- اعتبارسنجی ۷ معیاری ----------
+            // ---------- خلاصه: اعتبار ----------
             Text(
                 "🛡️ اعتبار: $passed از ۷ — $credText",
                 fontSize = 12.sp, fontWeight = FontWeight.Black, color = credColor
             )
-            checks.forEach { (label, ok) ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(if (ok) "✅" else "⚠️", fontSize = 10.sp)
-                    Spacer(Modifier.width(6.dp))
-                    Text(label, fontSize = 10.sp, color = if (ok) MGreen else MGold)
-                }
-            }
             if (passed <= 3) {
                 Text(
-                    "☠️ این ارز اعتبار پایینی داره — ریسک اسکم/راگpull بالا! سمتش نرو یا فقط با پول خیلی کم.",
+                    "☠️ این ارز اعتبار پایینی داره — ریسک اسکم/راگ بالا! سمتش نرو یا فقط با پول خیلی کم.",
                     fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MRed
                 )
             }
 
-            // ---------- آمار ----------
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "فشار خرید: ${String.format(Locale.US, "%.0f", s.buyRatio * 100)}٪ 🐳",
-                    fontSize = 11.sp,
-                    color = if (s.buyRatio >= 0.6) MGreen else MGold,
-                    fontWeight = FontWeight.Bold
-                )
-                Text("حجم ۱س: ${compact(s.volumeH1)}", fontSize = 11.sp, color = MGray)
-                Text("نقدینگی: ${compact(s.liquidity)}", fontSize = 11.sp, color = MBlue)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "۱س: ${String.format(Locale.US, "%+.1f%%", s.changeH1)}",
-                    fontSize = 11.sp, color = if (s.changeH1 >= 0) MGreen else MRed
-                )
-                Text(
-                    "۶س: ${String.format(Locale.US, "%+.1f%%", s.changeH6)}",
-                    fontSize = 11.sp, color = if (s.changeH6 >= 0) MGreen else MRed
-                )
-                Text(
-                    "۲۴س: ${String.format(Locale.US, "%+.1f%%", s.changeH24)}",
-                    fontSize = 11.sp, color = if (s.changeH24 >= 0) MGreen else MRed
-                )
-                Text("سن: ${ageText(s.ageHours)}", fontSize = 11.sp, color = MGray)
-            }
-
-            // ---------- برنامه معامله ----------
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("ورود: ${String.format(Locale.US, "$%.6f", s.entry)}", fontSize = 10.sp)
-                Text(
-                    "هدف۱: ${String.format(Locale.US, "$%.6f", s.target1)}",
-                    fontSize = 10.sp, color = MGreen
-                )
-                Text(
-                    "هدف۲: ${String.format(Locale.US, "$%.6f", s.target2)}",
-                    fontSize = 10.sp, color = MGreen
-                )
-                Text(
-                    "استاپ: ${String.format(Locale.US, "$%.6f", s.stopLoss)}",
-                    fontSize = 10.sp, color = MRed
-                )
-            }
-
-            // ---------- دلایل ----------
+            // ---------- خلاصه: دلیل‌ها ----------
             s.reasons.take(3).forEach { r ->
                 Text("• $r", fontSize = 11.sp, color = MGray)
+            }
+
+            // ---------- فلش جزئیات ----------
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = { expanded = !expanded }) {
+                    Text(if (expanded) "▲ بستن" else "▼ جزئیات", fontSize = 10.sp)
+                }
+            }
+
+            // ---------- جزئیات بازشو ----------
+            if (expanded) {
+                checks.forEach { (label, ok) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (ok) "✅" else "⚠️", fontSize = 10.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(label, fontSize = 10.sp, color = if (ok) MGreen else MGold)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "فشار خرید: ${String.format(Locale.US, "%.0f", s.buyRatio * 100)}٪ 🐳",
+                        fontSize = 11.sp,
+                        color = if (s.buyRatio >= 0.6) MGreen else MGold,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text("حجم ۱س: ${compact(s.volumeH1)}", fontSize = 11.sp, color = MGray)
+                    Text("نقدینگی: ${compact(s.liquidity)}", fontSize = 11.sp, color = MBlue)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "۱س: ${String.format(Locale.US, "%+.1f%%", s.changeH1)}",
+                        fontSize = 11.sp, color = if (s.changeH1 >= 0) MGreen else MRed
+                    )
+                    Text(
+                        "۶س: ${String.format(Locale.US, "%+.1f%%", s.changeH6)}",
+                        fontSize = 11.sp, color = if (s.changeH6 >= 0) MGreen else MRed
+                    )
+                    Text(
+                        "۲۴س: ${String.format(Locale.US, "%+.1f%%", s.changeH24)}",
+                        fontSize = 11.sp, color = if (s.changeH24 >= 0) MGreen else MRed
+                    )
+                    Text("سن: ${ageText(s.ageHours)}", fontSize = 11.sp, color = MGray)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("ورود: ${String.format(Locale.US, "$%.6f", s.entry)}", fontSize = 10.sp)
+                    Text(
+                        "هدف۱: ${String.format(Locale.US, "$%.6f", s.target1)}",
+                        fontSize = 10.sp, color = MGreen
+                    )
+                    Text(
+                        "هدف۲: ${String.format(Locale.US, "$%.6f", s.target2)}",
+                        fontSize = 10.sp, color = MGreen
+                    )
+                    Text(
+                        "استاپ: ${String.format(Locale.US, "$%.6f", s.stopLoss)}",
+                        fontSize = 10.sp, color = MRed
+                    )
+                }
             }
         }
     }
