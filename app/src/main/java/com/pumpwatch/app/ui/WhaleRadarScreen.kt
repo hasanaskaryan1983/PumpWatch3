@@ -209,13 +209,17 @@ fun WhaleRadarScreen() {
                     it.symbol.equals(symbol, true)
                 } ?: throw Exception("coin not found")
 
-                val (days, chunk, take, th) = when (tf) {
-                    "1h" -> listOf(1, 1, 70, 0.0015)
-                    "4h" -> listOf(1, 3, 70, 0.003)
-                    "12h" -> listOf(1, 6, 70, 0.005)
-                    "1d" -> listOf(2, 2, 24, 0.008)
-                    "3d" -> listOf(6, 8, 18, 0.015)
-                    else -> listOf(89, 24, 7, 0.03)
+                val days: Int
+                val chunk: Int
+                val take: Int
+                val th: Double
+                when (tf) {
+                    "1h" -> { days = 1; chunk = 1; take = 70; th = 0.0015 }
+                    "4h" -> { days = 1; chunk = 3; take = 70; th = 0.003 }
+                    "12h" -> { days = 1; chunk = 6; take = 70; th = 0.005 }
+                    "1d" -> { days = 2; chunk = 2; take = 24; th = 0.008 }
+                    "3d" -> { days = 6; chunk = 8; take = 18; th = 0.015 }
+                    else -> { days = 89; chunk = 24; take = 7; th = 0.03 }
                 }
 
                 val chart = ApiClient.getCoinChart(coin.id, days = days)
