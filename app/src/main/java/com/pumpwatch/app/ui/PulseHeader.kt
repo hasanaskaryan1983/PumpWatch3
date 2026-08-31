@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,9 +37,11 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.FngClient
 import com.pumpwatch.app.data.PulseClient
 import com.pumpwatch.app.data.TrendingItem
+import com.pumpwatch.app.data.geckoPoolUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 private val HGreen = Color(0xFF00E676)
@@ -108,6 +111,7 @@ private fun FngGauge(value: Int, label: String) {
 @Composable
 fun MarketPulseHeader() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var fng by remember { mutableStateOf(-1) }
     var fngLabel by remember { mutableStateOf("") }
     var btcDom by remember { mutableStateOf(0.0) }
@@ -195,7 +199,7 @@ fun MarketPulseHeader() {
             }
 
             if (trending.isNotEmpty()) {
-                Text("🔥 الان دنیا داره سرچ می‌کنه (بزن = GeckoTerminal):", fontSize = 11.sp, color = HGray)
+                Text("🔥 الان دنیا داره سرچ می‌کنه (بزن = نمودار GeckoTerminal):", fontSize = 11.sp, color = HGray)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -205,11 +209,13 @@ fun MarketPulseHeader() {
                             color = HCard,
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.clickable {
-                                try {
-                                    val url = "https://www.geckoterminal.com/search?query=" +
-                                            (item.symbol ?: "").uppercase(Locale.US)
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                } catch (_: Exception) { }
+                                scope.launch {
+                                    val url = geckoPoolUrl(item.symbol ?: "")
+                                        ?: "https://www.geckoterminal.com/"
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    } catch (_: Exception) { }
+                                }
                             }
                         ) {
                             Text(
