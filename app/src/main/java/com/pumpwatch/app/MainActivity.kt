@@ -53,7 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.geckoPoolUrl
+import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.ui.AssistantScreen
 import com.pumpwatch.app.ui.HistoryScreen
 import com.pumpwatch.app.ui.MarketPulseHeader
@@ -355,7 +355,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 @Composable
 fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val change = coin.price_change_percentage_24h ?: 0.0
     val isUp = change >= 0
     val rank = coin.market_cap_rank ?: 0
@@ -386,19 +385,17 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
                 )
             }
 
-            // ---------- 📊 نمودار GeckoTerminal ----------
+            // ---------- 📊 نمودار CoinMarketCap ----------
             Text(
                 "📊",
                 fontSize = 18.sp,
                 modifier = Modifier
                     .clickable {
-                        scope.launch {
-                            val url = geckoPoolUrl(coin.symbol)
-                                ?: ("https://www.coingecko.com/en/coins/" + coin.id)
-                            try {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            } catch (_: Exception) { }
-                        }
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id)))
+                            )
+                        } catch (_: Exception) { }
                     }
                     .padding(8.dp)
             )
