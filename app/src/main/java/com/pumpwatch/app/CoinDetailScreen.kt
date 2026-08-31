@@ -59,6 +59,8 @@ private val Blue = Color(0xFF40C4FF)
 
 private data class TfInfo(val name: String, val trend: String, val rsi: Double)
 
+private data class Vote(val name: String, val emoji: String, val dir: Int)
+
 private data class DetailAnalysis(
     val signal: String,
     val confidence: Int,
@@ -78,6 +80,8 @@ private data class DetailAnalysis(
     val tfs: List<TfInfo>,
     val explanation: String
 )
+
+// ---------- توابع محاسباتی ----------
 
 private fun chunkEvery(v: List<Double>, n: Int): List<Double> =
     if (n <= 1) v else v.filterIndexed { i, _ -> (i + 1) % n == 0 }
@@ -145,67 +149,87 @@ private fun tfLabel(tf: String): String = when (tf) {
     else -> "هفتگی"
 }
 
-// ---------- سیگنال پویا بر اساس تایم‌فریم + اندیکاتور + فیوچرز ----------
-
-private fun computeDynSignal(
-    closes: List<Double>,
-    price: Double,
-    mode: IndicatorMode,
-    isFutures: Boolean,
-    funding: Double?
-): Pair<String, Int> {
-    if (closes.size < 40) return "HOLD" to 50
-    val rsi = rsiOf(closes)
-    val e7 = emaLast(closes, 7)
-    val e30 = emaLast(closes, 30)
-    val mUp = macdUp(closes)
-    val (bbU, bbL) = bollinger(closes)
-
-    var sig: String
-    var conf: Int
-
-    when (mode) {
-        IndicatorMode.EMA -> {
-            if (price > e7 && e7 > e30) { sig = "BUY"; conf = if (mUp) 82 else 66 }
-            else if (price < e7 && e7 < e30) { sig = "SELL"; conf = if (!mUp) 82 else 66 }
-            else { sig = "HOLD"; conf = 50 }
-        }
-        IndicatorMode.RSI -> {
-            if (rsi <= 30) { sig = "BUY"; conf = 85 }
-            else if (rsi <= 40 && mUp) { sig = "BUY"; conf = 66 }
-            else if (rsi >= 70) { sig = "SELL"; conf = 85 }
-            else if (rsi >= 60 && !mUp) { sig = "SELL"; conf = 66 }
-            else { sig = "HOLD"; conf = 50 }
-        }
-        IndicatorMode.MACD -> {
-            if (mUp && price > e30) { sig = "BUY"; conf = 78 }
-            else if (mUp) { sig = "WAIT_BUY"; conf = 60 }
-            else if (!mUp && price < e30) { sig = "SELL"; conf = 78 }
-            else if (!mUp) { sig = "WAIT_SELL"; conf = 60 }
-            else { sig = "HOLD"; conf = 50 }
-        }
-        IndicatorMode.BOLL -> {
-            if (price <= bbL * 1.01) { sig = "BUY"; conf = 82 }
-            else if (price >= bbU * 0.99) { sig = "SELL"; conf = 82 }
-            else if (price > (bbU + bbL) / 2 && mUp) { sig = "BUY"; conf = 62 }
-            else if (price < (bbU + bbL) / 2 && !mUp) { sig = "SELL"; conf = 62 }
-            else { sig = "HOLD"; conf = 50 }
-        }
-        IndicatorMode.NONE -> {
-            if (price > e30 && mUp) { sig = "BUY"; conf = 60 }
-            else if (price < e30 && !mUp) { sig = "SELL"; conf = 60 }
-            else { sig = "HOLD"; conf = 50 }
-        }
-    }
-
-    if (isFutures && funding != null) {
-        if (funding <= -0.0003 && sig == "BUY") conf = (conf + 10).coerceAtMost(95)
-        if (funding >= 0.0005 && sig == "BUY") { sig = "WAIT_BUY"; conf = (conf - 10).coerceAtLeast(40) }
-        if (funding >= 0.0005 && sig == "SELL") conf = (conf + 10).coerceAtMost(95)
-        if (funding <= -0.0003 && sig == "SELL") { sig = "WAIT_SELL"; conf = (conf - 10).coerceAtLeast(40) }
-    }
-    return sig to conf
+private fun tfParams(tf: String): Pair<Int, Int> = when (tf) {
+    "15m" -> 1 to 3
+    "1h" -> 2 to 1
+    "4h" -> 8 to 4
+    "1d" -> 200 to 1
+    else -> 365 to 7
 }
+
+private suspend fun closesFor(coinId: String, tf: String): List<Double> {
+    val (days, chunk) = tfParams(tf)
+    val chart = ApiClient.getCoinChart(coinId, days = days)
+    return chart.prices.map { it[1] }.chunked(chunk).map { it.last() }
+}
+
+// ---------- رأی هر اندیکاتور (هم‌قانون با B/S روی نمودار) ----------
+
+private fun computeVotes(closes: List<Double>, price: Double): List<Vote> {
+    if (closes.size < 40) return emptyList()
+
+    val rsi = rsiOf(closes)
+    val e20 = emaLast(closes, 20)
+    val e50 = emaLast(closes, 50)
+    val mUp = macdUp(closes)
+
+    val emaDir = when {
+        price > e20 && e20 > e50 -> 1
+        price < e20 && e20 < e50 -> -1
+        else -> 0
+    }
+
+    val rsiDir = when {
+        rsi <= 35 -> 1
+        rsi >= 65 -> -1
+        else -> 0
+    }
+
+    val macdDir = if (mUp) 1 else -1
+
+    // بولینگر: با قانون «کراس برگشتی» مثل نمودار
+    val (bbU, bbL) = bollinger(closes)
+    val prev = closes.dropLast(1)
+    val (pU, pL) = bollinger(prev)
+    val c = closes.last()
+    val pc = if (prev.isNotEmpty()) prev.last() else c
+    val bollDir = when {
+        pc <= pL && c > bbL -> 1
+        pc >= pU && c < bbU -> -1
+        c <= bbL * 1.01 -> 1
+        c >= bbU * 0.99 -> -1
+        c > (bbU + bbL) / 2 && mUp -> 1
+        c < (bbU + bbL) / 2 && !mUp -> -1
+        else -> 0
+    }
+
+    return listOf(
+        Vote("EMA", "📊", emaDir),
+        Vote("RSI", "📈", rsiDir),
+        Vote("MACD", "📉", macdDir),
+        Vote("بولینگر", "🎯", bollDir)
+    )
+}
+
+private fun scoreOf(votes: List<Vote>): Int = votes.sumOf { it.dir }
+
+private data class Verdict(val text: String, val color: Color)
+
+private fun verdictOf(score: Int): Verdict = when {
+    score >= 3 -> Verdict("خرید قوی 🟢🟢", Green)
+    score >= 1 -> Verdict("خرید ✅", Green)
+    score == 0 -> Verdict("خنثی  — منتظر بمون", Gray)
+    score >= -2 -> Verdict("فروش / شورت ❌", Red)
+    else -> Verdict("فروش قوی 🔴🔴", Red)
+}
+
+private fun tfEmoji(score: Int): String = when {
+    score >= 1 -> "🟢"
+    score <= -1 -> "🔴"
+    else -> "⚪"
+}
+
+// ---------- تحلیل پایه (نقاط ورود/استاپ) ----------
 
 private fun buildAnalysis(
     prices1d: List<List<Double>>,
@@ -254,15 +278,10 @@ private fun buildAnalysis(
     )
 
     val explanation = buildString {
+        append("این حکم، برآیند هر ۴ اندیکاتور روی تایم‌فریم انتخابیه — نه نظر یه اندیکاتور تنها.\n")
         append("روند ۱ ساعته: ${trendOf(closes1h)} | RSI: ${String.format(Locale.US, "%.0f", rsi1h)}\n")
         append(if (mUp) "MACD صعودیه و مومنتوم مثبته.\n" else "MACD نزولیه و مومنتوم منفیه.\n")
-        when (signal) {
-            "BUY" -> append("✅ شرایط خرید مهیاست: روند + مومنتوم + RSI سالم. با مدیریت ریسک وارد شو.")
-            "SELL" -> append("✅ شرایط فروش/شورت مهیاست: روند نزولی + مومنتوم منفی.")
-            "WAIT_BUY" -> append("🟡 قیمت داغه (RSI بالا). منتظر پولبک به منطقه زرد بمون بعد وارد شو.")
-            "WAIT_SELL" -> append("🟡 اشباع فروش. عجولانه شورت نزن — منتظر برگشت باش.")
-            else -> append("⏸️ سیگنال واضحی نیست. بهتره فعلاً فقط تماشا کنی.")
-        }
+        append("💡 طبیعیه که تایم‌فریم‌های مختلف گاهی مخالف هم باشن؛ تریدرهای حرفه‌ای اول جهت تایم بالاتر رو می‌بینن، بعد با تایم پایین‌تر نقطه ورود پیدا می‌کنن.")
     }
 
     return DetailAnalysis(
@@ -277,6 +296,8 @@ private fun fmt(v: Double): String =
     if (v >= 1) String.format(Locale.US, "$%,.4f", v)
     else String.format(Locale.US, "$%.6f", v)
 
+// ---------- صفحه جزئیات ----------
+
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -288,11 +309,12 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
     var deriv by remember { mutableStateOf<Derivative?>(null) }
     var news by remember { mutableStateOf<List<NewsItem>>(emptyList()) }
 
-    // ---------- حالت پویای سیگنال ----------
     var tf by remember { mutableStateOf("1h") }
     var mode by remember { mutableStateOf(IndicatorMode.EMA) }
-    var dynSig by remember { mutableStateOf<String?>(null) }
-    var dynConf by remember { mutableStateOf<Int?>(null) }
+
+    var votes by remember { mutableStateOf<List<Vote>>(emptyList()) }
+    var score by remember { mutableStateOf(0) }
+    var tfScores by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
 
     val isFutures = remember {
         context.getSharedPreferences("pumpwatch_prefs", 0)
@@ -344,24 +366,36 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
         }
     }
 
-    // ---------- سیگنال پویا: با تغییر tf/mode/deriv دوباره حساب می‌شه ----------
-    LaunchedEffect(coin.id, tf, mode, deriv) {
+    // ---------- حکم تجمیعی تایم‌فریم انتخابی ----------
+    LaunchedEffect(coin.id, tf, deriv) {
         scope.launch {
             try {
-                val (days, chunk) = when (tf) {
-                    "15m" -> 1 to 3
-                    "1h" -> 2 to 1
-                    "4h" -> 8 to 4
-                    "1d" -> 200 to 1
-                    else -> 365 to 7
+                val closes = closesFor(coin.id, tf)
+                val v = computeVotes(closes, coin.current_price)
+                var s = scoreOf(v)
+                if (isFutures) {
+                    val fr = deriv?.fundingRate
+                    if (fr != null) {
+                        if (fr <= -0.0003) s += 1
+                        if (fr >= 0.0005) s -= 1
+                    }
                 }
-                val chart = ApiClient.getCoinChart(coin.id, days = days)
-                val closes = chart.prices.map { it[1] }.chunked(chunk).map { it.last() }
-                val (s, c) = computeDynSignal(
-                    closes, coin.current_price, mode, isFutures, deriv?.fundingRate
-                )
-                dynSig = s
-                dynConf = c
+                votes = v
+                score = s
+            } catch (_: Exception) { }
+        }
+    }
+
+    // ---------- قطب‌نمای تایم‌فریم‌ها ----------
+    LaunchedEffect(coin.id) {
+        scope.launch {
+            try {
+                val list = mutableListOf<Pair<String, Int>>()
+                listOf("15m", "1h", "4h", "1d").forEach { t ->
+                    val closes = closesFor(coin.id, t)
+                    list.add(t to scoreOf(computeVotes(closes, coin.current_price)))
+                }
+                tfScores = list
             } catch (_: Exception) { }
         }
     }
@@ -397,32 +431,53 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
             a != null -> {
                 val an = a!!
-                val effSig = dynSig ?: an.signal
-                val effConf = dynConf ?: an.confidence
+                val verdict = verdictOf(score)
+                val conf = (50 + abs(score) * 11).coerceIn(40, 95)
+                val selectedVote = votes.firstOrNull { it.name == mode.label || it.emoji == mode.emoji }
 
-                val (sigText, sigColor) = when (effSig) {
-                    "BUY" -> "✅ خرید" to Green
-                    "SELL" -> "❌ فروش / شورت" to Red
-                    "WAIT_BUY" -> "⏳ صبر کن برای پولبک" to Yellow
-                    "WAIT_SELL" -> "⏳ اشباع فروش — صبر کن" to Yellow
-                    else -> "⏸️ بدون معامله" to Gray
-                }
+                // ---------- کارت حکم واحد ----------
                 Surface(
-                    color = sigColor.copy(alpha = 0.12f),
+                    color = verdict.color.copy(alpha = 0.12f),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Text(sigText, fontWeight = FontWeight.Black, fontSize = 22.sp, color = sigColor)
-                        Text("اطمینان: ${effConf}٪", fontSize = 14.sp, color = Gray)
+                        Text(verdict.text, fontWeight = FontWeight.Black, fontSize = 22.sp, color = verdict.color)
+                        Text("اطمینان: ${conf}٪", fontSize = 14.sp, color = Gray)
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            votes.forEach { v ->
+                                Text(
+                                    "${v.emoji} ${if (v.dir > 0) "🟢" else if (v.dir < 0) "🔴" else "⚪"}",
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        if (tfScores.isNotEmpty()) {
+                            Text(
+                                "🧭 " + tfScores.joinToString(" • ") { (t, s) -> "${tfLabel(t)} ${tfEmoji(s)}" },
+                                fontSize = 10.sp, color = Gray
+                            )
+                        }
+
                         Text(
-                            "🎯 بر اساس: ${tfLabel(tf)} • ${mode.label} • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
+                            "🎯 بر اساس: ${tfLabel(tf)} • برآیند ۴ اندیکاتور • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
                             fontSize = 10.sp, color = Gray
                         )
+
+                        if (selectedVote != null && score != 0 &&
+                            ((selectedVote.dir > 0 && score < 0) || (selectedVote.dir < 0 && score > 0))
+                        ) {
+                            Text(
+                                "⚠️ ${mode.label} الان مخالف برآینده — حکم بالا نظرِ همه اندیکاتورهای باهمه تا سردرگم نشی",
+                                fontSize = 10.sp, color = Yellow
+                            )
+                        }
                     }
                 }
 
@@ -451,7 +506,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             Text("هدف۱: ${fmt(an.target1)}", fontSize = 12.sp, color = Green)
                             Text("هدف۲: ${fmt(an.target2)}", fontSize = 12.sp, color = Green)
                         }
-                        if (effSig == "WAIT_BUY") {
+                        if (an.signal == "WAIT_BUY") {
                             Text(
                                 "🟡 منطقه خرید ایده‌آل: ${fmt(an.zoneLow)} تا ${fmt(an.zoneHigh)}",
                                 fontSize = 12.sp, color = Yellow, fontWeight = FontWeight.Bold
