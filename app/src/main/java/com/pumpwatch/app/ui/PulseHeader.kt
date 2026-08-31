@@ -1,6 +1,9 @@
 package com.pumpwatch.app.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,8 +49,6 @@ private val HCyan = Color(0xFF26C6DA)
 private val HGray = Color(0xFF8B949E)
 private val HCard = Color(0xFF1A2230)
 
-// ---------- ترجمه فارسی ترس و طمع ----------
-
 private fun translateFng(s: String?): String = when (s) {
     "Extreme Fear" -> "ترس شدید 😱"
     "Fear" -> "ترس 😨"
@@ -63,8 +65,6 @@ private fun fngColor(v: Int): Color = when {
     v <= 55 -> HYellow
     else -> HGreen
 }
-
-// ---------- گیج ترس و طمع ----------
 
 @Composable
 private fun FngGauge(value: Int, label: String) {
@@ -105,10 +105,9 @@ private fun FngGauge(value: Int, label: String) {
     }
 }
 
-// ---------- سربرگ نبض بازار ----------
-
 @Composable
 fun MarketPulseHeader() {
+    val context = LocalContext.current
     var fng by remember { mutableStateOf(-1) }
     var fngLabel by remember { mutableStateOf("") }
     var btcDom by remember { mutableStateOf(0.0) }
@@ -152,7 +151,6 @@ fun MarketPulseHeader() {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // ---------- ردیف عنوان ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("📡 نبض بازار", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(Modifier.weight(1f))
@@ -164,7 +162,6 @@ fun MarketPulseHeader() {
                 )
             }
 
-            // ---------- ردیف گیج + دامیننس ----------
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -176,18 +173,14 @@ fun MarketPulseHeader() {
                         Text("دامیننس BTC:", fontSize = 11.sp, color = HGray)
                         Text(
                             String.format(Locale.US, "%.1f%%", btcDom),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = HOrange
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = HOrange
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("دامیننس ETH:", fontSize = 11.sp, color = HGray)
                         Text(
                             String.format(Locale.US, "%.1f%%", ethDom),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = HCyan
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = HCyan
                         )
                     }
                     Text(
@@ -196,21 +189,29 @@ fun MarketPulseHeader() {
                             fng >= 75 -> "💡 بازار حریصه — احتیاط، اصلاح نزدیکه"
                             else -> "💡 بازار متعادله — منتظر سیگنال بمون"
                         },
-                        fontSize = 10.sp,
-                        color = HGray
+                        fontSize = 10.sp, color = HGray
                     )
                 }
             }
 
-            // ---------- ردیف ترندها ----------
             if (trending.isNotEmpty()) {
-                Text("🔥 الان دنیا داره سرچ می‌کنه:", fontSize = 11.sp, color = HGray)
+                Text("🔥 الان دنیا داره سرچ می‌کنه (بزن = GeckoTerminal):", fontSize = 11.sp, color = HGray)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     trending.take(10).forEach { item ->
-                        Surface(color = HCard, shape = RoundedCornerShape(10.dp)) {
+                        Surface(
+                            color = HCard,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.clickable {
+                                try {
+                                    val url = "https://www.geckoterminal.com/search?query=" +
+                                            (item.symbol ?: "").uppercase(Locale.US)
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                } catch (_: Exception) { }
+                            }
+                        ) {
                             Text(
                                 "${item.name} (${item.symbol?.uppercase(Locale.US)})",
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
