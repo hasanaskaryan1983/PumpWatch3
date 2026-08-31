@@ -69,11 +69,11 @@ object GeckoTerminal {
     }
 }
 
-// ---------- پیدا کردن آدرس درست نمودار ----------
+// ---------- آدرس نمودار GeckoTerminal (با جستجوی دقیق) ----------
 
-suspend fun geckoPoolUrl(symbol: String): String? {
+suspend fun geckoPoolUrl(query: String): String? {
     return try {
-        val pool = GeckoTerminal.api.searchPools(symbol).data?.firstOrNull()
+        val pool = GeckoTerminal.api.searchPools(query).data?.firstOrNull()
         val network = pool?.relationships?.network?.data?.id
         val addr = pool?.id?.substringAfter('_')
         if (!network.isNullOrEmpty() && !addr.isNullOrEmpty())
@@ -82,6 +82,31 @@ suspend fun geckoPoolUrl(symbol: String): String? {
     } catch (_: Exception) {
         null
     }
+}
+
+// ---------- آدرس نمودار CoinMarketCap (با slug درست) ----------
+
+fun cmcUrl(geckoId: String): String {
+    val slug = when (geckoId) {
+        "binancecoin" -> "bnb"
+        "ripple" -> "xrp"
+        "matic-network" -> "polygon"
+        "near" -> "near-protocol"
+        "dai" -> "multi-collateral-dai"
+        "avalanche-2" -> "avalanche"
+        "crypto-com-chain" -> "cronos"
+        "theta-token" -> "theta-network"
+        "hedera-hashgraph" -> "hedera"
+        "jupiter-exchange-solana" -> "jupiter"
+        "sei-network" -> "sei"
+        "blockstack" -> "stacks"
+        "gatechain-token" -> "gatetoken"
+        "wrapped-bitcoin" -> "wrapped-bitcoin"
+        "staked-ether" -> "staked-ether"
+        "shiba-inu" -> "shiba-inu"
+        else -> geckoId
+    }
+    return "https://coinmarketcap.com/currencies/$slug/"
 }
 
 // ---------- بایننس (پشتیبان) ----------
