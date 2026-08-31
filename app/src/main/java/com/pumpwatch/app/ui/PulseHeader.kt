@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.FngClient
 import com.pumpwatch.app.data.PulseClient
 import com.pumpwatch.app.data.TrendingItem
+import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.data.geckoPoolUrl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -199,7 +200,7 @@ fun MarketPulseHeader() {
             }
 
             if (trending.isNotEmpty()) {
-                Text("🔥 الان دنیا داره سرچ می‌کنه (بزن = نمودار GeckoTerminal):", fontSize = 11.sp, color = HGray)
+                Text("🔥 الان دنیا داره سرچ می‌کنه (بزن = نمودار ارز):", fontSize = 11.sp, color = HGray)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -210,8 +211,8 @@ fun MarketPulseHeader() {
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.clickable {
                                 scope.launch {
-                                    val url = geckoPoolUrl(item.symbol ?: "")
-                                        ?: "https://www.geckoterminal.com/"
+                                    val url = geckoPoolUrl(item.name ?: item.symbol ?: "")
+                                        ?: cmcUrl(item.id ?: item.symbol ?: "")
                                     try {
                                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                     } catch (_: Exception) { }
