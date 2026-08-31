@@ -6,6 +6,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
+import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
 private val radarClient: OkHttpClient by lazy {
@@ -15,7 +16,7 @@ private val radarClient: OkHttpClient by lazy {
         .build()
 }
 
-// ---------- GeckoTerminal (استخرهای داغ میم‌کوین) ----------
+// ---------- GeckoTerminal (استخرهای داغ + جدید) ----------
 
 data class GeckoPriceChange(val h1: Double?, val h6: Double?, val h24: Double?)
 data class GeckoBuysSells(val buys: Double?, val sells: Double?)
@@ -49,6 +50,9 @@ data class GeckoPoolsResponse(val data: List<GeckoPool>?)
 interface GeckoApi {
     @GET("api/v2/networks/{network}/trending_pools")
     suspend fun trendingPools(@Path("network") network: String): GeckoPoolsResponse
+
+    @GET("api/v2/networks/{network}/new_pools")
+    suspend fun newPools(@Path("network") network: String): GeckoPoolsResponse
 }
 
 object GeckoTerminal {
@@ -62,7 +66,7 @@ object GeckoTerminal {
     }
 }
 
-// ---------- بایننس (حالت پشتیبان: حرکات سریع) ----------
+// ---------- بایننس اسپات (معاملات + کندل) ----------
 
 data class Ticker24(
     val symbol: String?,
@@ -84,5 +88,40 @@ object RadarBinance {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(RadarBinanceApi::class.java)
+    }
+}
+
+// ---------- بایننس فیوچرز (ردپای نهنگ‌های بزرگ) ----------
+
+data class TopRatio(
+    val symbol: String?,
+    @SerializedName("longShortRatio") val ratio: String?,
+    @SerializedName("longAccount") val longAccount: String?
+)
+
+data class PremiumIdx(
+    @SerializedName("lastFundingRate") val funding: String?
+)
+
+interface FuturesRadarApi {
+    @GET("futures/data/topLongShortPositionRatio")
+    suspend fun topRatio(
+        @Query("symbol") symbol: String,
+        @Query("period") period: String,
+        @Query("limit") limit: Int
+    ): List<TopRatio>
+
+    @GET("fapi/v1/premiumIndex")
+    suspend fun premium(@Query("symbol") symbol: String): PremiumIdx
+}
+
+object FuturesRadar {
+    val api: FuturesRadarApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://fapi.binance.com/")
+            .client(radarClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(FuturesRadarApi::class.java)
     }
 }
