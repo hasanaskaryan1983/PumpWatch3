@@ -43,6 +43,7 @@ import com.pumpwatch.app.data.Derivative
 import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.data.NewsItem
 import com.pumpwatch.app.data.ScanClient
+import com.pumpwatch.app.ui.IndicatorMode
 import com.pumpwatch.app.ui.ProChart
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -56,13 +57,7 @@ private val Yellow = Color(0xFFFFC107)
 private val Gray = Color(0xFF8B949E)
 private val Blue = Color(0xFF40C4FF)
 
-// ---------- مدل‌های تحلیل ----------
-
-private data class TfInfo(
-    val name: String,
-    val trend: String,
-    val rsi: Double
-)
+private data class TfInfo(val name: String, val trend: String, val rsi: Double)
 
 private data class DetailAnalysis(
     val signal: String,
@@ -83,8 +78,6 @@ private data class DetailAnalysis(
     val tfs: List<TfInfo>,
     val explanation: String
 )
-
-// ---------- توابع محاسباتی ----------
 
 private fun chunkEvery(v: List<Double>, n: Int): List<Double> =
     if (n <= 1) v else v.filterIndexed { i, _ -> (i + 1) % n == 0 }
@@ -144,7 +137,75 @@ private fun trendOf(closes: List<Double>): String {
     return if (e20 > e50) "صعودی" else if (e20 < e50) "نزولی" else "خنثی"
 }
 
-// ---------- ساخت تحلیل ----------
+private fun tfLabel(tf: String): String = when (tf) {
+    "15m" -> "۱۵ دقیقه"
+    "1h" -> "۱ ساعته"
+    "4h" -> "۴ ساعته"
+    "1d" -> "روزانه"
+    else -> "هفتگی"
+}
+
+// ---------- سیگنال پویا بر اساس تایم‌فریم + اندیکاتور + فیوچرز ----------
+
+private fun computeDynSignal(
+    closes: List<Double>,
+    price: Double,
+    mode: IndicatorMode,
+    isFutures: Boolean,
+    funding: Double?
+): Pair<String, Int> {
+    if (closes.size < 40) return "HOLD" to 50
+    val rsi = rsiOf(closes)
+    val e7 = emaLast(closes, 7)
+    val e30 = emaLast(closes, 30)
+    val mUp = macdUp(closes)
+    val (bbU, bbL) = bollinger(closes)
+
+    var sig: String
+    var conf: Int
+
+    when (mode) {
+        IndicatorMode.EMA -> {
+            if (price > e7 && e7 > e30) { sig = "BUY"; conf = if (mUp) 82 else 66 }
+            else if (price < e7 && e7 < e30) { sig = "SELL"; conf = if (!mUp) 82 else 66 }
+            else { sig = "HOLD"; conf = 50 }
+        }
+        IndicatorMode.RSI -> {
+            if (rsi <= 30) { sig = "BUY"; conf = 85 }
+            else if (rsi <= 40 && mUp) { sig = "BUY"; conf = 66 }
+            else if (rsi >= 70) { sig = "SELL"; conf = 85 }
+            else if (rsi >= 60 && !mUp) { sig = "SELL"; conf = 66 }
+            else { sig = "HOLD"; conf = 50 }
+        }
+        IndicatorMode.MACD -> {
+            if (mUp && price > e30) { sig = "BUY"; conf = 78 }
+            else if (mUp) { sig = "WAIT_BUY"; conf = 60 }
+            else if (!mUp && price < e30) { sig = "SELL"; conf = 78 }
+            else if (!mUp) { sig = "WAIT_SELL"; conf = 60 }
+            else { sig = "HOLD"; conf = 50 }
+        }
+        IndicatorMode.BOLL -> {
+            if (price <= bbL * 1.01) { sig = "BUY"; conf = 82 }
+            else if (price >= bbU * 0.99) { sig = "SELL"; conf = 82 }
+            else if (price > (bbU + bbL) / 2 && mUp) { sig = "BUY"; conf = 62 }
+            else if (price < (bbU + bbL) / 2 && !mUp) { sig = "SELL"; conf = 62 }
+            else { sig = "HOLD"; conf = 50 }
+        }
+        IndicatorMode.NONE -> {
+            if (price > e30 && mUp) { sig = "BUY"; conf = 60 }
+            else if (price < e30 && !mUp) { sig = "SELL"; conf = 60 }
+            else { sig = "HOLD"; conf = 50 }
+        }
+    }
+
+    if (isFutures && funding != null) {
+        if (funding <= -0.0003 && sig == "BUY") conf = (conf + 10).coerceAtMost(95)
+        if (funding >= 0.0005 && sig == "BUY") { sig = "WAIT_BUY"; conf = (conf - 10).coerceAtLeast(40) }
+        if (funding >= 0.0005 && sig == "SELL") conf = (conf + 10).coerceAtMost(95)
+        if (funding <= -0.0003 && sig == "SELL") { sig = "WAIT_SELL"; conf = (conf - 10).coerceAtLeast(40) }
+    }
+    return sig to conf
+}
 
 private fun buildAnalysis(
     prices1d: List<List<Double>>,
@@ -205,31 +266,16 @@ private fun buildAnalysis(
     }
 
     return DetailAnalysis(
-        signal = signal,
-        confidence = confidence,
-        entry = price,
-        stop = stop,
-        target1 = t1,
-        target2 = t2,
-        zoneLow = zoneLow,
-        zoneHigh = zoneHigh,
-        rsi1h = rsi1h,
-        macdUp = mUp,
-        ema20 = e20,
-        ema50 = e50,
-        atr = atr,
-        bbUpper = bbU,
-        bbLower = bbL,
-        tfs = tfs,
-        explanation = explanation
+        signal = signal, confidence = confidence, entry = price, stop = stop,
+        target1 = t1, target2 = t2, zoneLow = zoneLow, zoneHigh = zoneHigh,
+        rsi1h = rsi1h, macdUp = mUp, ema20 = e20, ema50 = e50, atr = atr,
+        bbUpper = bbU, bbLower = bbL, tfs = tfs, explanation = explanation
     )
 }
 
 private fun fmt(v: Double): String =
     if (v >= 1) String.format(Locale.US, "$%,.4f", v)
     else String.format(Locale.US, "$%.6f", v)
-
-// ---------- صفحه جزئیات ----------
 
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
@@ -241,6 +287,12 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
     var info by remember { mutableStateOf<CoinInfo?>(null) }
     var deriv by remember { mutableStateOf<Derivative?>(null) }
     var news by remember { mutableStateOf<List<NewsItem>>(emptyList()) }
+
+    // ---------- حالت پویای سیگنال ----------
+    var tf by remember { mutableStateOf("1h") }
+    var mode by remember { mutableStateOf(IndicatorMode.EMA) }
+    var dynSig by remember { mutableStateOf<String?>(null) }
+    var dynConf by remember { mutableStateOf<Int?>(null) }
 
     val isFutures = remember {
         context.getSharedPreferences("pumpwatch_prefs", 0)
@@ -260,9 +312,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     a = buildAnalysis(c1d.prices, c30.prices, coin.current_price)
                     loading = false
                     scope.launch {
-                        try {
-                            info = CoinInfoClient.api.info(coin.id)
-                        } catch (_: Exception) { }
+                        try { info = CoinInfoClient.api.info(coin.id) } catch (_: Exception) { }
                     }
                     scope.launch {
                         if (isFutures) {
@@ -294,6 +344,28 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
         }
     }
 
+    // ---------- سیگنال پویا: با تغییر tf/mode/deriv دوباره حساب می‌شه ----------
+    LaunchedEffect(coin.id, tf, mode, deriv) {
+        scope.launch {
+            try {
+                val (days, chunk) = when (tf) {
+                    "15m" -> 1 to 3
+                    "1h" -> 2 to 1
+                    "4h" -> 8 to 4
+                    "1d" -> 200 to 1
+                    else -> 365 to 7
+                }
+                val chart = ApiClient.getCoinChart(coin.id, days = days)
+                val closes = chart.prices.map { it[1] }.chunked(chunk).map { it.last() }
+                val (s, c) = computeDynSignal(
+                    closes, coin.current_price, mode, isFutures, deriv?.fundingRate
+                )
+                dynSig = s
+                dynConf = c
+            } catch (_: Exception) { }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -301,37 +373,34 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // ---------- سربرگ ----------
         Row(verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = onBack) { Text("← بازگشت") }
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(
                     "${coin.symbol.uppercase(Locale.US)} - ${coin.name}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontWeight = FontWeight.Bold, fontSize = 18.sp
                 )
                 Text(
                     "${String.format(Locale.US, "$%,.6f", coin.current_price)}  •  ${if (isFutures) "⚡ فیوچرز" else "🏦 اسپات"}",
-                    fontSize = 13.sp,
-                    color = Gray
+                    fontSize = 13.sp, color = Gray
                 )
             }
         }
 
         when {
             loading -> CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                color = Green
+                modifier = Modifier.align(Alignment.CenterHorizontally), color = Green
             )
 
             error != null -> Text("خطا: $error", color = Red)
 
             a != null -> {
                 val an = a!!
+                val effSig = dynSig ?: an.signal
+                val effConf = dynConf ?: an.confidence
 
-                // ---------- سیگنال ----------
-                val (sigText, sigColor) = when (an.signal) {
+                val (sigText, sigColor) = when (effSig) {
                     "BUY" -> "✅ خرید" to Green
                     "SELL" -> "❌ فروش / شورت" to Red
                     "WAIT_BUY" -> "⏳ صبر کن برای پولبک" to Yellow
@@ -345,17 +414,25 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(sigText, fontWeight = FontWeight.Black, fontSize = 22.sp, color = sigColor)
-                        Text("اطمینان: ${an.confidence}٪", fontSize = 14.sp, color = Gray)
+                        Text("اطمینان: ${effConf}٪", fontSize = 14.sp, color = Gray)
+                        Text(
+                            "🎯 بر اساس: ${tfLabel(tf)} • ${mode.label} • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
+                            fontSize = 10.sp, color = Gray
+                        )
                     }
                 }
 
-                // ---------- نمودار حرفه‌ای ----------
-                ProChart(coin.id, coin.symbol)
+                ProChart(
+                    coin.id,
+                    coin.symbol,
+                    onTfChange = { tf = it },
+                    onModeChange = { mode = it }
+                )
 
-                // ---------- نقاط دقیق ----------
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(16.dp),
@@ -365,7 +442,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         modifier = Modifier.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("🎯 نقاط دقیق معامله:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("🎯 نقاط دقیق معامله (پایه ۱ ساعته):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                             Text("ورود: ${fmt(an.entry)}", fontSize = 12.sp)
                             Text("استاپ: ${fmt(an.stop)}", fontSize = 12.sp, color = Red)
@@ -374,18 +451,15 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             Text("هدف۱: ${fmt(an.target1)}", fontSize = 12.sp, color = Green)
                             Text("هدف۲: ${fmt(an.target2)}", fontSize = 12.sp, color = Green)
                         }
-                        if (an.signal == "WAIT_BUY") {
+                        if (effSig == "WAIT_BUY") {
                             Text(
                                 "🟡 منطقه خرید ایده‌آل: ${fmt(an.zoneLow)} تا ${fmt(an.zoneHigh)}",
-                                fontSize = 12.sp,
-                                color = Yellow,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 12.sp, color = Yellow, fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
 
-                // ---------- جدول تایم‌فریم‌ها ----------
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(16.dp),
@@ -405,17 +479,12 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                                 Text(t.name, fontSize = 12.sp)
                                 Text("${t.trend} $emoji", fontSize = 12.sp, color = tColor)
-                                Text(
-                                    "RSI: ${String.format(Locale.US, "%.0f", t.rsi)}",
-                                    fontSize = 12.sp,
-                                    color = Gray
-                                )
+                                Text("RSI: ${String.format(Locale.US, "%.0f", t.rsi)}", fontSize = 12.sp, color = Gray)
                             }
                         }
                     }
                 }
 
-                // ---------- اندیکاتورهای ۱ ساعته ----------
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(16.dp),
@@ -438,7 +507,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     }
                 }
 
-                // ---------- فاندامنتال ----------
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(16.dp),
@@ -463,11 +531,8 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         if (isFutures && deriv != null) {
                             val d = deriv!!
                             val fr = d.fundingRate ?: 0.0
-                            IndRow(
-                                "فاندینگ ریت",
-                                String.format(Locale.US, "%.4f%%", fr * 100),
-                                if (fr <= -0.0003) Green else if (fr >= 0.0005) Red else Gray
-                            )
+                            IndRow("فاندینگ ریت", String.format(Locale.US, "%.4f%%", fr * 100),
+                                if (fr <= -0.0003) Green else if (fr >= 0.0005) Red else Gray)
                             IndRow("Open Interest", formatMarketCap(d.openInterestUsd), Blue)
                             IndRow("حجم ۲۴س فیوچرز", formatMarketCap(d.volume24h), Gray)
                             if (d.market?.name != null) {
@@ -477,25 +542,15 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     }
                 }
 
-                // ---------- نکته فاندینگ ----------
                 if (isFutures && deriv?.fundingRate != null) {
                     val fr = deriv!!.fundingRate!!
                     if (fr <= -0.0003) {
-                        Text(
-                            "💡 فاندینگ منفی: شورت‌ها شلوغن — پتانسیل اسکوییز صعودی 🚀",
-                            fontSize = 12.sp,
-                            color = Green
-                        )
+                        Text("💡 فاندینگ منفی: شورت‌ها شلوغن — پتانسیل اسکوییز صعودی 🚀", fontSize = 12.sp, color = Green)
                     } else if (fr >= 0.0005) {
-                        Text(
-                            "💡 فاندینگ مثبت شدید: لانگ‌ها شلوغن — احتیاط، احتمال اصلاح 🩸",
-                            fontSize = 12.sp,
-                            color = Red
-                        )
+                        Text("💡 فاندینگ مثبت شدید: لانگ‌ها شلوغن — احتیاط، احتمال اصلاح 🩸", fontSize = 12.sp, color = Red)
                     }
                 }
 
-                // ---------- اخبار ----------
                 if (news.isNotEmpty()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
@@ -518,18 +573,12 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                                             } catch (_: Exception) { }
                                         }
                                 ) {
-                                    Text(
-                                        n.title ?: "",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Blue
-                                    )
+                                    Text(n.title ?: "", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Blue)
                                     val t = n.publishedOn ?: 0L
                                     if (t > 0) {
                                         Text(
                                             "${n.source ?: ""} • ${DateUtils.getRelativeTimeSpanString(t * 1000)}",
-                                            fontSize = 10.sp,
-                                            color = Gray
+                                            fontSize = 10.sp, color = Gray
                                         )
                                     }
                                 }
@@ -538,7 +587,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     }
                 }
 
-                // ---------- توضیحات ----------
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shape = RoundedCornerShape(12.dp),
@@ -547,8 +595,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     Text(
                         an.explanation,
                         modifier = Modifier.padding(12.dp),
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp
+                        fontSize = 12.sp, lineHeight = 18.sp
                     )
                 }
             }
