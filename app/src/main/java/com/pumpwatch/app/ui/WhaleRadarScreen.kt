@@ -82,11 +82,17 @@ private data class WhalePick(
     val volH1: Double,
     val buysH1: Double,
     val sellsH1: Double,
+    val buysH6: Double,
+    val sellsH6: Double,
+    val buysH24: Double,
+    val sellsH24: Double,
     val liquidity: Double,
     val changeH1: Double,
+    val changeH6: Double,
+    val changeH24: Double,
     val ageHours: Double,
     val fdv: Double,
-    val safe: Boolean
+    val credScore: Int
 )
 
 // ---------- توابع کمکی ----------
@@ -106,6 +112,13 @@ private fun chainEmoji(chain: String): String = when (chain) {
     else -> "⛓️"
 }
 
+private fun ageText(h: Double): String = when {
+    h >= 9999 -> "—"
+    h < 1 -> "زیر ۱ ساعت"
+    h < 48 -> "${h.toInt()} ساعت"
+    else -> "${(h / 24).toInt()} روز"
+}
+
 private fun ageHours(createdAt: String?): Double {
     if (createdAt == null) return 9999.0
     return try {
@@ -118,25 +131,54 @@ private fun ageHours(createdAt: String?): Double {
     }
 }
 
+private fun ratio(b: Double, s: Double): Double {
+    val t = b + s
+    return if (t > 0) b / t else 0.5
+}
+
+// ---------- ساخت WhalePick + امتیاز اعتبار ----------
+
 private fun poolStats(p: GeckoPool): WhalePick? {
     val a = p.attributes ?: return null
     val price = a.priceUsd?.toDoubleOrNull() ?: return null
     if (price <= 0) return null
     val name = a.name ?: "?"
     val symbol = name.split("/").firstOrNull()?.trim() ?: "?"
+
+    val liq = a.reserveUsd?.toDoubleOrNull() ?: 0.0
+    val b1 = a.transactions?.h1?.buys ?: 0.0
+    val s1 = a.transactions?.h1?.sells ?: 0.0
+    val b6 = a.transactions?.h6?.buys ?: 0.0
+    val s6 = a.transactions?.h6?.sells ?: 0.0
+    val b24 = a.transactions?.h24?.buys ?: 0.0
+    val s24 = a.transactions?.h24?.sells ?: 0.0
+    val fdv = a.fdvUsd ?: 0.0
+    val age = ageHours(a.createdAt)
+
+    var score = 0
+    if (liq >= 100_000) score += 25 else if (liq >= 50_000) score += 10
+    if (b1 > 0 && s1 > 0) score += 15
+    val r1 = ratio(b1, s1)
+    if (r1 >= 0.6) score += 25 else if (r1 >= 0.5) score += 10
+    if (age >= 24) score += 15 else if (age >= 6) score += 10 else score += 5
+    if (fdv in 100_000.0..10_000_000.0) score += 20
+
     return WhalePick(
         symbol = symbol,
         name = name,
         chain = p.relationships?.network?.data?.id ?: "?",
         price = price,
         volH1 = a.volume?.h1 ?: 0.0,
-        buysH1 = a.transactions?.h1?.buys ?: 0.0,
-        sellsH1 = a.transactions?.h1?.sells ?: 0.0,
-        liquidity = a.reserveUsd?.toDoubleOrNull() ?: 0.0,
+        buysH1 = b1, sellsH1 = s1,
+        buysH6 = b6, sellsH6 = s6,
+        buysH24 = b24, sellsH24 = s24,
+        liquidity = liq,
         changeH1 = a.priceChange?.h1 ?: 0.0,
-        ageHours = ageHours(a.createdAt),
-        fdv = a.fdvUsd ?: 0.0,
-        safe = false
+        changeH6 = a.priceChange?.h6 ?: 0.0,
+        changeH24 = a.priceChange?.h24 ?: 0.0,
+        ageHours = age,
+        fdv = fdv,
+        credScore = score.coerceAtMost(100)
     )
 }
 
@@ -305,7 +347,7 @@ fun WhaleRadarScreen() {
 
                 leaders = trend
                     .mapNotNull { poolStats(it) }
-                    .filter { it.volH1 >= threshold && (it.buysH1 + it.sellsH1) > 0 && it.sellsH1 > 0 }
+                    .filter { it.volH1 >= threshold && it.buysH1 > it.sellsH1 && it.sellsH1 > 0 }
                     .sortedByDescending { it.volH1 }
                     .take(12)
 
@@ -317,10 +359,9 @@ fun WhaleRadarScreen() {
                                 p.ageHours >= 1 &&
                                 p.sellsH1 > 0 &&
                                 p.buysH1 > p.sellsH1 &&
-                                p.volH1 >= 10_000
+                                p.credScore >= 50
                     }
-                    .map { it.copy(safe = it.liquidity >= 100_000 && it.fdv <= 10_000_000) }
-                    .sortedByDescending { it.buysH1 / (it.buysH1 + it.sellsH1) * it.volH1 }
+                    .sortedByDescending { it.credScore * 1_000_000 + it.volH1 }
                     .take(10)
 
                 lastUpdate = "بروزرسانی: " +
@@ -506,9 +547,9 @@ fun WhaleRadarScreen() {
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("👑 مهمترین نهنگ‌ها — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("👑 مهمترین نهنگ‌ها — الان دارن چی می‌خرن/می‌فروشن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
                         Row(
                             modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -519,7 +560,7 @@ fun WhaleRadarScreen() {
                             FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 },
                                 label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
                             FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 },
-                                label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
+                                label = { Text("۵۰ هزار", fontSize = 10.sp) })
                             FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 },
                                 label = { Text("۱ میلیون", fontSize = 10.sp) })
                         }
@@ -532,29 +573,65 @@ fun WhaleRadarScreen() {
                             Text("😴 فعلاً خرید نهنگی سنگینی ثبت نشده", fontSize = 11.sp, color = WGray)
                         } else {
                             leaders.forEach { l ->
-                                val ratio = l.buysH1 / (l.buysH1 + l.sellsH1)
-                                Row(
+                                val r1 = ratio(l.buysH1, l.sellsH1)
+                                val r6 = ratio(l.buysH6, l.sellsH6)
+                                val r24 = ratio(l.buysH24, l.sellsH24)
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(chainEmoji(l.chain), fontSize = 18.sp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(l.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(chainEmoji(l.chain), fontSize = 18.sp)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(l.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                        Spacer(Modifier.width(8.dp))
                                         Text(
-                                            "قیمت: ${String.format(Locale.US, "$%.6f", l.price)} • حجم ۱س: ${compact(l.volH1)}",
-                                            fontSize = 10.sp, color = WGray
+                                            String.format(Locale.US, "$%.6f", l.price),
+                                            fontSize = 11.sp, color = WGray
                                         )
+                                        Spacer(Modifier.weight(1f))
                                         Text(
-                                            "خرید: ${l.buysH1.toInt()} / فروش: ${l.sellsH1.toInt()} معامله",
-                                            fontSize = 10.sp,
-                                            color = if (ratio >= 0.6) WGreen else WGold
+                                            "${String.format(Locale.US, "%+.1f%%", l.changeH1)} 🕐",
+                                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                            color = if (l.changeH1 >= 0) WGreen else WRed
                                         )
                                     }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            "➕ اضافه کردن (خرید ۱س): ${l.buysH1.toInt()} معامله",
+                                            fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            "➖ فروش ۱س: ${l.sellsH1.toInt()} معامله",
+                                            fontSize = 10.sp, color = WRed
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("فشار خرید ۱س: ${String.format(Locale.US, "%.0f", r1 * 100)}٪", fontSize = 10.sp, color = if (r1 >= 0.6) WGreen else WGold)
+                                        Text("۶س: ${String.format(Locale.US, "%.0f", r6 * 100)}٪", fontSize = 10.sp, color = WGray)
+                                        Text("۲۴س: ${String.format(Locale.US, "%.0f", r24 * 100)}٪", fontSize = 10.sp, color = WGray)
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("💧 موجودی استخر: ${compact(l.liquidity)}", fontSize = 10.sp, color = WBlue)
+                                        Text("حجم ۱س: ${compact(l.volH1)}", fontSize = 10.sp, color = WGray)
+                                    }
                                     Text(
-                                        "${String.format(Locale.US, "%.0f", ratio * 100)}٪ 🐳",
-                                        fontSize = 13.sp, fontWeight = FontWeight.Black,
-                                        color = if (ratio >= 0.6) WGreen else WGold
+                                        when {
+                                            r1 > r6 && r6 > r24 -> "🐳 نهنگ‌ها تازه شروع به خرید کردن — شتاب فزاینده 📈"
+                                            r1 >= 0.6 -> "🐳 نهنگ‌ها در حال جمع‌کردن این ارزن 🚀"
+                                            else -> "⚖️ خرید معمولی"
+                                        },
+                                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                        color = if (r1 >= 0.6) WGreen else WGray
                                     )
                                 }
                             }
@@ -563,7 +640,7 @@ fun WhaleRadarScreen() {
                 }
             }
 
-            // ================= ۳) تازه‌واردهای زیر ذره‌بین نهنگ‌ها =================
+            // ================= ۳) تازه‌واردهای مورد تأیید =================
             item {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
@@ -572,11 +649,11 @@ fun WhaleRadarScreen() {
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text("🌱 تازه‌واردهایی که نهنگ‌ها حمله کردن (تأیید ایمنی خودکار)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("🌱 تازه‌واردهایی که نهنگ‌ها حمله کردن — با تأیید ایمنی", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Text(
-                            "بررسی خودکار: نقدینگی ≥ ۵۰K • معامله دوطرفه • سن ≥ ۱ ساعت • فشار خرید — ✅ = ایمن‌تر",
+                            "امتیاز اعتبار از ۱۰۰: نقدینگی + معامله دوطرفه + فشار خرید + سن + FDV سالم",
                             fontSize = 9.sp, color = WGray
                         )
 
@@ -586,39 +663,52 @@ fun WhaleRadarScreen() {
                             Text("😴 فعلاً تازه‌وارد مورد تأییدی پیدا نشد — بعداً سر بزن", fontSize = 11.sp, color = WGray)
                         } else {
                             fresh.forEach { f ->
-                                val ratio = f.buysH1 / (f.buysH1 + f.sellsH1)
-                                Row(
+                                val r1 = ratio(f.buysH1, f.sellsH1)
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(chainEmoji(f.chain), fontSize = 18.sp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(f.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            if (f.safe) {
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("✅ تأیید ایمنی", fontSize = 9.sp, color = WGreen, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(chainEmoji(f.chain), fontSize = 18.sp)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(f.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                        Spacer(Modifier.weight(1f))
                                         Text(
-                                            "قیمت: ${String.format(Locale.US, "$%.8f", f.price)}",
-                                            fontSize = 10.sp, color = WGray
-                                        )
-                                        Text(
-                                            "نقدینگی: ${compact(f.liquidity)} • حجم ۱س: ${compact(f.volH1)} • سن: ${if (f.ageHours < 48) "${f.ageHours.toInt()} ساعت" else "${(f.ageHours / 24).toInt()} روز"}",
-                                            fontSize = 10.sp, color = WGray
+                                            "اعتبار: ${f.credScore}/۱۰۰",
+                                            fontSize = 11.sp, fontWeight = FontWeight.Black,
+                                            color = if (f.credScore >= 70) WGreen else WGold
                                         )
                                     }
                                     Text(
-                                        "${String.format(Locale.US, "%+.1f%%", f.changeH1)}",
-                                        fontSize = 12.sp, fontWeight = FontWeight.Black,
-                                        color = if (f.changeH1 >= 0) WGreen else WRed
+                                        "قیمت: ${String.format(Locale.US, "$%.8f", f.price)} • سن: ${ageText(f.ageHours)}",
+                                        fontSize = 10.sp, color = WGray
                                     )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("💧 نقدینگی: ${compact(f.liquidity)}", fontSize = 10.sp, color = WBlue)
+                                        Text("حجم ۱س: ${compact(f.volH1)}", fontSize = 10.sp, color = WGray)
+                                        Text(
+                                            "${String.format(Locale.US, "%+.1f%%", f.changeH1)} 🕐",
+                                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                            color = if (f.changeH1 >= 0) WGreen else WRed
+                                        )
+                                    }
+                                    Text(
+                                        "🐳 فشار خرید: ${String.format(Locale.US, "%.0f", r1 * 100)}٪ — نهنگ‌ها در حال خریدن",
+                                        fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (f.liquidity >= 100_000) Text("✅ نقدینگی قوی", fontSize = 9.sp, color = WGreen)
+                                        if (f.buysH1 > 0 && f.sellsH1 > 0) Text("✅ معامله دوطرفه", fontSize = 9.sp, color = WGreen)
+                                        if (f.fdv in 100_000.0..10_000_000.0) Text("✅ FDV سالم", fontSize = 9.sp, color = WGreen)
+                                        if (f.ageHours >= 24) Text("✅ جاافتاده", fontSize = 9.sp, color = WGreen)
+                                    }
                                 }
                             }
                             Text(
-                                "⚠️ تأیید ایمنی ≠ تضمین! میم‌کوین یعنی ریسک بالا — فقط پولی که تحمل از دست دادنش رو داری",
+                                "⚠️ امتیاز اعتبار فقط معیارهای آن‌چین رو می‌سنجه — تیم/نقشه راه رو خودت هم بررسی کن. میم‌کوین = ریسک بالا!",
                                 fontSize = 10.sp, color = WGold
                             )
                         }
