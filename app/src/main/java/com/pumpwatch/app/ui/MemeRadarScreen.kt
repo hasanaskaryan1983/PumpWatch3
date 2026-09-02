@@ -1,5 +1,5 @@
 package com.pumpwatch.app.ui
-
+import com.pumpwatch.app.formatMarketCap
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
