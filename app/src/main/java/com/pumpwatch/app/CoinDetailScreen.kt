@@ -36,10 +36,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.data.BinanceFutures
 import com.pumpwatch.app.data.CoinInfo
 import com.pumpwatch.app.data.CoinInfoClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.Derivative
+import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.data.NewsItem
 import com.pumpwatch.app.data.ScanClient
@@ -49,7 +52,6 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 
 private val Green = Color(0xFF00E676)
 private val Red = Color(0xFFFF5252)
@@ -59,27 +61,19 @@ private val Blue = Color(0xFF40C4FF)
 
 private data class TfInfo(val name: String, val trend: String, val rsi: Double)
 
-private data class Vote(val name: String, val emoji: String, val dir: Int)
+private data class Layer(
+    val ema: Int, val rsi: Int, val macd: Int, val vol: Int, val boll: Int, val score: Int
+)
 
 private data class DetailAnalysis(
-    val signal: String,
-    val confidence: Int,
-    val entry: Double,
-    val stop: Double,
-    val target1: Double,
-    val target2: Double,
-    val zoneLow: Double,
-    val zoneHigh: Double,
-    val rsi1h: Double,
-    val macdUp: Boolean,
-    val ema20: Double,
-    val ema50: Double,
-    val atr: Double,
-    val bbUpper: Double,
-    val bbLower: Double,
-    val tfs: List<TfInfo>,
-    val explanation: String
+    val signal: String, val confidence: Int, val entry: Double, val stop: Double,
+    val target1: Double, val target2: Double, val zoneLow: Double, val zoneHigh: Double,
+    val rsi1h: Double, val macdUp: Boolean, val ema20: Double, val ema50: Double,
+    val atr: Double, val bbUpper: Double, val bbLower: Double,
+    val tfs: List<TfInfo>, val explanation: String
 )
+
+private data class Verdict(val text: String, val color: Color)
 
 // ---------- توابع محاسباتی ----------
 
@@ -163,72 +157,68 @@ private suspend fun closesFor(coinId: String, tf: String): List<Double> {
     return chart.prices.map { it[1] }.chunked(chunk).map { it.last() }
 }
 
-// ---------- رأی هر اندیکاتور (هم‌قانون با نمودار) ----------
+private suspend fun binanceData(symbol: String, interval: String): Pair<List<Double>, List<Double>>? {
+    return try {
+        val kl = BinanceClient.api.klines(symbol + "USDT", interval, 100)
+        Pair(kl.map { it[4].asDouble }, kl.map { it[5].asDouble })
+    } catch (_: Exception) {
+        null
+    }
+}
 
-private fun computeVotes(closes: List<Double>, price: Double): List<Vote> {
-    if (closes.size < 40) return emptyList()
+// ---------- لایه قیمتی وزنی (EMA25 + MACD25 + RSI20 + حجم15 + بولینگر15) ----------
 
-    val rsi = rsiOf(closes)
+private fun computeLayer(closes: List<Double>, volumes: List<Double>?): Layer {
+    if (closes.size < 40) return Layer(0, 0, 0, 0, 0, 0)
+    val price = closes.last()
     val e20 = emaLast(closes, 20)
     val e50 = emaLast(closes, 50)
-    val mUp = macdUp(closes)
-
-    val emaDir = when {
+    val ema = when {
         price > e20 && e20 > e50 -> 1
         price < e20 && e20 < e50 -> -1
         else -> 0
     }
-
-    val rsiDir = when {
-        rsi <= 35 -> 1
-        rsi >= 65 -> -1
+    val r = rsiOf(closes)
+    val rsi = when {
+        r <= 35 -> 1
+        r >= 65 -> -1
         else -> 0
     }
+    val macd = if (macdUp(closes)) 1 else -1
 
-    val macdDir = if (mUp) 1 else -1
-
-    val (bbU, bbL) = bollinger(closes)
+    val (bu, bl) = bollinger(closes)
     val prev = closes.dropLast(1)
-    val (pU, pL) = bollinger(prev)
-    val c = closes.last()
-    val pc = if (prev.isNotEmpty()) prev.last() else c
-    val bollDir = when {
-        pc <= pL && c > bbL -> 1
-        pc >= pU && c < bbU -> -1
-        c <= bbL * 1.01 -> 1
-        c >= bbU * 0.99 -> -1
-        c > (bbU + bbL) / 2 && mUp -> 1
-        c < (bbU + bbL) / 2 && !mUp -> -1
+    val (pbu, pbl) = bollinger(prev)
+    val c = price
+    val pc = prev.lastOrNull() ?: c
+    val boll = when {
+        pc <= pbl && c > bl -> 1
+        pc >= pbu && c < bu -> -1
+        c <= bl * 1.01 -> 1
+        c >= bu * 0.99 -> -1
+        c > (bu + bl) / 2 && macd == 1 -> 1
+        c < (bu + bl) / 2 && macd == -1 -> -1
         else -> 0
     }
 
-    return listOf(
-        Vote("EMA", "📊", emaDir),
-        Vote("RSI", "📈", rsiDir),
-        Vote("MACD", "📉", macdDir),
-        Vote("بولینگر", "🎯", bollDir)
-    )
+    val vol = if (volumes != null && volumes.size > 15) {
+        val lv = volumes.last()
+        val av = volumes.dropLast(1).takeLast(14).average()
+        val bd = if (c >= pc) 1 else -1
+        if (av > 0 && lv >= 1.5 * av) bd else 0
+    } else 0
+
+    val score = ema * 25 + macd * 25 + rsi * 20 + vol * 15 + boll * 15
+    return Layer(ema, rsi, macd, vol, boll, score)
 }
 
-private fun scoreOf(votes: List<Vote>): Int = votes.sumOf { it.dir }
-
-private data class Verdict(val text: String, val color: Color)
-
-private fun verdictOf(score: Int): Verdict = when {
-    score >= 3 -> Verdict("خرید قوی 🟢", Green)
-    score >= 1 -> Verdict("خرید ✅", Green)
-    score == 0 -> Verdict("خنثی ⚪ — منتظر بمون", Gray)
-    score >= -2 -> Verdict("فروش / شورت ❌", Red)
-    else -> Verdict("فروش قوی 🔴🔴", Red)
+private fun lightEmoji(score: Int): String = when {
+    score >= 40 -> "🟢"
+    score <= -40 -> "🔴"
+    else -> "🟡"
 }
 
-private fun tfEmoji(score: Int): String = when {
-    score >= 1 -> "🟢"
-    score <= -1 -> "🔴"
-    else -> "⚪"
-}
-
-// ---------- تحلیل پایه ----------
+// ---------- تحلیل پایه (نقاط ورود/استاپ) ----------
 
 private fun buildAnalysis(
     prices1d: List<List<Double>>,
@@ -277,12 +267,14 @@ private fun buildAnalysis(
     )
 
     val explanation = buildString {
-        append("حکم بالا برآیند ۴ اندیکاتور + کارآگاه شروع‌حرکت + ضدتعقیبه.\n")
-        append("🚀 شروع‌حرکت: کندلی که بدنه‌اش بزرگ‌تر از ۱٫۵×ATR باشه و سقف ۱۲ کندل قبل رو بشکنه = اولین هشدار.\n")
-        append("🛑 ضدتعقیب: اگه قیمت بیشتر از ۳×ATR از EMA7 فاصله گرفته باشه، حتی در روند صعودی می‌گیم «پولبک رو صبر کن» — چون تعقیبِ سقف = ضرر.\n")
-        append("روند ۱ ساعته: ${trendOf(closes1h)} | RSI: ${String.format(Locale.US, "%.0f", rsi1h)}\n")
-        append(if (mUp) "MACD صعودیه.\n" else "MACD نزولیه.\n")
-        append("💡 B/S های روی نمودار = نقاط «تأیید روند» (دیر اما مطمئن)؛ ورود بهینه = ترکیب حکم بالا + پولبک.")
+        append("🧠 معماری امتیازدهی وزنی (Confluence):\n")
+        append("EMA 25% + MACD 25% + RSI 20% + حجم 15% + بولینگر 15% = امتیاز پایه (-100 تا +100)\n")
+        append("🚦 هم‌راستایی ۳ تایم‌فریم (۱۵د/۱س/۴س) = +10 پاداش\n")
+        append("⚡ فاندینگ منفی شدید = +10 | فاندینگ مثبت شدید = -10\n")
+        append("📈 OI صعودی همراه قیمت = +10 | پامپ بدون OI = -10 (پامپ مصنوعی)\n")
+        append("⛔ وتوی نهنگی: فشار فروش آن‌چین ≥ 65% = مسدود شدن سیگنال خرید\n")
+        append("🎯 آستانه‌ها: ≥75 خرید قوی | ≥40 خرید | ±40 خنثی | ≤-40 فروش\n")
+        append("💡 سیگنال کمتر ولی باکیفیت‌تر = اعتماد بیشتر = سود پایدار")
     }
 
     return DetailAnalysis(
@@ -313,11 +305,14 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
     var tf by remember { mutableStateOf("1h") }
     var mode by remember { mutableStateOf(IndicatorMode.EMA) }
 
-    var votes by remember { mutableStateOf<List<Vote>>(emptyList()) }
-    var score by remember { mutableStateOf(0) }
-    var tfScores by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
-    var breakout by remember { mutableStateOf(false) }
-    var chase by remember { mutableStateOf(false) }
+    var verdict by remember { mutableStateOf<Verdict?>(null) }
+    var confScore by remember { mutableStateOf(0) }
+    var layer by remember { mutableStateOf<Layer?>(null) }
+    var lights by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
+    var aligned by remember { mutableStateOf(false) }
+    var fundingRate by remember { mutableStateOf<Double?>(null) }
+    var oiUp by remember { mutableStateOf<Boolean?>(null) }
+    var veto by remember { mutableStateOf<String?>(null) }
 
     val isFutures = remember {
         context.getSharedPreferences("pumpwatch_prefs", 0)
@@ -369,52 +364,95 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
         }
     }
 
-    // ---------- حکم تجمیعی + شروع‌حرکت + ضدتعقیب ----------
+    // ---------- موتور Confluence وزنی ----------
     LaunchedEffect(coin.id, tf, deriv) {
         scope.launch {
             try {
-                val closes = closesFor(coin.id, tf)
-                val v = computeVotes(closes, coin.current_price)
-                var s = scoreOf(v)
-                if (isFutures) {
-                    val fr = deriv?.fundingRate
-                    if (fr != null) {
-                        if (fr <= -0.0003) s += 1
-                        if (fr >= 0.0005) s -= 1
-                    }
-                }
+                val sym = coin.symbol.uppercase(Locale.US)
 
-                // 🚀 کارآگاه شروع حرکت (کندل شکعت بزرگ)
+                // لایه تایم‌فریم انتخابی
+                val bd = binanceData(sym, tf)
+                val closes = bd?.first ?: closesFor(coin.id, tf)
+                val vols = bd?.second
+                val ly = computeLayer(closes, vols)
+                layer = ly
+
+                // چراغ‌راهنمای ۳ تایم‌فریم
+                val lightList = mutableListOf<Pair<String, Int>>()
+                val dirs = mutableListOf<Int>()
+                listOf("15m", "1h", "4h").forEach { t ->
+                    val l = if (t == tf) ly else run {
+                        val b2 = binanceData(sym, t)
+                        computeLayer(b2?.first ?: closesFor(coin.id, t), b2?.second)
+                    }
+                    lightList.add(tfLabel(t) to l.score)
+                    dirs.add(if (l.score >= 40) 1 else if (l.score <= -40) -1 else 0)
+                }
+                lights = lightList
+                aligned = dirs.size == 3 && dirs[0] != 0 && dirs.all { it == dirs[0] }
+
+                // شروع‌حرکت + ضدتعقیب
                 val price = coin.current_price
                 val atrPct = (atrOf(closes) / price).coerceAtLeast(0.0005)
-                val lastC = closes.last()
                 val prevCloses = closes.dropLast(1)
-                val prevC = prevCloses.lastOrNull() ?: lastC
-                val body = if (prevC > 0) (lastC - prevC) / prevC else 0.0
-                val prevHigh = prevCloses.takeLast(12).maxOrNull() ?: lastC
-                breakout = body > 1.5 * atrPct && lastC > prevHigh
-
-                // 🛑 ضدتعقیب: فاصله زیاد از EMA7 بعد از پامپ
+                val prevC = prevCloses.lastOrNull() ?: closes.last()
+                val body = if (prevC > 0) (closes.last() - prevC) / prevC else 0.0
+                val prevHigh = prevCloses.takeLast(12).maxOrNull() ?: closes.last()
+                val brk = body > 1.5 * atrPct && closes.last() > prevHigh
                 val e7 = emaLast(closes, 7)
                 val ext = if (e7 > 0) (price - e7) / e7 else 0.0
-                chase = abs(ext) > 3.0 * atrPct
+                val chs = abs(ext) > 3.0 * atrPct
 
-                votes = v + Vote("شروع‌حرکت", "🚀", if (breakout) (if (body > 0) 1 else -1) else 0)
-                score = s
-            } catch (_: Exception) { }
-        }
-    }
+                // لایه فیوچرز: فاندینگ + OI
+                val fr = try {
+                    BinanceFutures.api.premiumIndex(sym + "USDT").lastFundingRate?.toDoubleOrNull()
+                } catch (_: Exception) { null }
+                fundingRate = fr
+                val oi = try {
+                    val h = BinanceFutures.api.oiHist(sym + "USDT", "1h", 24)
+                    if (h.size >= 2) {
+                        val first = h.first().sumOpenInterestValue?.toDoubleOrNull() ?: 0.0
+                        val lastV = h.last().sumOpenInterestValue?.toDoubleOrNull() ?: 0.0
+                        lastV > first
+                    } else null
+                } catch (_: Exception) { null }
+                oiUp = oi
 
-    // ---------- قطب‌نمای تایم‌فریم‌ها ----------
-    LaunchedEffect(coin.id) {
-        scope.launch {
-            try {
-                val list = mutableListOf<Pair<String, Int>>()
-                listOf("15m", "1h", "4h", "1d").forEach { t ->
-                    val closes = closesFor(coin.id, t)
-                    list.add(t to scoreOf(computeVotes(closes, coin.current_price)))
+                // وتوی نهنگی
+                val vt = try {
+                    val pool = GeckoTerminal.api.searchPools(sym)
+                        .data?.firstOrNull { it.attributes != null }
+                    val at = pool?.attributes
+                    val b = at?.transactions?.h1?.buys ?: 0.0
+                    val s = at?.transactions?.h1?.sells ?: 0.0
+                    if (s > 0 && b / (b + s) <= 0.35) "فشار فروش سنگین نهنگ‌ها در آن‌چین 🐳" else null
+                } catch (_: Exception) { null }
+                veto = vt
+
+                // امتیاز نهایی
+                var sc = ly.score
+                if (aligned) sc += if (dirs[0] > 0) 10 else -10
+                val priceUp = closes.last() >= prevC
+                fr?.let { if (it <= -0.0003) sc += 10 else if (it >= 0.0005) sc -= 10 }
+                oi?.let { if (priceUp) sc += if (it) 10 else -10 }
+                sc = sc.coerceIn(-100, 100)
+                confScore = sc
+
+                // حکم نهایی
+                val base = when {
+                    sc >= 75 -> Verdict("خرید قوی 🟢🟢", Green)
+                    sc >= 40 -> Verdict("خرید ✅", Green)
+                    sc > -40 -> Verdict("خنثی ⚪ — منتظر بمون", Gray)
+                    sc > -75 -> Verdict("فروش / شورت ❌", Red)
+                    else -> Verdict("فروش قوی 🔴🔴", Red)
                 }
-                tfScores = list
+                verdict = when {
+                    vt != null && sc > 0 -> Verdict("⛔ خرید مسدود: $vt", Red)
+                    chs && sc >= 40 -> Verdict("⏳ روند صعودیه ولی قیمت بعد از پامپ فاصله گرفته — منتظر پولبک 🛑", Yellow)
+                    chs && sc <= -40 -> Verdict("⏳ روند نزولیه ولی بعد از ریزش شدید — تعقیب نکن 🛑", Yellow)
+                    brk && sc in -20..39 -> Verdict("🚀 شروع حرکت — ورود پله‌ای با استاپ تنگ", Green)
+                    else -> base
+                }
             } catch (_: Exception) { }
         }
     }
@@ -450,31 +488,11 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
             a != null -> {
                 val an = a!!
+                val v = verdict
 
-                // ---------- حکم نهایی هوشمند ----------
-                val verdict = when {
-                    chase && score >= 1 -> Verdict(
-                        "⏳ روند صعودیه ولی قیمت بعد از پامپ فاصله گرفته — منتظر پولبک باش، تعقیب نکن 🛑",
-                        Yellow
-                    )
-                    chase && score <= -1 -> Verdict(
-                        "⏳ روند نزولیه ولی بعد از ریزش شدید — تعقیب فروش نکن 🛑",
-                        Yellow
-                    )
-                    breakout && score >= -1 -> Verdict(
-                        "🚀 شروع حرکت صعودی — ورود پله‌ای با استاپ تنگ",
-                        Green
-                    )
-                    breakout && score <= -2 -> Verdict(
-                        " شروع حرکت نزولی — شورت پله‌ای با استاپ تنگ",
-                        Red
-                    )
-                    else -> verdictOf(score)
-                }
-                val conf = (50 + abs(score) * 11 + (if (breakout) 8 else 0)).coerceIn(40, 95)
-
+                // ---------- کارت حکم Confluence ----------
                 Surface(
-                    color = verdict.color.copy(alpha = 0.12f),
+                    color = (v?.color ?: Gray).copy(alpha = 0.12f),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -483,27 +501,66 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Text(verdict.text, fontWeight = FontWeight.Black, fontSize = 18.sp, color = verdict.color)
-                        Text("اطمینان: ${conf}٪", fontSize = 14.sp, color = Gray)
+                        Text(
+                            v?.text ?: "⏳ در حال محاسبه...",
+                            fontWeight = FontWeight.Black, fontSize = 17.sp,
+                            color = v?.color ?: Gray
+                        )
+                        Text(
+                            "امتیاز هم‌گرایی: ${confScore}/100",
+                            fontSize = 13.sp, color = Gray, fontWeight = FontWeight.Bold
+                        )
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            votes.forEach { v ->
+                        // وزن‌های هر اندیکاتور
+                        layer?.let { l ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                IndChip("EMA 25%", l.ema)
+                                IndChip("MACD 25%", l.macd)
+                                IndChip("RSI 20%", l.rsi)
+                                IndChip("حجم 15%", l.vol)
+                                IndChip("بولینگر 15%", l.boll)
+                            }
+                        }
+
+                        // چراغ‌راهنمای چندتایم‌فریم
+                        if (lights.isNotEmpty()) {
+                            Text(
+                                "🚦 " + lights.joinToString(" • ") { (label, s) -> "$label ${lightEmoji(s)}" },
+                                fontSize = 11.sp, color = Gray
+                            )
+                            if (aligned) {
                                 Text(
-                                    "${v.emoji} ${if (v.dir > 0) "🟢" else if (v.dir < 0) "🔴" else "⚪"}",
-                                    fontSize = 12.sp
+                                    "✅ هم‌راستایی کامل ۳ تایم‌فریم (+۱۰ امتیاز)",
+                                    fontSize = 10.sp, color = Green, fontWeight = FontWeight.Bold
                                 )
                             }
                         }
 
-                        if (tfScores.isNotEmpty()) {
+                        // لایه فیوچرز
+                        fundingRate?.let { fr ->
                             Text(
-                                "🧭 " + tfScores.joinToString(" • ") { (t, s) -> "${tfLabel(t)} ${tfEmoji(s)}" },
-                                fontSize = 10.sp, color = Gray
+                                "⚡ فاندینگ: ${String.format(Locale.US, "%.4f%%", fr * 100)}" +
+                                        (if (fr <= -0.0003) " — پتانسیل اسکوییز 🚀" else if (fr >= 0.0005) " — لانگ‌ها شلوغن 🩸" else ""),
+                                fontSize = 10.sp,
+                                color = if (fr <= -0.0003) Green else if (fr >= 0.0005) Red else Gray
+                            )
+                        }
+                        oiUp?.let { up ->
+                            Text(
+                                "📈 OI (24h): ${if (up) "صعودی — پول واقعی وارد شده ✅" else "نزولی — احتیاط"}",
+                                fontSize = 10.sp,
+                                color = if (up) Green else Yellow
+                            )
+                        }
+                        veto?.let { vt ->
+                            Text(
+                                "⛔ وتوی نهنگی: $vt",
+                                fontSize = 10.sp, color = Red, fontWeight = FontWeight.Bold
                             )
                         }
 
                         Text(
-                            "🎯 بر اساس: ${tfLabel(tf)} • برآیند ۴ اندیکاتور + شروع‌حرکت + ضدتعقیب • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
+                            "🎯 بر اساس: ${tfLabel(tf)} • معماری وزنی Confluence • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
                             fontSize = 10.sp, color = Gray
                         )
                     }
@@ -625,15 +682,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     }
                 }
 
-                if (isFutures && deriv?.fundingRate != null) {
-                    val fr = deriv!!.fundingRate!!
-                    if (fr <= -0.0003) {
-                        Text("💡 فاندینگ منفی: شورت‌ها شلوغن — پتانسیل اسکوییز صعودی 🚀", fontSize = 12.sp, color = Green)
-                    } else if (fr >= 0.0005) {
-                        Text("💡 فاندینگ مثبت شدید: لانگ‌ها شلوغن — احتیاط، احتمال اصلاح 🩸", fontSize = 12.sp, color = Red)
-                    }
-                }
-
                 if (news.isNotEmpty()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
@@ -686,6 +734,14 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
     }
+}
+
+@Composable
+private fun IndChip(label: String, dir: Int) {
+    Text(
+        "$label ${if (dir > 0) "🟢" else if (dir < 0) "🔴" else "⚪"}",
+        fontSize = 10.sp
+    )
 }
 
 @Composable
