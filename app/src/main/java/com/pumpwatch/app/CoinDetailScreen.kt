@@ -1,5 +1,6 @@
 package com.pumpwatch.app
-
+import com.pumpwatch.app.formatMarketCap
+import com.pumpwatch.app.formatPrice
 import android.content.Intent
 import android.net.Uri
 import android.text.format.DateUtils
