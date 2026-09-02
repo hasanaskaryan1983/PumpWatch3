@@ -1,6 +1,5 @@
 package com.pumpwatch.app
-import com.pumpwatch.app.formatMarketCap
-import com.pumpwatch.app.formatPrice
+
 import android.content.Intent
 import android.net.Uri
 import android.text.format.DateUtils
@@ -47,6 +46,8 @@ import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.data.NewsItem
 import com.pumpwatch.app.data.ScanClient
+import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.ui.IndicatorMode
 import com.pumpwatch.app.ui.ProChart
 import kotlinx.coroutines.launch
@@ -75,8 +76,6 @@ private data class DetailAnalysis(
 )
 
 private data class Verdict(val text: String, val color: Color)
-
-// ---------- توابع محاسباتی ----------
 
 private fun chunkEvery(v: List<Double>, n: Int): List<Double> =
     if (n <= 1) v else v.filterIndexed { i, _ -> (i + 1) % n == 0 }
@@ -167,8 +166,6 @@ private suspend fun binanceData(symbol: String, interval: String): Pair<List<Dou
     }
 }
 
-// ---------- لایه قیمتی وزنی (EMA25 + MACD25 + RSI20 + حجم15 + بولینگر15) ----------
-
 private fun computeLayer(closes: List<Double>, volumes: List<Double>?): Layer {
     if (closes.size < 40) return Layer(0, 0, 0, 0, 0, 0)
     val price = closes.last()
@@ -214,12 +211,10 @@ private fun computeLayer(closes: List<Double>, volumes: List<Double>?): Layer {
 }
 
 private fun lightEmoji(score: Int): String = when {
-    score >= 40 -> "🟢"
-    score <= -40 -> "🔴"
-    else -> "🟡"
+    score >= 40 -> ""
+    score <= -40 -> ""
+    else -> ""
 }
-
-// ---------- تحلیل پایه (نقاط ورود/استاپ) ----------
 
 private fun buildAnalysis(
     prices1d: List<List<Double>>,
@@ -271,7 +266,7 @@ private fun buildAnalysis(
         append("🧠 معماری امتیازدهی وزنی (Confluence):\n")
         append("EMA 25% + MACD 25% + RSI 20% + حجم 15% + بولینگر 15% = امتیاز پایه (-100 تا +100)\n")
         append("🚦 هم‌راستایی ۳ تایم‌فریم (۱۵د/۱س/۴س) = +10 پاداش\n")
-        append("⚡ فاندینگ منفی شدید = +10 | فاندینگ مثبت شدید = -10\n")
+        append(" فاندینگ منفی شدید = +10 | فاندینگ مثبت شدید = -10\n")
         append("📈 OI صعودی همراه قیمت = +10 | پامپ بدون OI = -10 (پامپ مصنوعی)\n")
         append("⛔ وتوی نهنگی: فشار فروش آن‌چین ≥ 65% = مسدود شدن سیگنال خرید\n")
         append("🎯 آستانه‌ها: ≥75 خرید قوی | ≥40 خرید | ±40 خنثی | ≤-40 فروش\n")
@@ -289,8 +284,6 @@ private fun buildAnalysis(
 private fun fmt(v: Double): String =
     if (v >= 1) String.format(Locale.US, "$%,.4f", v)
     else String.format(Locale.US, "$%.6f", v)
-
-// ---------- صفحه جزئیات ----------
 
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
@@ -365,20 +358,17 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
         }
     }
 
-    // ---------- موتور Confluence وزنی ----------
     LaunchedEffect(coin.id, tf, deriv) {
         scope.launch {
             try {
                 val sym = coin.symbol.uppercase(Locale.US)
 
-                // لایه تایم‌فریم انتخابی
                 val bd = binanceData(sym, tf)
                 val closes = bd?.first ?: closesFor(coin.id, tf)
                 val vols = bd?.second
                 val ly = computeLayer(closes, vols)
                 layer = ly
 
-                // چراغ‌راهنمای ۳ تایم‌فریم
                 val lightList = mutableListOf<Pair<String, Int>>()
                 val dirs = mutableListOf<Int>()
                 listOf("15m", "1h", "4h").forEach { t ->
@@ -392,7 +382,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 lights = lightList
                 aligned = dirs.size == 3 && dirs[0] != 0 && dirs.all { it == dirs[0] }
 
-                // شروع‌حرکت + ضدتعقیب
                 val price = coin.current_price
                 val atrPct = (atrOf(closes) / price).coerceAtLeast(0.0005)
                 val prevCloses = closes.dropLast(1)
@@ -404,7 +393,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 val ext = if (e7 > 0) (price - e7) / e7 else 0.0
                 val chs = abs(ext) > 3.0 * atrPct
 
-                // لایه فیوچرز: فاندینگ + OI
                 val fr = try {
                     BinanceFutures.api.premiumIndex(sym + "USDT").lastFundingRate?.toDoubleOrNull()
                 } catch (_: Exception) { null }
@@ -419,7 +407,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 } catch (_: Exception) { null }
                 oiUp = oi
 
-                // وتوی نهنگی
                 val vt = try {
                     val pool = GeckoTerminal.api.searchPools(sym)
                         .data?.firstOrNull { it.attributes != null }
@@ -430,7 +417,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 } catch (_: Exception) { null }
                 veto = vt
 
-                // امتیاز نهایی
                 var sc = ly.score
                 if (aligned) sc += if (dirs[0] > 0) 10 else -10
                 val priceUp = closes.last() >= prevC
@@ -439,7 +425,26 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 sc = sc.coerceIn(-100, 100)
                 confScore = sc
 
-                // حکم نهایی
+                // 📝 ثبت خودکار سیگنال
+                if (confScore >= 40 || confScore <= -40) {
+                    val side = if (confScore > 0) "BUY" else "SELL"
+                    val tgt = if (side == "BUY") a?.target1 else a?.target2
+                    if (a != null) {
+                        SignalLogger.log(
+                            context,
+                            LoggedSignal(
+                                symbol = sym,
+                                side = side,
+                                score = confScore,
+                                entry = price,
+                                stop = a.stop,
+                                target = tgt ?: price,
+                                time = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+
                 val base = when {
                     sc >= 75 -> Verdict("خرید قوی 🟢🟢", Green)
                     sc >= 40 -> Verdict("خرید ✅", Green)
@@ -448,9 +453,9 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     else -> Verdict("فروش قوی 🔴🔴", Red)
                 }
                 verdict = when {
-                    vt != null && sc > 0 -> Verdict("⛔ خرید مسدود: $vt", Red)
+                    vt != null && sc > 0 -> Verdict(" خرید مسدود: $vt", Red)
                     chs && sc >= 40 -> Verdict("⏳ روند صعودیه ولی قیمت بعد از پامپ فاصله گرفته — منتظر پولبک 🛑", Yellow)
-                    chs && sc <= -40 -> Verdict("⏳ روند نزولیه ولی بعد از ریزش شدید — تعقیب نکن 🛑", Yellow)
+                    chs && sc <= -40 -> Verdict("⏳ روند نزولیه ولی بعد از ریزش شدید — تعقیب نکن ", Yellow)
                     brk && sc in -20..39 -> Verdict("🚀 شروع حرکت — ورود پله‌ای با استاپ تنگ", Green)
                     else -> base
                 }
@@ -474,7 +479,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     fontWeight = FontWeight.Bold, fontSize = 18.sp
                 )
                 Text(
-                    "${String.format(Locale.US, "$%,.6f", coin.current_price)}  •  ${if (isFutures) "⚡ فیوچرز" else "🏦 اسپات"}",
+                    "${String.format(Locale.US, "$%,.6f", coin.current_price)}  •  ${if (isFutures) "⚡ فیوچرز" else " اسپات"}",
                     fontSize = 13.sp, color = Gray
                 )
             }
@@ -491,7 +496,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 val an = a!!
                 val v = verdict
 
-                // ---------- کارت حکم Confluence ----------
                 Surface(
                     color = (v?.color ?: Gray).copy(alpha = 0.12f),
                     shape = RoundedCornerShape(16.dp),
@@ -512,7 +516,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             fontSize = 13.sp, color = Gray, fontWeight = FontWeight.Bold
                         )
 
-                        // وزن‌های هر اندیکاتور
                         layer?.let { l ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 IndChip("EMA 25%", l.ema)
@@ -523,7 +526,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             }
                         }
 
-                        // چراغ‌راهنمای چندتایم‌فریم
                         if (lights.isNotEmpty()) {
                             Text(
                                 "🚦 " + lights.joinToString(" • ") { (label, s) -> "$label ${lightEmoji(s)}" },
@@ -531,13 +533,12 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             )
                             if (aligned) {
                                 Text(
-                                    "✅ هم‌راستایی کامل ۳ تایم‌فریم (+۱۰ امتیاز)",
+                                    "✅ هم‌راستایی کامل ۳ تایم‌فریم (+۰ امتیاز)",
                                     fontSize = 10.sp, color = Green, fontWeight = FontWeight.Bold
                                 )
                             }
                         }
 
-                        // لایه فیوچرز
                         fundingRate?.let { fr ->
                             Text(
                                 "⚡ فاندینگ: ${String.format(Locale.US, "%.4f%%", fr * 100)}" +
@@ -613,9 +614,9 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         Text("⏱️ تایم‌فریم‌ها:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         an.tfs.forEach { t ->
                             val (emoji, tColor) = when (t.trend) {
-                                "صعودی" -> "🟢" to Green
-                                "نزولی" -> "🔴" to Red
-                                else -> "⚪" to Gray
+                                "صعودی" -> "" to Green
+                                "نزولی" -> "" to Red
+                                else -> "" to Gray
                             }
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                                 Text(t.name, fontSize = 12.sp)
@@ -635,10 +636,10 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         modifier = Modifier.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("📊 اندیکاتورهای ۱ ساعته:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(" اندیکاتورهای ۱ ساعته:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         IndRow("RSI", String.format(Locale.US, "%.1f", an.rsi1h),
                             if (an.rsi1h > 75 || an.rsi1h < 25) Yellow else Green)
-                        IndRow("MACD", if (an.macdUp) "صعودی 🟢" else "نزولی 🔴",
+                        IndRow("MACD", if (an.macdUp) "صعودی " else "نزولی ",
                             if (an.macdUp) Green else Red)
                         IndRow("EMA 20", fmt(an.ema20), if (coin.current_price > an.ema20) Green else Red)
                         IndRow("EMA 50", fmt(an.ema50), if (coin.current_price > an.ema50) Green else Red)
@@ -740,7 +741,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 @Composable
 private fun IndChip(label: String, dir: Int) {
     Text(
-        "$label ${if (dir > 0) "🟢" else if (dir < 0) "🔴" else "⚪"}",
+        "$label ${if (dir > 0) "" else if (dir < 0) "" else ""}",
         fontSize = 10.sp
     )
 }
