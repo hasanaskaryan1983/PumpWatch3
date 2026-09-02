@@ -68,7 +68,6 @@ import com.pumpwatch.app.worker.MonitorScheduler
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-// ---------- رنگ‌های تم ----------
 private val DarkBackground = Color(0xFF0B0F14)
 private val DarkSurface = Color(0xFF121820)
 private val DarkCard = Color(0xFF1A2230)
@@ -77,13 +76,12 @@ private val AccentRed = Color(0xFFFF5252)
 private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
 
-// ---------- تب‌ها ----------
 enum class Tab(val title: String, val emoji: String) {
-    MARKET("بازار", "📊"),
+    MARKET("بازار", ""),
     ALERTS("هشدارها", "🔔"),
     WHALE("نهنگ‌ها", "🐳"),
     ASSISTANT("دستیار", "🤖"),
-    BACKTEST("بک‌تست", "🧪"),
+    BACKTEST("بک‌تست", ""),
     TOP("برترین‌ها", "🏆"),
     MEME("میم", "🐸"),
     LOG("سیگنال‌ها", "📓"),
@@ -91,7 +89,6 @@ enum class Tab(val title: String, val emoji: String) {
     HISTORY("تاریخچه", "📚")
 }
 
-// ---------- اکتیویتی ----------
 class MainActivity : ComponentActivity() {
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -133,7 +130,6 @@ fun PumpWatchTheme(content: @Composable () -> Unit) {
     )
 }
 
-// ---------- صفحه اصلی ----------
 @Composable
 fun MainApp() {
     val context = LocalContext.current
@@ -165,7 +161,7 @@ fun MainApp() {
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("🚀", fontSize = 26.sp)
+                        Text("", fontSize = 26.sp)
                         Spacer(Modifier.width(8.dp))
                         Text(
                             "PumpDump",
@@ -217,3 +213,224 @@ fun MainApp() {
             ) { padding ->
                 Box(
                     modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                ) {
+                    when (selectedTab) {
+                        Tab.MARKET -> MarketScreen(onCoinClick = { selectedCoin = it })
+                        Tab.ALERTS -> SmartAlertsScreen(onCoinClick = { selectedCoin = it })
+                        Tab.WHALE -> WhaleRadarScreen()
+                        Tab.ASSISTANT -> AssistantScreen(onOpenCoin = { selectedCoin = it })
+                        Tab.BACKTEST -> BacktestScreen()
+                        Tab.TOP -> TopPicksScreen(if (isFutures) "FUT" else "SPOT")
+                        Tab.MEME -> MemeRadarScreen()
+                        Tab.LOG -> SignalLogScreen()
+                        Tab.TRADES -> TradesScreen()
+                        Tab.HISTORY -> HistoryScreen(if (isFutures) "FUT" else "SPOT")
+                    }
+                }
+            }
+
+            if (selectedCoin != null) {
+                Surface(
+                    color = DarkBackground,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    CoinDetailScreen(
+                        coin = selectedCoin!!,
+                        onBack = { selectedCoin = null }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
+    var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    fun load() {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
+                val mode = prefs.getString("mode", "SPOT")
+                if (mode == "FUTURES") {
+                    coins = ApiClient.getTop100Coins()
+                } else {
+                    coins = ApiClient.getQuickCoins()
+                    loading = false
+                    try {
+                        val full = ApiClient.getTop1000Coins()
+                        if (full.size > coins.size) coins = full
+                    } catch (_: Exception) { }
+                }
+            } catch (e: Exception) {
+                errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    val shown = if (query.isBlank()) coins
+    else coins.filter {
+        it.symbol.contains(query, true) || it.name.contains(query, true)
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "قیمت لحظه‌ای",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { load() }) { Text("بروزرسانی") }
+        }
+
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
+
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+            MarketPulseHeader()
+        }
+
+        when {
+            loading -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentGreen)
+            }
+
+            errorMsg != null -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    errorMsg ?: "",
+                    color = AccentRed,
+                    modifier = Modifier.padding(16.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(shown) { coin ->
+                    CoinCard(coin = coin, onClick = { onCoinClick(coin) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val change = coin.price_change_percentage_24h ?: 0.0
+    val isUp = change >= 0
+    val rank = coin.market_cap_rank ?: 0
+    Surface(
+        color = DarkCard,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "#$rank  ${coin.symbol.uppercase(Locale.US)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+                Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+                Text(
+                    "کپ: ${formatMarketCap(coin.market_cap)}",
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
+            }
+
+            Text(
+                "📊",
+                fontSize = 18.sp,
+                modifier = Modifier
+                    .clickable {
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id)))
+                            )
+                        } catch (_: Exception) { }
+                    }
+                    .padding(8.dp)
+            )
+
+            Spacer(Modifier.width(4.dp))
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    formatPrice(coin.current_price),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+                Text(
+                    String.format(Locale.US, "%+.2f%%", change),
+                    color = if (isUp) AccentGreen else AccentRed,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+fun formatMarketCap(cap: Double?): String {
+    if (cap == null) return "-"
+    return when {
+        cap >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", cap / 1_000_000_000_000)
+        cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
+        cap >= 1_000_000 -> String.format(Locale.US, "$%.2fM", cap / 1_000_000)
+        else -> String.format(Locale.US, "$%,.0f", cap)
+    }
+}
+
+fun formatPrice(price: Double): String {
+    return when {
+        price >= 1000 -> String.format(Locale.US, "$%,.2f", price)
+        price >= 1 -> String.format(Locale.US, "$%.4f", price)
+        price >= 0.01 -> String.format(Locale.US, "$%.6f", price)
+        else -> String.format(Locale.US, "$%.8f", price)
+    }
+}
