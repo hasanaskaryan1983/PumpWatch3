@@ -3,6 +3,7 @@ package com.pumpwatch.app.engine
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.pumpwatch.app.data.BinanceClient
 
 data class LoggedSignal(
     val symbol: String,
@@ -19,6 +20,9 @@ data class LoggedSignal(
 
 object SignalLogger {
     private const val KEY = "pumpdump_signal_log_v1"
+    private const val EXPIRY_MS = 24 * 3_600_000L      // ۲۴ ساعت — هماهنگ با متن UI
+    private const val MAX_EVALUATE_FETCH = 40          // سقف دریافت کندل در هر بار ارزیابی
+
     private val gson = Gson()
 
     fun load(ctx: Context): MutableList<LoggedSignal> {
@@ -45,21 +49,52 @@ object SignalLogger {
         return true
     }
 
-    fun evaluate(
-        list: MutableList<LoggedSignal>,
-        prices: Map<String, Double>
-    ): MutableList<LoggedSignal> {
+    /**
+     * ارزیابی صحیح با کندل ساعتی واقعی:
+     * - WIN فقط اگر قیمت «بعد از» زمان سیگنال به هدف رسیده باشه
+     * - LOSS فقط اگر استاپ خورده باشه (در یک کندل، استاپ اولویت داره = محافظه‌کارانه)
+     * - exitPrice دقیقاً سطح هدف/استاپ ثبت می‌شه → PnL واقعی
+     * - بعد از ۲۴ ساعت بدون نتیجه → EXP
+     * (نسخه قبلی فقط «آخرین قیمت لحظه‌ای» رو چک می‌کرد و برد/باخت‌ها رو جابجا نشون می‌داد)
+     */
+    fun evaluate(ctx: Context, list: MutableList<LoggedSignal>): MutableList<LoggedSignal> {
         val now = System.currentTimeMillis()
+        var fetched = 0
+
         for (s in list) {
             if (s.status != "OPEN") continue
-            val p = prices[s.symbol] ?: continue
-            s.exitPrice = p
-            val win = if (s.side == "BUY") p >= s.target else p <= s.target
-            val loss = if (s.side == "BUY") p <= s.stop else p >= s.stop
-            when {
-                win -> s.status = "WIN"
-                loss -> s.status = "LOSS"
-                now - s.time > 72 * 3_600_000L -> s.status = "EXP"
+            if (now - s.time < 45 * 60_000L) continue   // تازه ثبت شده — هنوز فرصت نداشته
+            if (fetched >= MAX_EVALUATE_FETCH) break     // جلوگیری از طوفان درخواست
+
+            fetched++
+            try {
+                val hours = ((now - s.time) / 3_600_000L + 2).toInt().coerceIn(2, 48)
+                val klines = BinanceClient.api.klines("${s.symbol}USDT", "1h", hours)
+                if (klines.isEmpty()) continue
+
+                for (c in klines) {
+                    val candleTime = c[0].asLong()
+                    if (candleTime <= s.time) continue          // فقط کندل‌های «بعد» از سیگنال
+                    val high = c[2].asDouble()
+                    val low = c[3].asDouble()
+                    val isBuy = s.side == "BUY"
+
+                    val hitStop = if (isBuy) low <= s.stop else high >= s.stop
+                    val hitTarget = if (isBuy) high >= s.target else low <= s.target
+
+                    when {
+                        hitStop -> { s.status = "LOSS"; s.exitPrice = s.stop }      // استاپ اولویت داره
+                        hitTarget -> { s.status = "WIN"; s.exitPrice = s.target }
+                    }
+                    if (s.status != "OPEN") break
+                }
+
+                if (s.status == "OPEN" && now - s.time > EXPIRY_MS) {
+                    s.status = "EXP"
+                    s.exitPrice = klines.last()[4].asDouble()
+                }
+            } catch (_: Exception) {
+                // خطای شبکه → سیگنال باز می‌مونه و دفعه بعد دوباره چک می‌شه
             }
         }
         return list
