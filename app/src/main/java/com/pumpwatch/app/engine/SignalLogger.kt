@@ -57,7 +57,7 @@ object SignalLogger {
      * - بعد از ۲۴ ساعت بدون نتیجه → EXP
      * (نسخه قبلی فقط «آخرین قیمت لحظه‌ای» رو چک می‌کرد و برد/باخت‌ها رو جابجا نشون می‌داد)
      */
-    fun evaluate(ctx: Context, list: MutableList<LoggedSignal>): MutableList<LoggedSignal> {
+    suspend fun evaluate(ctx: Context, list: MutableList<LoggedSignal>): MutableList<LoggedSignal> {
         val now = System.currentTimeMillis()
         var fetched = 0
 
@@ -73,10 +73,10 @@ object SignalLogger {
                 if (klines.isEmpty()) continue
 
                 for (c in klines) {
-                    val candleTime = c[0].asLong()
+                    val candleTime = c[0].asLong
                     if (candleTime <= s.time) continue          // فقط کندل‌های «بعد» از سیگنال
-                    val high = c[2].asDouble()
-                    val low = c[3].asDouble()
+                    val high = c[2].asDouble
+                    val low = c[3].asDouble
                     val isBuy = s.side == "BUY"
 
                     val hitStop = if (isBuy) low <= s.stop else high >= s.stop
@@ -91,7 +91,7 @@ object SignalLogger {
 
                 if (s.status == "OPEN" && now - s.time > EXPIRY_MS) {
                     s.status = "EXP"
-                    s.exitPrice = klines.last()[4].asDouble()
+                    s.exitPrice = klines.last()[4].asDouble
                 }
             } catch (_: Exception) {
                 // خطای شبکه → سیگنال باز می‌مونه و دفعه بعد دوباره چک می‌شه
