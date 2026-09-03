@@ -12,6 +12,7 @@ data class LoggedSignal(
     val stop: Double,
     val target: Double,
     val time: Long,
+    val mode: String = "SPOT",
     var status: String = "OPEN",
     var exitPrice: Double? = null
 )
