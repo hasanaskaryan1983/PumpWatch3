@@ -32,10 +32,10 @@ private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
 
 private fun statusEmoji(s: String) = when (s) {
-    "WIN" -> "âœ…"
-    "LOSS" -> "â‌Œ"
-    "EXP" -> "âŒ›"
-    else -> "âڈ³"
+    "WIN" -> "✅"
+    "LOSS" -> "❌"
+    "EXP" -> "⌛"
+    else -> "⏳"
 }
 
 private fun fmtPrice(p: Double): String = when {
@@ -62,7 +62,7 @@ fun SignalLogScreen() {
     fun loadLogs() {
         scope.launch {
             val l = SignalLogger.load(ctx)
-            // ط§ط±ط²غŒط§ط¨غŒ ط¯ظ‚غŒظ‚ ط¨ط§ ع©ظ†ط¯ظ„ ط³ط§ط¹طھغŒ (ط§ظˆظ„غŒظ† ط¨ط±ط®ظˆط±ط¯ ط¨ظ‡ ظ‡ط¯ظپ غŒط§ ط§ط³طھط§ظ¾)
+            // ارزیابی دقیق با کندل ساعتی (اولین برخورد به هدف یا استاپ)
             val ev = SignalLogger.evaluate(ctx, l)
             SignalLogger.save(ctx, ev)
             logs = ev
@@ -94,7 +94,7 @@ fun SignalLogScreen() {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("ًں““ ظ„ط§ع¯ ط³غŒع¯ظ†ط§ظ„â€Œظ‡ط§غŒ ط²ظ†ط¯ظ‡", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("📓 لاگ سیگنال‌های زنده", fontWeight = FontWeight.Bold, fontSize = 18.sp)
             Button(
                 onClick = {
                     if (!isScanning) {
@@ -104,7 +104,7 @@ fun SignalLogScreen() {
                             val report = withContext(Dispatchers.IO) {
                                 QuickScanner.scan(ctx, QuickScanner.TOP_SYMBOLS.take(15), mode)
                             }
-                            lastScores = "ط³غŒع¯ظ†ط§ظ„ ط¬ط¯غŒط¯: ${report.signalCount}\n" + report.lines.joinToString("\n")
+                            lastScores = "سیگنال جدید: ${report.signalCount}\n" + report.lines.joinToString("\n")
                             prefs.edit().putString("last_scores", lastScores).apply()
                             loadLogs()
                             isScanning = false
@@ -122,23 +122,23 @@ fun SignalLogScreen() {
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (isScanning) "ط¯ط± ط­ط§ظ„ ط§ط³ع©ظ†..." else "ًں”چ ط§ط³ع©ظ† ظپظˆط±غŒ", fontSize = 12.sp)
+                Text(if (isScanning) "در حال اسکن..." else "🔍 اسکن فوری", fontSize = 12.sp)
             }
         }
 
         stats?.let { st ->
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
-                Text("âœ… ط¨ط±ط¯: ${st.first}", color = LG, fontWeight = FontWeight.Bold)
-                Text("â‌Œ ط¨ط§ط®طھ: ${st.second}", color = LR, fontWeight = FontWeight.Bold)
-                Text("âŒ› ظ…ظ†ظ‚ط¶غŒ: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
+                Text("✅ برد: ${st.first}", color = LG, fontWeight = FontWeight.Bold)
+                Text("❌ باخت: ${st.second}", color = LR, fontWeight = FontWeight.Bold)
+                Text("⌛ منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
             }
             Text(
-                "ط¨ط±ط¯ = ط±ط³غŒط¯ ط¨ظ‡ ظ‡ط¯ظپ | ط¨ط§ط®طھ = ط®ظˆط±ط¯ ط¨ظ‡ ط§ط³طھط§ظ¾ | ظ…ظ†ظ‚ط¶غŒ = ط¨ط¯ظˆظ† ظ†طھغŒط¬ظ‡ ط¨ط¹ط¯ ط§ط² غ²غ´ ط³ط§ط¹طھ",
+                "برد = رسید به هدف | باخت = خورد به استاپ | منقضی = بدون نتیجه بعد از ۲۴ ساعت",
                 fontSize = 9.sp,
                 color = LGr
             )
             Text(
-                "ًںژ¯ ط§ط³طھط±ط§طھعکغŒ: ط®ط±غŒط¯ ط§ظپطھ ط´ط¯غŒط¯ (RSI2â‰¤غ±غµ) ط¯ط§ط®ظ„ ط±ظˆظ†ط¯ طµط¹ظˆط¯غŒ â€¢ ط§ط³طھط§ظ¾ ط¯ظˆط± غ².غ´أ—ATR + ظ‡ط¯ظپ ظ†ط²ط¯غŒع© غ°.غ¹أ—ATR â†’ ط§ط­طھظ…ط§ظ„ ط¨ط±ط¯ ط¨ط§ظ„ط§",
+                "🎯 استراتژی: خرید افت شدید (RSI2≤۱۵) داخل روند صعودی • استاپ دور ۲.۴×ATR + هدف نزدیک ۰.۹×ATR → احتمال برد بالا",
                 fontSize = 9.sp,
                 color = LBlue
             )
@@ -146,12 +146,12 @@ fun SignalLogScreen() {
             if (t > 0) {
                 val wr = st.first * 100.0 / t
                 Text(
-                    "ظˆغŒظ†â€Œط±غŒطھ ط²ظ†ط¯ظ‡: ${String.format(Locale.US, "%.1f%%", wr)}",
+                    "وین‌ریت زنده: ${String.format(Locale.US, "%.1f%%", wr)}",
                     color = if (wr >= 55) LG else LR,
                     fontWeight = FontWeight.Bold
                 )
             }
-            // ظ…غŒط§ظ†ع¯غŒظ† ط³ظˆط¯/ط¶ط±ط± ظ…ط¹ط§ظ…ظ„ط§طھ طھط³ظˆغŒظ‡â€Œط´ط¯ظ‡
+            // میانگین سود/ضرر معاملات تسویه‌شده
             val closed = logs.filter { (it.status == "WIN" || it.status == "LOSS") && it.exitPrice != null }
             if (closed.isNotEmpty()) {
                 val avgPnl = closed.map { s ->
@@ -159,7 +159,7 @@ fun SignalLogScreen() {
                     else (s.entry - s.exitPrice!!) / s.entry * 100
                 }.average()
                 Text(
-                    "ظ…غŒط§ظ†ع¯غŒظ† ط³ظˆط¯/ط¶ط±ط± ظ‡ط± ظ…ط¹ط§ظ…ظ„ظ‡: ${String.format(Locale.US, "%+.2f%%", avgPnl)}",
+                    "میانگین سود/ضرر هر معامله: ${String.format(Locale.US, "%+.2f%%", avgPnl)}",
                     fontSize = 11.sp,
                     color = if (avgPnl >= 0) LG else LR,
                     fontWeight = FontWeight.Bold
@@ -174,24 +174,24 @@ fun SignalLogScreen() {
             FilterChip(
                 selected = selectedFilter == "ALL",
                 onClick = { selectedFilter = "ALL" },
-                label = { Text("ظ‡ظ…ظ‡ (${logs.size})", fontSize = 11.sp) }
+                label = { Text("همه (${logs.size})", fontSize = 11.sp) }
             )
             FilterChip(
                 selected = selectedFilter == "SPOT",
                 onClick = { selectedFilter = "SPOT" },
-                label = { Text("ًںڈ¦ ط§ط³ظ¾ط§طھ (${logs.count { it.mode != "FUT" }})", fontSize = 11.sp) }
+                label = { Text("🏦 اسپات (${logs.count { it.mode != "FUT" }})", fontSize = 11.sp) }
             )
             FilterChip(
                 selected = selectedFilter == "FUT",
                 onClick = { selectedFilter = "FUT" },
-                label = { Text("âڑ، ظپغŒظˆع†ط±ط² (${logs.count { it.mode == "FUT" }})", fontSize = 11.sp) }
+                label = { Text("⚡ فیوچرز (${logs.count { it.mode == "FUT" }})", fontSize = 11.sp) }
             )
         }
 
         if (lastScores.isNotEmpty()) {
             TextButton(onClick = { showDetails = !showDetails }) {
                 Text(
-                    if (showDetails) "ًں”¬ ط¬ط²ط¦غŒط§طھ ط§ط³ع©ظ† (ظ¾ظ†ظ‡ط§ظ† ع©ظ†)" else "ًں”¬ ط¬ط²ط¦غŒط§طھ ط§ط³ع©ظ† (ظ†ظ…ط§غŒط´)",
+                    if (showDetails) "🔬 جزئیات اسکن (پنهان کن)" else "🔬 جزئیات اسکن (نمایش)",
                     fontSize = 11.sp
                 )
             }
@@ -216,8 +216,8 @@ fun SignalLogScreen() {
 
         if (filteredLogs.isEmpty()) {
             Text(
-                if (logs.isEmpty()) "ظ‡ظ†ظˆط² ط³غŒع¯ظ†ط§ظ„غŒ ط«ط¨طھ ظ†ط´ط¯ظ‡ â€” ط¯ع©ظ…ظ‡ آ«ط§ط³ع©ظ† ظپظˆط±غŒآ» ط±ظˆ ط¨ط²ظ†"
-                else "ط³غŒع¯ظ†ط§ظ„غŒ ط¨ط§ ط§غŒظ† ظپغŒظ„طھط± ظ¾غŒط¯ط§ ظ†ط´ط¯ â€” آ«ط§ط³ع©ظ† ظپظˆط±غŒآ» ط¨ط²ظ† طھط§ ط¯ط± ط§غŒظ† ط­ط§ظ„طھ ط§ط³ع©ظ† ط¨ط´ظ‡",
+                if (logs.isEmpty()) "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن"
+                else "سیگنالی با این فیلتر پیدا نشد — «اسکن فوری» بزن تا در این حالت اسکن بشه",
                 color = LGr,
                 modifier = Modifier.padding(24.dp)
             )
@@ -232,10 +232,10 @@ fun SignalLogScreen() {
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                val modeEmoji = if (s.mode == "FUT") "âڑ،" else "ًںڈ¦"
-                                val modeText = if (s.mode == "FUT") "ظپغŒظˆع†ط±ط²" else "ط§ط³ظ¾ط§طھ"
+                                val modeEmoji = if (s.mode == "FUT") "⚡" else "🏦"
+                                val modeText = if (s.mode == "FUT") "فیوچرز" else "اسپات"
                                 Text(
-                                    "$modeEmoji ${s.symbol} â€¢ ${if(s.side=="BUY")"ًںں¢ ط®ط±غŒط¯" else "ًں”´ ظپط±ظˆط´"} â€¢ $modeText",
+                                    "$modeEmoji ${s.symbol} • ${if(s.side=="BUY")"🟢 خرید" else "🔴 فروش"} • $modeText",
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
@@ -249,18 +249,18 @@ fun SignalLogScreen() {
                                 )
                             }
                             Text(
-                                "ط§ظ…طھغŒط§ط²: ${s.score}/100 â€¢ ظˆط±ظˆط¯: $${fmtPrice(s.entry)}",
+                                "امتیاز: ${s.score}/100 • ورود: $${fmtPrice(s.entry)}",
                                 fontSize = 11.sp, color = LGr
                             )
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                Text("ط§ط³طھط§ظ¾: $${fmtPrice(s.stop)}", fontSize = 10.sp, color = LR)
-                                Text("ظ‡ط¯ظپ: $${fmtPrice(s.target)}", fontSize = 10.sp, color = LG)
+                                Text("استاپ: $${fmtPrice(s.stop)}", fontSize = 10.sp, color = LR)
+                                Text("هدف: $${fmtPrice(s.target)}", fontSize = 10.sp, color = LG)
                             }
                             s.exitPrice?.let { ep ->
                                 val pnl = if (s.side == "BUY") (ep - s.entry) / s.entry * 100
                                 else (s.entry - ep) / s.entry * 100
                                 Text(
-                                    "ط®ط±ظˆط¬: $${fmtPrice(ep)} â€¢ PnL: ${String.format(Locale.US, "%+.2f%%", pnl)}",
+                                    "خروج: $${fmtPrice(ep)} • PnL: ${String.format(Locale.US, "%+.2f%%", pnl)}",
                                     fontSize = 10.sp,
                                     color = if (pnl >= 0) LG else LR
                                 )
