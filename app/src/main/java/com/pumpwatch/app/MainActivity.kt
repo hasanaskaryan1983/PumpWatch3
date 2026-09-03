@@ -54,6 +54,7 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.ui.AssistantScreen
+import com.pumpwatch.app.ui.BacktestScreen
 import com.pumpwatch.app.ui.HistoryScreen
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.MemeRadarScreen
@@ -78,16 +79,16 @@ private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
 
 enum class Tab(val title: String, val emoji: String) {
-    MARKET("بازار", ""),
-    ALERTS("هشدار", ""),
-    WHALE("نهنگ", ""),
-    ASSISTANT("دستیار", ""),
-    BACKTEST("بک‌تست", ""),
-    TOP("برترین", ""),
-    MEME("میم", ""),
-    LOG("سیگنال", ""),
+    MARKET("بازار", "📊"),
+    ALERTS("هشدار", "🔔"),
+    WHALE("نهنگ", "🐳"),
+    ASSISTANT("دستیار", "🤖"),
+    BACKTEST("بک‌تست", "🧪"),
+    TOP("برترین", "🏆"),
+    MEME("میم", "🐸"),
+    LOG("سیگنال", "📓"),
     TRADES("معامله", ""),
-    HISTORY("تاریخچه", "")
+    HISTORY("تاریخچه", "📚")
 }
 
 class MainActivity : ComponentActivity() {
@@ -105,7 +106,6 @@ class MainActivity : ComponentActivity() {
 
         MonitorScheduler.start(this)
 
-        // شروع اسکنر خودکار هر ۴ ساعت
         val scanRequest = PeriodicWorkRequestBuilder<SignalScannerWorker>(4, TimeUnit.HOURS)
             .setConstraints(
                 Constraints.Builder()
@@ -176,7 +176,7 @@ fun MainApp() {
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("", fontSize = 26.sp)
+                        Text("🚀", fontSize = 26.sp)
                         Spacer(Modifier.width(8.dp))
                         Text(
                             "PumpDump",
@@ -367,7 +367,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp)
             )
         }
