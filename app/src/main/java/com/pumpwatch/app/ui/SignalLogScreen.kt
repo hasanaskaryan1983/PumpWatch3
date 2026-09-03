@@ -7,15 +7,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.work.*
 import com.pumpwatch.app.data.RadarBinance
 import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.SignalLogger
+import com.pumpwatch.app.worker.SignalScannerWorker
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -24,12 +28,13 @@ private val LR = Color(0xFFFF5252)
 private val LY = Color(0xFFFFC107)
 private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
+private val LBlue = Color(0xFF40C4FF)
 
 private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
-    "LOSS" -> "❌"
+    "LOSS" -> ""
     "EXP" -> "⌛"
-    else -> ""
+    else -> "⏳"
 }
 
 @Composable
@@ -38,8 +43,9 @@ fun SignalLogScreen() {
     val scope = rememberCoroutineScope()
     var logs by remember { mutableStateOf<List<LoggedSignal>>(emptyList()) }
     var stats by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+    var isScanning by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    fun loadLogs() {
         scope.launch {
             val l = SignalLogger.load(ctx)
             val prices = try {
@@ -61,11 +67,47 @@ fun SignalLogScreen() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        loadLogs()
+    }
+
     Column(
         Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("📓 لاگ سیگنال‌های زنده", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("📓 لاگ سیگنال‌های زنده", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Button(
+                onClick = {
+                    if (!isScanning) {
+                        isScanning = true
+                        scope.launch {
+                            val workRequest = OneTimeWorkRequestBuilder<SignalScannerWorker>().build()
+                            WorkManager.getInstance(ctx).enqueue(workRequest)
+                            delay(8000)
+                            loadLogs()
+                            isScanning = false
+                        }
+                    }
+                },
+                enabled = !isScanning,
+                colors = ButtonDefaults.buttonColors(containerColor = LBlue)
+            ) {
+                if (isScanning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (isScanning) "در حال اسکن..." else " اسکن فوری", fontSize = 12.sp)
+            }
+        }
 
         stats?.let { st ->
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
@@ -86,7 +128,7 @@ fun SignalLogScreen() {
 
         if (logs.isEmpty()) {
             Text(
-                "هنوز سیگنالی ثبت نشده — با اسکن‌های بعدی، سیگنال‌ها اینجا ثبت و ارزیابی می‌شن",
+                "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن یا صبر کن تا اسکن خودکار اجرا بشه",
                 color = LGr,
                 modifier = Modifier.padding(24.dp)
             )
@@ -101,10 +143,10 @@ fun SignalLogScreen() {
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                val modeEmoji = if (s.mode == "FUT") "" else "🏦"
+                                val modeEmoji = if (s.mode == "FUT") "⚡" else "🏦"
                                 val modeText = if (s.mode == "FUT") "فیوچرز" else "اسپات"
                                 Text(
-                                    "$modeEmoji ${s.symbol} • ${if(s.side=="BUY")"🟢 خرید" else " فروش"} • $modeText",
+                                    "$modeEmoji ${s.symbol} • ${if(s.side=="BUY")"🟢 خرید" else "🔴 فروش"} • $modeText",
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
