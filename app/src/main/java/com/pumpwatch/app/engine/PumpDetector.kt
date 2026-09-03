@@ -3,7 +3,6 @@ package com.pumpwatch.app.engine
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 /**
  * نتیجه تحلیل Sixty Second Trades
@@ -38,15 +37,13 @@ data class OrderFlowResult(
     val buyVolume: Double,
     val sellVolume: Double,
     val delta: Double,       // buy - sell
-    val isAccumulation: Boolean,  // نهنگ‌ها در حال جمع‌کردن
-    val isDistribution: Boolean   // نهنگ‌ها در حال فروش
+    val isAccumulation: Boolean,
+    val isDistribution: Boolean
 )
 
 object PumpDetector {
 
     // ==================== SIXTY SECOND TRADES ====================
-    // ترکیب ADX + Stochastic + Fractal Dots
-
     fun analyzeSixtySecond(
         highs: List<Double>,
         lows: List<Double>,
@@ -61,22 +58,16 @@ object PumpDetector {
         val isFractalHigh = detectFractalHigh(highs, closes.size - 1, 2)
         val isFractalLow = detectFractalLow(lows, closes.size - 1, 2)
 
-        // منطق سیگنال‌دهی
         var signal = "NEUTRAL"
         var strength = 0
 
-        // سیگنال خرید: Stochastic oversold + ADX قوی + Fractal Low
         if (stochK < 20 && adx > 20 && isFractalLow) {
             signal = "BUY"
             strength = ((20 - stochK) * 2 + (adx - 20) + 30).toInt().coerceIn(0, 100)
-        }
-        // سیگنال فروش: Stochastic overbought + ADX قوی + Fractal High
-        else if (stochK > 80 && adx > 20 && isFractalHigh) {
+        } else if (stochK > 80 && adx > 20 && isFractalHigh) {
             signal = "SELL"
             strength = ((stochK - 80) * 2 + (adx - 20) + 30).toInt().coerceIn(0, 100)
-        }
-        // مومنتوم خنثی
-        else if (adx > 25) {
+        } else if (adx > 25) {
             strength = (adx * 2).toInt().coerceIn(0, 100)
         }
 
@@ -140,7 +131,6 @@ object PumpDetector {
             (currentClose - lowestLow) / (highestHigh - lowestLow) * 100
         } else 50.0
 
-        // Simple D = میانگین 3 دوره آخر K
         val kValues = mutableListOf<Double>()
         for (i in max(0, closes.size - kPeriod * dPeriod) until closes.size step kPeriod) {
             val h = highs.subList(i, min(i + kPeriod, highs.size)).maxOrNull() ?: 0.0
@@ -172,7 +162,6 @@ object PumpDetector {
     }
 
     // ==================== ZIG ZAG HIST ====================
-
     fun analyzeZigZag(
         highs: List<Double>,
         lows: List<Double>,
@@ -195,11 +184,8 @@ object PumpDetector {
         val prevSwing = swingPoints[swingPoints.size - 2]
 
         val currentTrend = if (lastSwing.second > prevSwing.second) "BULLISH" else "BEARISH"
-
-        // تشخیص بازگشت روند
         val reversalSignal = detectZigZagReversal(swingPoints, closes.last())
 
-        // محاسبه هیستوگرام (فاصله از آخرین swing)
         val histValue = if (currentTrend == "BULLISH") {
             (closes.last() - lastSwing.second) / lastSwing.second * 100
         } else {
@@ -235,7 +221,6 @@ object PumpDetector {
         var lastLowIdx = 0
 
         for (i in depth until highs.size - depth) {
-            // Swing High
             var isHigh = true
             for (j in 1..depth) {
                 if (highs[i] <= highs[i - j] || highs[i] <= highs[i + j]) {
@@ -248,7 +233,6 @@ object PumpDetector {
                 lastHighIdx = i
             }
 
-            // Swing Low
             var isLow = true
             for (j in 1..depth) {
                 if (lows[i] >= lows[i - j] || lows[i] >= lows[i + j]) {
@@ -276,12 +260,8 @@ object PumpDetector {
         val lows = last4.filter { it.first == "LOW" }.map { it.second }
 
         if (highs.size >= 2 && lows.size >= 2) {
-            // Higher Highs + Higher Lows = uptrend continuation
-            // Lower Highs + Lower Lows = downtrend continuation
-            // Mixed = potential reversal
             val hh = highs.last() > highs.first()
             val hl = lows.last() > lows.first()
-
             return (hh && !hl) || (!hh && hl)
         }
 
@@ -289,7 +269,6 @@ object PumpDetector {
     }
 
     // ==================== ORDER FLOW (CVD) ====================
-
     fun analyzeOrderFlow(
         opens: List<Double>,
         highs: List<Double>,
@@ -306,7 +285,6 @@ object PumpDetector {
         var cvd = 0.0
         val cvdHistory = mutableListOf<Double>()
 
-        // تحلیل ۵۰ کندل آخر
         val lookback = min(50, closes.size)
         for (i in (closes.size - lookback) until closes.size) {
             val open = opens[i]
@@ -315,14 +293,10 @@ object PumpDetector {
             val low = lows[i]
             val volume = volumes[i]
 
-            // محاسبه Taker Buy/Sell Volume تقریبی
-            // اگر کندل صعودی: بیشتر حجم = خرید
-            // اگر کندل نزولی: بیشتر حجم = فروش
             val candleRange = high - low
             val bodySize = abs(close - open)
 
             if (candleRange > 0) {
-                // نسبت بدنه به کل رنج
                 val buyRatio = if (close > open) {
                     0.5 + (bodySize / candleRange) * 0.5
                 } else {
@@ -342,12 +316,10 @@ object PumpDetector {
         val delta = buyVolume - sellVolume
         val totalVolume = buyVolume + sellVolume
 
-        // CVD Score
         val cvdScore = if (totalVolume > 0) {
             (delta / totalVolume * 100).toInt().coerceIn(-100, 100)
         } else 0
 
-        // تشخیص Accumulation/Distribution
         val isAccumulation = detectAccumulation(cvdHistory, closes.takeLast(lookback))
         val isDistribution = detectDistribution(cvdHistory, closes.takeLast(lookback))
 
@@ -357,35 +329,28 @@ object PumpDetector {
     private fun detectAccumulation(cvdHistory: List<Double>, prices: List<Double>): Boolean {
         if (cvdHistory.size < 10 || prices.size < 10) return false
 
-        val cvdTrend = cvdHistory.takeLast(10).let {
-            it.last() > it.first()
-        }
+        val cvdTrend = cvdHistory.takeLast(10).let { it.last() > it.first() }
         val priceFlat = prices.takeLast(10).let {
             val change = abs(it.last() - it.first()) / it.first()
-            change < 0.03 // قیمت کمتر از 3% تغییر کرده
+            change < 0.03
         }
 
-        // CVD بالا میره ولی قیمت ثابته = Accumulation (نهنگ‌ها دارن جمع می‌کنن)
         return cvdTrend && priceFlat
     }
 
     private fun detectDistribution(cvdHistory: List<Double>, prices: List<Double>): Boolean {
         if (cvdHistory.size < 10 || prices.size < 10) return false
 
-        val cvdTrend = cvdHistory.takeLast(10).let {
-            it.last() < it.first()
-        }
+        val cvdTrend = cvdHistory.takeLast(10).let { it.last() < it.first() }
         val priceFlat = prices.takeLast(10).let {
             val change = abs(it.last() - it.first()) / it.first()
             change < 0.03
         }
 
-        // CVD پایین میاد ولی قیمت ثابته = Distribution (نهنگ‌ها دارن می‌فروشن)
         return cvdTrend && priceFlat
     }
 
     // ==================== تشخیص پامپ زودهنگام ====================
-
     fun detectEarlyPump(
         closes: List<Double>,
         volumes: List<Double>
@@ -427,7 +392,6 @@ object PumpDetector {
     }
 
     // ==================== بررسی سقف قیمتی ====================
-
     fun isAtTop(
         closes: List<Double>,
         volumes: List<Double>
@@ -450,8 +414,6 @@ object PumpDetector {
         val isOverbought = rsi > 75
         val isPumped = change24h > 20 || change4h > 10
         val isExtended = distanceFromEma > 8
-
-        // فیلتر اضافی: قیمت زیر EMA50 = نباید سیگنال خرید داد
         val belowEma50 = price < e50
 
         var topSignals = 0
@@ -464,7 +426,6 @@ object PumpDetector {
     }
 
     // ==================== محاسبه امتیاز نهایی ====================
-
     fun calculateFinalScore(
         baseScore: Int,
         closes: List<Double>,
@@ -486,33 +447,33 @@ object PumpDetector {
             score += 15
         }
 
-        // 3. فیلتر Sixty Second Trades (تا 25 امتیاز)
+        // 3. فیلتر Sixty Second Trades
         when (sixtyResult.signal) {
             "BUY" -> score += (sixtyResult.strength * 0.25).toInt()
             "SELL" -> score -= (sixtyResult.strength * 0.25).toInt()
         }
 
-        // 4. فیلتر Zig Zag Hist (تا 20 امتیاز)
+        // 4. فیلتر Zig Zag Hist
         when (zigzagResult.direction) {
-            "REVERSING_UP" -> score += 20  // بازگشت صعودی = سیگنال قوی
+            "REVERSING_UP" -> score += 20
             "UP" -> score += 10
-            "REVERSING_DOWN" -> score -= 20  // بازگشت نزولی = خطر
+            "REVERSING_DOWN" -> score -= 20
             "DOWN" -> score -= 10
         }
 
-        // 5. فیلتر Order Flow (تا 25 امتیاز)
+        // 5. فیلتر Order Flow
         if (orderFlowResult.cvdScore > 30) {
             score += (orderFlowResult.cvdScore * 0.25).toInt()
         } else if (orderFlowResult.cvdScore < -30) {
             score -= (abs(orderFlowResult.cvdScore) * 0.25).toInt()
         }
 
-        // 6. پاداش Accumulation (نهنگ‌ها در حال جمع‌کردن)
+        // 6. پاداش Accumulation
         if (orderFlowResult.isAccumulation) {
             score += 15
         }
 
-        // 7. جریمه Distribution (نهنگ‌ها در حال فروش)
+        // 7. جریمه Distribution
         if (orderFlowResult.isDistribution) {
             score -= 20
         }
@@ -521,7 +482,6 @@ object PumpDetector {
     }
 
     // ==================== توابع کمکی ====================
-
     private fun emaLast(data: List<Double>, period: Int): Double {
         if (data.size < period) return data.lastOrNull() ?: 0.0
         val k = 2.0 / (period + 1)
