@@ -2,9 +2,12 @@ package com.pumpwatch.app.engine
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import com.pumpwatch.app.MainActivity
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.BinanceFutures
 import kotlin.math.abs
@@ -28,7 +31,7 @@ object QuickScanner {
 
     suspend fun scan(ctx: Context, symbols: List<String>, mode: String): ScanReport {
         val signalType = if (mode == "FUTURES") "FUT" else "SPOT"
-        val threshold = if (mode == "FUTURES") 55 else 50
+        val threshold = 60
         val lines = mutableListOf<String>()
         var signalCount = 0
 
@@ -248,6 +251,17 @@ object QuickScanner {
             )
         }
 
+        // ✅ اینتنت برای باز کردن اپ با لمس نوتیفیکیشن
+        val intent = Intent(ctx, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(ctx, 0, intent, pendingFlags)
+
         val emoji = if (score > 0) "🟢" else "🔴"
         val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
         val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات"
@@ -256,6 +270,18 @@ object QuickScanner {
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("$emoji $action: $symbol $modeText")
             .setContentText("امتیاز: $score/100 | پامپ: $pumpScore | قیمت: $$price")
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    "امتیاز: $score/100\n" +
+                            "Sixty Second: ${sixty.signal} (${sixty.strength}%)\n" +
+                            "ZigZag: ${zigzag.direction}\n" +
+                            "Order Flow: ${orderFlow.cvdScore}\n" +
+                            "پامپ: $pumpScore/100\n" +
+                            "قیمت: $$price"
+                )
+            )
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
 
