@@ -10,6 +10,7 @@ import androidx.work.WorkerParameters
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.BinanceFutures
 import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.PumpDetector
 import com.pumpwatch.app.engine.SignalLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -45,29 +46,37 @@ class SignalScannerWorker(
 
                 if (closes.size < 40) continue
 
-                val score = computeScore(closes, volumes)
+                // محاسبه امتیاز پایه
+                val baseScore = computeScore(closes, volumes)
+                
+                // تشخیص پامپ زودهنگام
+                val pumpScore = PumpDetector.detectEarlyPump(closes, volumes)
+                
+                // محاسبه امتیاز نهایی با فیلترهای ضد سقف
+                val finalScore = PumpDetector.calculateFinalScore(baseScore, closes, volumes, pumpScore)
+
                 val funding = getFundingRate(symbol)
                 val oiUp = getOiTrend(symbol)
 
-                var finalScore = score
+                var adjustedScore = finalScore
                 funding?.let {
-                    if (it <= -0.0003) finalScore += 10
-                    else if (it >= 0.0005) finalScore -= 10
+                    if (it <= -0.0003) adjustedScore += 10
+                    else if (it >= 0.0005) adjustedScore -= 10
                 }
                 oiUp?.let {
                     if (closes.last() >= closes.dropLast(1).last()) {
-                        finalScore += if (it) 10 else -10
+                        adjustedScore += if (it) 10 else -10
                     }
                 }
-                finalScore = finalScore.coerceIn(-100, 100)
+                adjustedScore = adjustedScore.coerceIn(-100, 100)
 
                 val threshold = if (mode == "FUTURES") 65 else 60
 
-                if (finalScore >= threshold || finalScore <= -threshold) {
+                if (adjustedScore >= threshold || adjustedScore <= -threshold) {
                     val price = closes.last()
                     val atr = calculateAtr(closes)
                     val risk = if (atr > 0) atr * 1.5 else price * 0.03
-                    val side = if (finalScore > 0) "BUY" else "SELL"
+                    val side = if (adjustedScore > 0) "BUY" else "SELL"
 
                     val (stop, target) = if (mode == "FUTURES") {
                         val shortRisk = risk * 0.7
@@ -89,7 +98,7 @@ class SignalScannerWorker(
                         LoggedSignal(
                             symbol = symbol,
                             side = side,
-                            score = finalScore,
+                            score = adjustedScore,
                             entry = price,
                             stop = stop,
                             target = target,
@@ -98,8 +107,8 @@ class SignalScannerWorker(
                         )
                     )
 
-                    if (finalScore >= 75 || finalScore <= -75) {
-                        sendNotification(symbol, finalScore, side, price, signalType)
+                    if (adjustedScore >= 75 || adjustedScore <= -75) {
+                        sendNotification(symbol, adjustedScore, side, price, signalType, pumpScore)
                     }
                 }
             } catch (e: Exception) {
@@ -217,7 +226,7 @@ class SignalScannerWorker(
         } catch (_: Exception) { null }
     }
 
-    private fun sendNotification(symbol: String, score: Int, side: String, price: Double, mode: String) {
+    private fun sendNotification(symbol: String, score: Int, side: String, price: Double, mode: String, pumpScore: Int) {
         val channelId = "signal_alerts"
         val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -230,14 +239,15 @@ class SignalScannerWorker(
             notificationManager.createNotificationChannel(channel)
         }
 
-        val emoji = if (score > 0) "🟢" else ""
+        val emoji = if (score > 0) "🟢" else "🔴"
         val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
-        val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات"
+        val modeText = if (mode == "FUT") " فیوچرز" else "🏦 اسپات"
+        val pumpText = if (pumpScore >= 60) " پامپ" else ""
 
         val notification = NotificationCompat.Builder(applicationContext, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("$emoji $action: $symbol $modeText")
-            .setContentText("امتیاز: $score/100 | قیمت: $$price")
+            .setContentTitle("$emoji $action: $symbol $modeText$pumpText")
+            .setContentText("امتیاز: $score/100 | پامپ: $pumpScore/100 | قیمت: $$price")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
 
