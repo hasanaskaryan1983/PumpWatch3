@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 private val TOP_SYMBOLS = listOf(
@@ -41,20 +42,42 @@ class SignalScannerWorker(
         for (symbol in symbolsToScan) {
             try {
                 val klines = BinanceClient.api.klines("${symbol}USDT", "1h", 100)
+
+                if (klines.size < 60) continue
+
+                val opens = klines.map { it[1].asDouble }
+                val highs = klines.map { it[2].asDouble }
+                val lows = klines.map { it[3].asDouble }
                 val closes = klines.map { it[4].asDouble }
                 val volumes = klines.map { it[5].asDouble }
 
-                if (closes.size < 40) continue
-
-                // محاسبه امتیاز پایه
+                // 1. امتیاز پایه
                 val baseScore = computeScore(closes, volumes)
-                
-                // تشخیص پامپ زودهنگام
-                val pumpScore = PumpDetector.detectEarlyPump(closes, volumes)
-                
-                // محاسبه امتیاز نهایی با فیلترهای ضد سقف
-                val finalScore = PumpDetector.calculateFinalScore(baseScore, closes, volumes, pumpScore)
 
+                // 2. تشخیص پامپ زودهنگام
+                val pumpScore = PumpDetector.detectEarlyPump(closes, volumes)
+
+                // 3. تحلیل Sixty Second Trades
+                val sixtyResult = PumpDetector.analyzeSixtySecond(highs, lows, closes)
+
+                // 4. تحلیل Zig Zag Hist
+                val zigzagResult = PumpDetector.analyzeZigZag(highs, lows, closes)
+
+                // 5. تحلیل Order Flow
+                val orderFlowResult = PumpDetector.analyzeOrderFlow(opens, highs, lows, closes, volumes)
+
+                // 6. محاسبه امتیاز نهایی با همه پارامترها
+                val finalScore = PumpDetector.calculateFinalScore(
+                    baseScore = baseScore,
+                    closes = closes,
+                    volumes = volumes,
+                    pumpScore = pumpScore,
+                    sixtyResult = sixtyResult,
+                    zigzagResult = zigzagResult,
+                    orderFlowResult = orderFlowResult
+                )
+
+                // 7. فاندینگ و OI
                 val funding = getFundingRate(symbol)
                 val oiUp = getOiTrend(symbol)
 
@@ -108,7 +131,17 @@ class SignalScannerWorker(
                     )
 
                     if (adjustedScore >= 75 || adjustedScore <= -75) {
-                        sendNotification(symbol, adjustedScore, side, price, signalType, pumpScore)
+                        sendNotification(
+                            symbol = symbol,
+                            score = adjustedScore,
+                            side = side,
+                            price = price,
+                            mode = signalType,
+                            pumpScore = pumpScore,
+                            sixty = sixtyResult,
+                            zigzag = zigzagResult,
+                            orderFlow = orderFlowResult
+                        )
                     }
                 }
             } catch (e: Exception) {
@@ -212,7 +245,9 @@ class SignalScannerWorker(
     private suspend fun getFundingRate(symbol: String): Double? {
         return try {
             BinanceFutures.api.premiumIndex("${symbol}USDT").lastFundingRate?.toDoubleOrNull()
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private suspend fun getOiTrend(symbol: String): Boolean? {
@@ -223,10 +258,22 @@ class SignalScannerWorker(
                 val lastV = h.last().sumOpenInterestValue?.toDoubleOrNull() ?: 0.0
                 lastV > first
             } else null
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        }
     }
 
-    private fun sendNotification(symbol: String, score: Int, side: String, price: Double, mode: String, pumpScore: Int) {
+    private fun sendNotification(
+        symbol: String,
+        score: Int,
+        side: String,
+        price: Double,
+        mode: String,
+        pumpScore: Int,
+        sixty: com.pumpwatch.app.engine.SixtySecondResult,
+        zigzag: com.pumpwatch.app.engine.ZigZagResult,
+        orderFlow: com.pumpwatch.app.engine.OrderFlowResult
+    ) {
         val channelId = "signal_alerts"
         val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -239,16 +286,32 @@ class SignalScannerWorker(
             notificationManager.createNotificationChannel(channel)
         }
 
-        val emoji = if (score > 0) "🟢" else "🔴"
+        val emoji = if (score > 0) "" else "🔴"
         val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
-        val modeText = if (mode == "FUT") " فیوچرز" else "🏦 اسپات"
-        val pumpText = if (pumpScore >= 60) " پامپ" else ""
+        val modeText = if (mode == "FUT") " فیوچرز" else " اسپات"
+
+        val indicators = buildString {
+            if (pumpScore >= 60) append("🚀پامپ ")
+            if (sixty.signal == "BUY") append("60s ")
+            if (zigzag.direction == "REVERSING_UP") append("ZigZag ")
+            if (orderFlow.isAccumulation) append("Accumulation")
+        }
 
         val notification = NotificationCompat.Builder(applicationContext, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("$emoji $action: $symbol $modeText$pumpText")
-            .setContentText("امتیاز: $score/100 | پامپ: $pumpScore/100 | قیمت: $$price")
+            .setContentTitle("$emoji $action: $symbol $modeText")
+            .setContentText("امتیاز: $score/100 | $indicators | قیمت: $$price")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    "امتیاز: $score/100\n" +
+                            "Sixty Second: ${sixty.signal} (${sixty.strength}%)\n" +
+                            "ZigZag: ${zigzag.direction}\n" +
+                            "Order Flow: ${orderFlow.cvdScore}\n" +
+                            "پامپ: $pumpScore/100\n" +
+                            "قیمت: $$price"
+                )
+            )
             .build()
 
         notificationManager.notify("${symbol}_$mode".hashCode(), notification)
