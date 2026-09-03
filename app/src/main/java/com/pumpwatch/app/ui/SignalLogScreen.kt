@@ -32,8 +32,8 @@ private val LBlue = Color(0xFF40C4FF)
 
 private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
-    "LOSS" -> ""
-    "EXP" -> "⌛"
+    "LOSS" -> "❌"
+    "EXP" -> ""
     else -> "⏳"
 }
 
@@ -44,6 +44,7 @@ fun SignalLogScreen() {
     var logs by remember { mutableStateOf<List<LoggedSignal>>(emptyList()) }
     var stats by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     var isScanning by remember { mutableStateOf(false) }
+    var selectedFilter by remember { mutableStateOf("ALL") }
 
     fun loadLogs() {
         scope.launch {
@@ -69,6 +70,12 @@ fun SignalLogScreen() {
 
     LaunchedEffect(Unit) {
         loadLogs()
+    }
+
+    val filteredLogs = when (selectedFilter) {
+        "SPOT" -> logs.filter { it.mode != "FUT" }
+        "FUT" -> logs.filter { it.mode == "FUT" }
+        else -> logs
     }
 
     Column(
@@ -105,7 +112,7 @@ fun SignalLogScreen() {
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (isScanning) "در حال اسکن..." else " اسکن فوری", fontSize = 12.sp)
+                Text(if (isScanning) "در حال اسکن..." else "🔍 اسکن فوری", fontSize = 12.sp)
             }
         }
 
@@ -113,7 +120,7 @@ fun SignalLogScreen() {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                 Text("✅ برد: ${st.first}", color = LG, fontWeight = FontWeight.Bold)
                 Text("❌ باخت: ${st.second}", color = LR, fontWeight = FontWeight.Bold)
-                Text("⌛ منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
+                Text(" منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
             }
             val t = st.first + st.second
             if (t > 0) {
@@ -126,15 +133,37 @@ fun SignalLogScreen() {
             }
         }
 
-        if (logs.isEmpty()) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = selectedFilter == "ALL",
+                onClick = { selectedFilter = "ALL" },
+                label = { Text("همه (${logs.size})", fontSize = 11.sp) }
+            )
+            FilterChip(
+                selected = selectedFilter == "SPOT",
+                onClick = { selectedFilter = "SPOT" },
+                label = { Text("🏦 اسپات (${logs.count { it.mode != "FUT" }})", fontSize = 11.sp) }
+            )
+            FilterChip(
+                selected = selectedFilter == "FUT",
+                onClick = { selectedFilter = "FUT" },
+                label = { Text("⚡ فیوچرز (${logs.count { it.mode == "FUT" }})", fontSize = 11.sp) }
+            )
+        }
+
+        if (filteredLogs.isEmpty()) {
             Text(
-                "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن یا صبر کن تا اسکن خودکار اجرا بشه",
+                if (logs.isEmpty()) "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن یا صبر کن تا اسکن خودکار اجرا بشه"
+                else "سیگنالی با این فیلتر پیدا نشد",
                 color = LGr,
                 modifier = Modifier.padding(24.dp)
             )
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(logs) { s ->
+                items(filteredLogs) { s ->
                     Box(
                         Modifier
                             .fillMaxWidth()
