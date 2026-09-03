@@ -17,6 +17,14 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
 
+private val TOP_SYMBOLS = listOf(
+    "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "AVAX", "SHIB",
+    "DOT", "LINK", "MATIC", "LTC", "BCH", "UNI", "ATOM", "ETC", "XLM", "FIL",
+    "APT", "ARB", "OP", "NEAR", "ICP", "STX", "IMX", "INJ", "SUI", "SEI",
+    "TIA", "ORDI", "RUNE", "FET", "GRT", "AAVE", "MKR", "SNX", "CRV", "LDO",
+    "PEPE", "WIF", "BONK", "FLOKI", "TON", "JUP", "PYTH", "WLD", "RENDER", "TAO"
+)
+
 class SignalScannerWorker(
     context: Context,
     params: WorkerParameters
@@ -26,24 +34,11 @@ class SignalScannerWorker(
         val prefs = applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
         val mode = prefs.getString("mode", "SPOT")
 
-        val (topCount, signalType) = if (mode == "FUTURES") {
-            100 to "FUT"
-        } else {
-            200 to "SPOT"
-        }
+        val signalType = if (mode == "FUTURES") "FUT" else "SPOT"
+        val symbolsToScan = TOP_SYMBOLS.take(if (mode == "FUTURES") 50 else 50)
 
-        val tickers = try {
-            BinanceClient.api.ticker24h()
-                .filter { it.symbol.endsWith("USDT") }
-                .sortedByDescending { it.quoteVolume?.toDoubleOrNull() ?: 0.0 }
-                .take(topCount)
-        } catch (e: Exception) {
-            return@withContext Result.retry()
-        }
-
-        for (ticker in tickers) {
+        for (symbol in symbolsToScan) {
             try {
-                val symbol = ticker.symbol.replace("USDT", "")
                 val klines = BinanceClient.api.klines("${symbol}USDT", "1h", 100)
                 val closes = klines.map { it[4].asDouble }
                 val volumes = klines.map { it[5].asDouble }
@@ -235,7 +230,7 @@ class SignalScannerWorker(
             notificationManager.createNotificationChannel(channel)
         }
 
-        val emoji = if (score > 0) "🟢" else "🔴"
+        val emoji = if (score > 0) "🟢" else ""
         val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
         val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات"
 
