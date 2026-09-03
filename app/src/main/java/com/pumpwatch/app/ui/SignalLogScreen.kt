@@ -39,15 +39,26 @@ private fun statusEmoji(s: String) = when (s) {
     else -> "⏳"
 }
 
+private fun fmtPrice(p: Double): String = when {
+    p >= 1000 -> String.format(Locale.US, "%.2f", p)
+    p >= 1 -> String.format(Locale.US, "%.4f", p)
+    p >= 0.01 -> String.format(Locale.US, "%.5f", p)
+    else -> String.format(Locale.US, "%.6f", p)
+}
+
 @Composable
 fun SignalLogScreen() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val prefs = remember { ctx.getSharedPreferences("pumpwatch_prefs", 0) }
     var logs by remember { mutableStateOf<List<LoggedSignal>>(emptyList()) }
     var stats by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     var isScanning by remember { mutableStateOf(false) }
-    var selectedFilter by remember { mutableStateOf("ALL") }
+    var selectedFilter by remember {
+        mutableStateOf(if (prefs.getString("mode", "SPOT") == "FUTURES") "FUT" else "SPOT")
+    }
     var lastScores by remember { mutableStateOf("") }
+    var showDetails by remember { mutableStateOf(false) }
 
     fun loadLogs() {
         scope.launch {
@@ -73,8 +84,7 @@ fun SignalLogScreen() {
 
     LaunchedEffect(Unit) {
         loadLogs()
-        lastScores = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-            .getString("last_scores", "") ?: ""
+        lastScores = prefs.getString("last_scores", "") ?: ""
     }
 
     val filteredLogs = when (selectedFilter) {
@@ -85,7 +95,7 @@ fun SignalLogScreen() {
 
     Column(
         Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
             Modifier.fillMaxWidth(),
@@ -98,14 +108,12 @@ fun SignalLogScreen() {
                     if (!isScanning) {
                         isScanning = true
                         scope.launch {
-                            val mode = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-                                .getString("mode", "SPOT") ?: "SPOT"
+                            val mode = prefs.getString("mode", "SPOT") ?: "SPOT"
                             val report = withContext(Dispatchers.IO) {
                                 QuickScanner.scan(ctx, QuickScanner.TOP_SYMBOLS.take(15), mode)
                             }
                             lastScores = "سیگنال جدید: ${report.signalCount}\n" + report.lines.joinToString("\n")
-                            ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
-                                .putString("last_scores", lastScores).apply()
+                            prefs.edit().putString("last_scores", lastScores).apply()
                             loadLogs()
                             isScanning = false
                         }
@@ -132,6 +140,11 @@ fun SignalLogScreen() {
                 Text("❌ باخت: ${st.second}", color = LR, fontWeight = FontWeight.Bold)
                 Text("⌛ منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
             }
+            Text(
+                "برد = رسید به هدف | باخت = خورد به استاپ | منقضی = بدون نتیجه بعد از ۲۴ ساعت",
+                fontSize = 9.sp,
+                color = LGr
+            )
             val t = st.first + st.second
             if (t > 0) {
                 val wr = st.first * 100.0 / t
@@ -165,20 +178,27 @@ fun SignalLogScreen() {
         }
 
         if (lastScores.isNotEmpty()) {
-            Surface(
-                color = LC,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 200.dp)
-            ) {
-                Column(
-                    Modifier
-                        .padding(10.dp)
-                        .verticalScroll(rememberScrollState())
+            TextButton(onClick = { showDetails = !showDetails }) {
+                Text(
+                    if (showDetails) "🔬 جزئیات اسکن (پنهان کن)" else "🔬 جزئیات اسکن (نمایش)",
+                    fontSize = 11.sp
+                )
+            }
+            if (showDetails) {
+                Surface(
+                    color = LC,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
                 ) {
-                    Text("🔬 جزئیات آخرین اسکن:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Text(lastScores, fontSize = 10.sp, color = LGr, modifier = Modifier.padding(top = 4.dp))
+                    Column(
+                        Modifier
+                            .padding(10.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(lastScores, fontSize = 10.sp, color = LGr)
+                    }
                 }
             }
         }
@@ -186,7 +206,7 @@ fun SignalLogScreen() {
         if (filteredLogs.isEmpty()) {
             Text(
                 if (logs.isEmpty()) "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن"
-                else "سیگنالی با این فیلتر پیدا نشد",
+                else "سیگنالی با این فیلتر پیدا نشد — «اسکن فوری» بزن تا در این حالت اسکن بشه",
                 color = LGr,
                 modifier = Modifier.padding(24.dp)
             )
@@ -218,18 +238,18 @@ fun SignalLogScreen() {
                                 )
                             }
                             Text(
-                                "امتیاز: ${s.score}/100 • ورود: $${s.entry}",
+                                "امتیاز: ${s.score}/100 • ورود: $${fmtPrice(s.entry)}",
                                 fontSize = 11.sp, color = LGr
                             )
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                Text("استاپ: $${s.stop}", fontSize = 10.sp, color = LR)
-                                Text("هدف: $${s.target}", fontSize = 10.sp, color = LG)
+                                Text("استاپ: $${fmtPrice(s.stop)}", fontSize = 10.sp, color = LR)
+                                Text("هدف: $${fmtPrice(s.target)}", fontSize = 10.sp, color = LG)
                             }
                             s.exitPrice?.let { ep ->
                                 val pnl = if (s.side == "BUY") (ep - s.entry) / s.entry * 100
                                 else (s.entry - ep) / s.entry * 100
                                 Text(
-                                    "خروج: $${ep} • PnL: ${String.format(Locale.US, "%+.2f%%", pnl)}",
+                                    "خروج: $${fmtPrice(ep)} • PnL: ${String.format(Locale.US, "%+.2f%%", pnl)}",
                                     fontSize = 10.sp,
                                     color = if (pnl >= 0) LG else LR
                                 )
