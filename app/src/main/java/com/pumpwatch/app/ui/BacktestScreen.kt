@@ -76,7 +76,6 @@ fun BacktestScreen() {
             fontSize = 12.sp, color = LGr
         )
 
-        // انتخاب چند بازه همزمان
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             RANGES.forEach { (label, range) ->
                 FilterChip(
@@ -126,12 +125,11 @@ fun BacktestScreen() {
                     scope.launch {
                         val allResults = mutableListOf<BacktestResult>()
 
-                        // دریافت ۱۰۰ ارز پرحجم
                         val tickers = withContext(Dispatchers.IO) {
                             try {
-                                BinanceClient.api.ticker24h()
-                                    .filter { it.symbol.endsWith("USDT") }
-                                    .sortedByDescending { it.quoteVolume?.toDoubleOrNull() ?: 0.0 }
+                                BinanceClient.api.tickers()
+                                    .filter { t -> t.symbol?.endsWith("USDT") == true }
+                                    .sortedByDescending { t -> t.quoteVolume?.toDoubleOrNull() ?: 0.0 }
                                     .take(100)
                             } catch (e: Exception) {
                                 emptyList()
@@ -144,7 +142,6 @@ fun BacktestScreen() {
                             return@launch
                         }
 
-                        // جمع‌آوری تمام ایندکس‌های مورد نیاز از بازه‌های انتخابی
                         val allIndices = mutableSetOf<Int>()
                         selectedRanges.forEach { label ->
                             RANGES.find { it.first == label }?.second?.forEach { allIndices.add(it) }
@@ -269,7 +266,7 @@ fun BacktestScreen() {
 
             val displayResults = results.takeLast(30)
             Text(
-                "📋 ۳۰ سیگنال آخر (${results.size} کل):",
+                " ۳۰ سیگنال آخر (${results.size} کل):",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
             )
@@ -291,7 +288,7 @@ fun BacktestScreen() {
                         ) {
                             Column {
                                 Text(
-                                    "#${r.rank} ${r.symbol} • ${if (r.side == "BUY") "🟢" else ""}",
+                                    "#${r.rank} ${r.symbol} • ${if (r.side == "BUY") "🟢" else "🔴"}",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp
                                 )
