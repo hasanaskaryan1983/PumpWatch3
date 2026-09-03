@@ -33,7 +33,7 @@ private val LBlue = Color(0xFF40C4FF)
 private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
     "LOSS" -> "❌"
-    "EXP" -> ""
+    "EXP" -> "⌛"
     else -> "⏳"
 }
 
@@ -45,6 +45,7 @@ fun SignalLogScreen() {
     var stats by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     var isScanning by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("ALL") }
+    var lastScores by remember { mutableStateOf("") }
 
     fun loadLogs() {
         scope.launch {
@@ -65,6 +66,8 @@ fun SignalLogScreen() {
                 ev.count { it.status == "LOSS" },
                 ev.count { it.status == "EXP" }
             )
+            lastScores = ctx.getSharedPreferences("pumpwatch_prefs", 0)
+                .getString("last_scores", "") ?: ""
         }
     }
 
@@ -95,7 +98,7 @@ fun SignalLogScreen() {
                         scope.launch {
                             val workRequest = OneTimeWorkRequestBuilder<SignalScannerWorker>().build()
                             WorkManager.getInstance(ctx).enqueue(workRequest)
-                            delay(8000)
+                            delay(15000)
                             loadLogs()
                             isScanning = false
                         }
@@ -120,7 +123,7 @@ fun SignalLogScreen() {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                 Text("✅ برد: ${st.first}", color = LG, fontWeight = FontWeight.Bold)
                 Text("❌ باخت: ${st.second}", color = LR, fontWeight = FontWeight.Bold)
-                Text(" منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
+                Text("⌛ منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
             }
             val t = st.first + st.second
             if (t > 0) {
@@ -161,6 +164,18 @@ fun SignalLogScreen() {
                 color = LGr,
                 modifier = Modifier.padding(24.dp)
             )
+            if (lastScores.isNotEmpty()) {
+                Surface(
+                    color = LC,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("📊 امتیاز ۱۰ ارز اخیر (برای عیب‌یابی):", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(lastScores, fontSize = 11.sp, color = LGr, modifier = Modifier.padding(top = 6.dp))
+                    }
+                }
+            }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filteredLogs) { s ->
