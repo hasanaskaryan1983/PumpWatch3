@@ -1,293 +1,476 @@
-package com.pumpwatch.app.engine
+package com.pumpwatch.app
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.content.Context
+import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
-import androidx.core.app.NotificationCompat
-import com.pumpwatch.app.MainActivity
-import com.pumpwatch.app.data.BinanceClient
-import com.pumpwatch.app.data.BinanceFutures
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.sqrt
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.work.*
+import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.cmcUrl
+import com.pumpwatch.app.ui.AssistantScreen
+import com.pumpwatch.app.ui.BacktestScreen
+import com.pumpwatch.app.ui.HistoryScreen
+import com.pumpwatch.app.ui.MarketPulseHeader
+import com.pumpwatch.app.ui.MemeRadarScreen
+import com.pumpwatch.app.ui.OnboardingScreen
+import com.pumpwatch.app.ui.SignalLogScreen
+import com.pumpwatch.app.ui.SmartAlertsScreen
+import com.pumpwatch.app.ui.TopPicksScreen
+import com.pumpwatch.app.ui.TradesScreen
+import com.pumpwatch.app.ui.WhaleRadarScreen
+import com.pumpwatch.app.worker.MonitorScheduler
+import com.pumpwatch.app.worker.SignalScannerWorker
+import kotlinx.coroutines.launch
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 
-data class ScanReport(
-    val lines: List<String>,
-    val signalCount: Int
-)
+private val DarkBackground = Color(0xFF0B0F14)
+private val DarkSurface = Color(0xFF121820)
+private val DarkCard = Color(0xFF1A2230)
+private val AccentGreen = Color(0xFF00E676)
+private val AccentRed = Color(0xFFFF5252)
+private val TextPrimary = Color(0xFFE6EDF3)
+private val TextSecondary = Color(0xFF8B949E)
 
-object QuickScanner {
+enum class Tab(val title: String, val emoji: String) {
+    MARKET("بازار", "📊"),
+    ALERTS("هشدار", "🔔"),
+    WHALE("نهنگ", "🐳"),
+    ASSISTANT("دستیار", "🤖"),
+    BACKTEST("بک‌تست", "🧪"),
+    TOP("برترین", "🏆"),
+    MEME("میم", "🐸"),
+    LOG("سیگنال", "📓"),
+    TRADES("معامله", "📈"),
+    HISTORY("تاریخچه", "📚")
+}
 
-    val TOP_SYMBOLS = listOf(
-        "BTC", "ETH", "BNB", "SOL", "XRP", "DOGE", "ADA", "TRX", "AVAX", "SHIB",
-        "DOT", "LINK", "MATIC", "LTC", "BCH", "UNI", "ATOM", "ETC", "XLM", "FIL",
-        "APT", "ARB", "OP", "NEAR", "ICP", "STX", "IMX", "INJ", "SUI", "SEI",
-        "TIA", "ORDI", "RUNE", "FET", "GRT", "AAVE", "MKR", "SNX", "CRV", "LDO",
-        "PEPE", "WIF", "BONK", "FLOKI", "TON", "JUP", "PYTH", "WLD", "RENDER", "TAO"
-    )
+class MainActivity : ComponentActivity() {
 
-    suspend fun scan(ctx: Context, symbols: List<String>, mode: String): ScanReport {
-        val signalType = if (mode == "FUTURES") "FUT" else "SPOT"
-        val threshold = 60
-        val lines = mutableListOf<String>()
-        var signalCount = 0
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
 
-        for (symbol in symbols) {
-            try {
-                val klines = BinanceClient.api.klines("${symbol}USDT", "1h", 100)
-                if (klines.size < 60) {
-                    lines.add("$symbol: کندل کم (${klines.size})")
-                    continue
-                }
-                val opens = klines.map { it[1].asDouble }
-                val highs = klines.map { it[2].asDouble }
-                val lows = klines.map { it[3].asDouble }
-                val closes = klines.map { it[4].asDouble }
-                val volumes = klines.map { it[5].asDouble }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-                val baseScore = computeScore(closes, volumes)
-                val pumpScore = PumpDetector.detectEarlyPump(closes, volumes)
-                val sixty = PumpDetector.analyzeSixtySecond(highs, lows, closes)
-                val zigzag = PumpDetector.analyzeZigZag(highs, lows, closes)
-                val of = PumpDetector.analyzeOrderFlow(opens, highs, lows, closes, volumes)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
 
-                val finalScore = PumpDetector.calculateFinalScore(
-                    baseScore, closes, volumes, pumpScore, sixty, zigzag, of
-                )
+        MonitorScheduler.start(this)
 
-                val funding = getFundingRate(symbol)
-                val oiUp = getOiTrend(symbol)
+        val scanRequest = PeriodicWorkRequestBuilder<SignalScannerWorker>(1, TimeUnit.HOURS)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "SignalScanner",
+            ExistingPeriodicWorkPolicy.KEEP,
+            scanRequest
+        )
 
-                var adjusted = finalScore
-                funding?.let {
-                    if (it <= -0.0003) adjusted += 10
-                    else if (it >= 0.0005) adjusted -= 10
-                }
-                oiUp?.let {
-                    if (closes.last() >= closes.dropLast(1).last()) {
-                        adjusted += if (it) 10 else -10
-                    }
-                }
-                adjusted = adjusted.coerceIn(-100, 100)
-
-                lines.add(
-                    "$symbol | پایه:$baseScore پامپ:$pumpScore 60s:${sixty.signal} zz:${zigzag.direction} of:${of.cvdScore} => $adjusted"
-                )
-
-                // اسپات = فقط خرید | فیوچرز = خرید + فروش
-                val isBuySignal = adjusted >= threshold
-                val isSellSignal = adjusted <= -threshold && mode == "FUTURES"
-
-                if (isBuySignal || isSellSignal) {
-                    val price = closes.last()
-                    val atr = calculateAtr(closes)
-                    val risk = if (atr > 0) atr * 1.5 else price * 0.03
-                    val side = if (adjusted > 0) "BUY" else "SELL"
-
-                    val (stop, target) = if (mode == "FUTURES") {
-                        val sr = risk * 0.7
-                        if (side == "BUY") price - sr to price + sr * 1.5
-                        else price + sr to price - sr * 1.5
-                    } else {
-                        if (side == "BUY") price - risk to price + risk * 1.5
-                        else price + risk to price - risk * 1.5
-                    }
-
-                    val logged = SignalLogger.log(
-                        ctx,
-                        LoggedSignal(
-                            symbol = symbol,
-                            side = side,
-                            score = adjusted,
-                            entry = price,
-                            stop = stop,
-                            target = target,
-                            time = System.currentTimeMillis(),
-                            mode = signalType
-                        )
-                    )
-                    if (logged) signalCount++
-
-                    if (adjusted >= 75 || adjusted <= -75) {
-                        sendNotification(ctx, symbol, adjusted, side, price, signalType, pumpScore, sixty, zigzag, of)
-                    }
-                }
-            } catch (e: Exception) {
-                lines.add("$symbol خطا: ${e.message}")
+        setContent {
+            PumpWatchTheme {
+                MainApp()
             }
         }
+    }
+}
 
-        return ScanReport(lines, signalCount)
+@Composable
+fun PumpWatchTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = AccentGreen,
+            onPrimary = Color.Black,
+            background = DarkBackground,
+            onBackground = TextPrimary,
+            surface = DarkSurface,
+            onSurface = TextPrimary,
+            secondaryContainer = DarkCard,
+            onSecondaryContainer = TextPrimary,
+            error = AccentRed
+        ),
+        content = content
+    )
+}
+
+@Composable
+fun MainApp() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
+    var isFutures by remember {
+        mutableStateOf(prefs.getString("mode", "SPOT") == "FUTURES")
+    }
+    var selectedTab by remember { mutableStateOf(Tab.MARKET) }
+    var selectedCoin by remember { mutableStateOf<CoinMarket?>(null) }
+    var onboarded by remember {
+        mutableStateOf(prefs.getBoolean("onboarded", false))
     }
 
-    private fun emaLast(data: List<Double>, period: Int): Double {
-        if (data.size < period) return data.lastOrNull() ?: 0.0
-        val k = 2.0 / (period + 1)
-        var ema = data.take(period).average()
-        for (i in period until data.size) ema = data[i] * k + ema * (1 - k)
-        return ema
+    if (!onboarded) {
+        OnboardingScreen(onDone = {
+            prefs.edit().putBoolean("onboarded", true).apply()
+            onboarded = true
+        })
+        return
     }
 
-    private fun rsiOf(data: List<Double>, period: Int = 14): Double {
-        if (data.size <= period) return 50.0
-        var g = 0.0
-        var l = 0.0
-        for (i in 1..period) {
-            val d = data[i] - data[i - 1]
-            if (d > 0) g += d else l -= d
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Scaffold(
+                topBar = {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🚀", fontSize = 26.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "PumpDump",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            color = AccentGreen
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Surface(
+                            modifier = Modifier.clickable {
+                                isFutures = !isFutures
+                                prefs.edit()
+                                    .putString("mode", if (isFutures) "FUTURES" else "SPOT")
+                                    .apply()
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isFutures) AccentRed.copy(alpha = 0.15f)
+                                    else AccentGreen.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = if (isFutures) "فیوچرز" else "اسپات",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                color = if (isFutures) AccentRed else AccentGreen,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                },
+                bottomBar = {
+                    Surface(color = DarkSurface, modifier = Modifier.height(120.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            verticalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceAround
+                            ) {
+                                Tab.entries.take(5).forEach { tab ->
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { selectedTab = tab }
+                                            .padding(4.dp)
+                                    ) {
+                                        Text(
+                                            tab.emoji,
+                                            fontSize = 20.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary
+                                        )
+                                        Text(
+                                            tab.title,
+                                            fontSize = 8.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceAround
+                            ) {
+                                Tab.entries.drop(5).forEach { tab ->
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { selectedTab = tab }
+                                            .padding(4.dp)
+                                    ) {
+                                        Text(
+                                            tab.emoji,
+                                            fontSize = 20.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary
+                                        )
+                                        Text(
+                                            tab.title,
+                                            fontSize = 8.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            ) { padding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                ) {
+                    when (selectedTab) {
+                        Tab.MARKET -> MarketScreen(onCoinClick = { selectedCoin = it })
+                        Tab.ALERTS -> SmartAlertsScreen(onCoinClick = { selectedCoin = it })
+                        Tab.WHALE -> WhaleRadarScreen()
+                        Tab.ASSISTANT -> AssistantScreen(onOpenCoin = { selectedCoin = it })
+                        Tab.BACKTEST -> BacktestScreen()
+                        Tab.TOP -> TopPicksScreen(if (isFutures) "FUT" else "SPOT")
+                        Tab.MEME -> MemeRadarScreen()
+                        Tab.LOG -> SignalLogScreen()
+                        Tab.TRADES -> TradesScreen()
+                        Tab.HISTORY -> HistoryScreen(if (isFutures) "FUT" else "SPOT")
+                    }
+                }
+            }
+
+            if (selectedCoin != null) {
+                Surface(
+                    color = DarkBackground,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    CoinDetailScreen(
+                        coin = selectedCoin!!,
+                        onBack = { selectedCoin = null }
+                    )
+                }
+            }
         }
-        var ag = g / period
-        var al = l / period
-        for (i in period + 1 until data.size) {
-            val d = data[i] - data[i - 1]
-            ag = (ag * (period - 1) + max(d, 0.0)) / period
-            al = (al * (period - 1) + max(-d, 0.0)) / period
-        }
-        if (al == 0.0) return 100.0
-        return 100.0 - 100.0 / (1.0 + ag / al)
     }
+}
 
-    private fun macdUp(data: List<Double>): Boolean {
-        if (data.size < 35) return false
-        val prev = data.dropLast(1)
-        return (emaLast(data, 12) - emaLast(data, 26)) > (emaLast(prev, 12) - emaLast(prev, 26))
-    }
+@Composable
+fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
+    var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
 
-    private fun bollinger(data: List<Double>, period: Int = 20): Pair<Double, Double> {
-        if (data.size < period) return Pair(0.0, 0.0)
-        val win = data.takeLast(period)
-        val m = win.average()
-        val sd = sqrt(win.map { (it - m) * (it - m) }.average())
-        return Pair(m + 2 * sd, m - 2 * sd)
-    }
-
-    private fun calculateAtr(data: List<Double>, period: Int = 14): Double {
-        if (data.size <= period) return 0.0
-        var s = 0.0
-        for (i in 1..period) s += abs(data[i] - data[i - 1])
-        return s / period
-    }
-
-    private fun computeScore(closes: List<Double>, volumes: List<Double>): Int {
-        val price = closes.last()
-        val e20 = emaLast(closes, 20)
-        val e50 = emaLast(closes, 50)
-        val ema = when {
-            price > e20 && e20 > e50 -> 25
-            price < e20 && e20 < e50 -> -25
-            else -> 0
-        }
-        val r = rsiOf(closes)
-        val rsi = when {
-            r <= 35 -> 20
-            r >= 65 -> -20
-            else -> 0
-        }
-        val macd = if (macdUp(closes)) 25 else -25
-
-        val (bu, bl) = bollinger(closes)
-        val prev = closes.dropLast(1)
-        val (pbu, pbl) = bollinger(prev)
-        val c = price
-        val pc = prev.lastOrNull() ?: c
-        val boll = when {
-            pc <= pbl && c > bl -> 15
-            pc >= pbu && c < bu -> -15
-            c <= bl * 1.01 -> 15
-            c >= bu * 0.99 -> -15
-            c > (bu + bl) / 2 && macd == 25 -> 15
-            c < (bu + bl) / 2 && macd == -25 -> -15
-            else -> 0
-        }
-
-        val vol = if (volumes.size > 15) {
-            val lv = volumes.last()
-            val av = volumes.dropLast(1).takeLast(14).average()
-            val bd = if (c >= pc) 15 else -15
-            if (av > 0 && lv >= 1.5 * av) bd else 0
-        } else 0
-
-        return (ema + rsi + macd + vol + boll).coerceIn(-100, 100)
-    }
-
-    private suspend fun getFundingRate(symbol: String): Double? {
-        return try {
-            BinanceFutures.api.premiumIndex("${symbol}USDT").lastFundingRate?.toDoubleOrNull()
-        } catch (_: Exception) {
-            null
+    fun load() {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
+                val mode = prefs.getString("mode", "SPOT")
+                if (mode == "FUTURES") {
+                    coins = ApiClient.getTop100Coins()
+                } else {
+                    coins = ApiClient.getQuickCoins()
+                    loading = false
+                    try {
+                        val full = ApiClient.getTop1000Coins()
+                        if (full.size > coins.size) coins = full
+                    } catch (_: Exception) { }
+                }
+            } catch (e: Exception) {
+                errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
+            } finally {
+                loading = false
+            }
         }
     }
 
-    private suspend fun getOiTrend(symbol: String): Boolean? {
-        return try {
-            val h = BinanceFutures.api.oiHist("${symbol}USDT", "1h", 24)
-            if (h.size >= 2) {
-                val first = h.first().sumOpenInterestValue?.toDoubleOrNull() ?: 0.0
-                val lastV = h.last().sumOpenInterestValue?.toDoubleOrNull() ?: 0.0
-                lastV > first
-            } else null
-        } catch (_: Exception) {
-            null
-        }
+    LaunchedEffect(Unit) { load() }
+
+    val shown = if (query.isBlank()) coins
+    else coins.filter {
+        it.symbol.contains(query, true) || it.name.contains(query, true)
     }
 
-    private fun sendNotification(
-        ctx: Context,
-        symbol: String,
-        score: Int,
-        side: String,
-        price: Double,
-        mode: String,
-        pumpScore: Int,
-        sixty: SixtySecondResult,
-        zigzag: ZigZagResult,
-        orderFlow: OrderFlowResult
-    ) {
-        val channelId = "signal_alerts"
-        val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "قیمت لحظه‌ای",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { load() }) { Text("بروزرسانی") }
+        }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            nm.createNotificationChannel(
-                NotificationChannel(channelId, "سیگنال‌های قوی", NotificationManager.IMPORTANCE_HIGH)
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                shape = RoundedCornerShape(12.dp)
             )
         }
 
-        val intent = Intent(ctx, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+            MarketPulseHeader()
         }
-        val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        val pendingIntent = PendingIntent.getActivity(ctx, 0, intent, pendingFlags)
 
-        val emoji = if (score > 0) "🟢" else "🔴"
-        val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
-        val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات"
+        when {
+            loading -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentGreen)
+            }
 
-        val notification = NotificationCompat.Builder(ctx, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("$emoji $action: $symbol $modeText")
-            .setContentText("امتیاز: $score/100 | پامپ: $pumpScore | قیمت: $$price")
-            .setStyle(
-                NotificationCompat.BigTextStyle().bigText(
-                    "امتیاز: $score/100\n" +
-                            "Sixty Second: ${sixty.signal} (${sixty.strength}%)\n" +
-                            "ZigZag: ${zigzag.direction}\n" +
-                            "Order Flow: ${orderFlow.cvdScore}\n" +
-                            "پامپ: $pumpScore/100\n" +
-                            "قیمت: $$price"
+            errorMsg != null -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    errorMsg ?: "",
+                    color = AccentRed,
+                    modifier = Modifier.padding(16.dp),
+                    textAlign = TextAlign.Center
                 )
-            )
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
+            }
 
-        nm.notify("${symbol}_$mode".hashCode(), notification)
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(shown) { coin ->
+                    CoinCard(coin = coin, onClick = { onCoinClick(coin) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val change = coin.price_change_percentage_24h ?: 0.0
+    val isUp = change >= 0
+    val rank = coin.market_cap_rank ?: 0
+    Surface(
+        color = DarkCard,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "#$rank  ${coin.symbol.uppercase(Locale.US)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+                Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+                Text(
+                    "کپ: ${formatMarketCap(coin.market_cap)}",
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                )
+            }
+
+            Text(
+                "📊",
+                fontSize = 18.sp,
+                modifier = Modifier
+                    .clickable {
+                        try {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id)))
+                            )
+                        } catch (_: Exception) { }
+                    }
+                    .padding(8.dp)
+            )
+
+            Spacer(Modifier.width(4.dp))
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    formatPrice(coin.current_price),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+                Text(
+                    String.format(Locale.US, "%+.2f%%", change),
+                    color = if (isUp) AccentGreen else AccentRed,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
     }
 }
