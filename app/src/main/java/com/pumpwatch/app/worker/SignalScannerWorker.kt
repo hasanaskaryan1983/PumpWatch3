@@ -39,6 +39,8 @@ class SignalScannerWorker(
         val signalType = if (mode == "FUTURES") "FUT" else "SPOT"
         val symbolsToScan = TOP_SYMBOLS.take(if (mode == "FUTURES") 50 else 50)
 
+        val allScores = mutableListOf<Pair<String, Int>>()
+
         for (symbol in symbolsToScan) {
             try {
                 val klines = BinanceClient.api.klines("${symbol}USDT", "1h", 100)
@@ -51,22 +53,12 @@ class SignalScannerWorker(
                 val closes = klines.map { it[4].asDouble }
                 val volumes = klines.map { it[5].asDouble }
 
-                // 1. امتیاز پایه
                 val baseScore = computeScore(closes, volumes)
-
-                // 2. تشخیص پامپ زودهنگام
                 val pumpScore = PumpDetector.detectEarlyPump(closes, volumes)
-
-                // 3. تحلیل Sixty Second Trades
                 val sixtyResult = PumpDetector.analyzeSixtySecond(highs, lows, closes)
-
-                // 4. تحلیل Zig Zag Hist
                 val zigzagResult = PumpDetector.analyzeZigZag(highs, lows, closes)
-
-                // 5. تحلیل Order Flow
                 val orderFlowResult = PumpDetector.analyzeOrderFlow(opens, highs, lows, closes, volumes)
 
-                // 6. محاسبه امتیاز نهایی با همه پارامترها
                 val finalScore = PumpDetector.calculateFinalScore(
                     baseScore = baseScore,
                     closes = closes,
@@ -77,7 +69,6 @@ class SignalScannerWorker(
                     orderFlowResult = orderFlowResult
                 )
 
-                // 7. فاندینگ و OI
                 val funding = getFundingRate(symbol)
                 val oiUp = getOiTrend(symbol)
 
@@ -93,7 +84,11 @@ class SignalScannerWorker(
                 }
                 adjustedScore = adjustedScore.coerceIn(-100, 100)
 
-                val threshold = if (mode == "FUTURES") 65 else 60
+                // ذخیره امتیاز برای عیب‌یابی
+                allScores.add(symbol to adjustedScore)
+
+                // آستانه پایین‌تر: 50 برای اسپات، 55 برای فیوچرز
+                val threshold = if (mode == "FUTURES") 55 else 50
 
                 if (adjustedScore >= threshold || adjustedScore <= -threshold) {
                     val price = closes.last()
@@ -148,6 +143,11 @@ class SignalScannerWorker(
                 continue
             }
         }
+
+        // ذخیره 10 امتیاز برتر برای نمایش در UI
+        allScores.sortByDescending { abs(it.second) }
+        val scoresText = allScores.take(10).joinToString("\n") { "${it.first}: ${it.second}" }
+        prefs.edit().putString("last_scores", scoresText).apply()
 
         Result.success()
     }
@@ -286,15 +286,15 @@ class SignalScannerWorker(
             notificationManager.createNotificationChannel(channel)
         }
 
-        val emoji = if (score > 0) "" else "🔴"
+        val emoji = if (score > 0) "🟢" else "🔴"
         val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
-        val modeText = if (mode == "FUT") " فیوچرز" else " اسپات"
+        val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات"
 
         val indicators = buildString {
             if (pumpScore >= 60) append("🚀پامپ ")
-            if (sixty.signal == "BUY") append("60s ")
-            if (zigzag.direction == "REVERSING_UP") append("ZigZag ")
-            if (orderFlow.isAccumulation) append("Accumulation")
+            if (sixty.signal == "BUY") append("📈60s ")
+            if (zigzag.direction == "REVERSING_UP") append("🔄ZigZag ")
+            if (orderFlow.isAccumulation) append("💰Accumulation")
         }
 
         val notification = NotificationCompat.Builder(applicationContext, channelId)
