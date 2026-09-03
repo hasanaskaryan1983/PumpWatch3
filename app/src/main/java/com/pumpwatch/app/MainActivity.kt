@@ -80,7 +80,7 @@ private val TextSecondary = Color(0xFF8B949E)
 
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
-    ALERTS("هشدار", ""),
+    ALERTS("هشدار", "🔔"),
     WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
     BACKTEST("بک‌تست", "🧪"),
@@ -367,7 +367,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp)
             )
         }
