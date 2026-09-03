@@ -29,7 +29,7 @@ private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
     "LOSS" -> "❌"
     "EXP" -> "⌛"
-    else -> "⏳"
+    else -> ""
 }
 
 @Composable
@@ -101,13 +101,15 @@ fun SignalLogScreen() {
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                                val modeEmoji = if (s.mode == "FUT") "" else "🏦"
+                                val modeText = if (s.mode == "FUT") "فیوچرز" else "اسپات"
                                 Text(
-                                    "${s.symbol} • ${if (s.side == "BUY") "🟢 خرید" else "🔴 فروش"}",
+                                    "$modeEmoji ${s.symbol} • ${if(s.side=="BUY")"🟢 خرید" else " فروش"} • $modeText",
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
                                     "${statusEmoji(s.status)} ${s.status}",
-                                    color = when (s.status) {
+                                    color = when(s.status) {
                                         "WIN" -> LG
                                         "LOSS" -> LR
                                         "EXP" -> LY
