@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -70,7 +71,7 @@ fun BacktestScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("🧪 بک‌تست استراتژی", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(" بک‌تست استراتژی", fontWeight = FontWeight.Bold, fontSize = 18.sp)
         Text(
             "یک یا چند بازه رتبه ارزها (بر اساس حجم ۲۴ ساعته) رو انتخاب کن:",
             fontSize = 12.sp, color = LGr
@@ -125,35 +126,38 @@ fun BacktestScreen() {
                     scope.launch {
                         val allResults = mutableListOf<BacktestResult>()
 
-                        val tickers = withContext(Dispatchers.IO) {
+                        // دریافت لیست ارزها با ApiClient (که قبلاً کار کرده)
+                        val allCoins = withContext(Dispatchers.IO) {
                             try {
-                                BinanceClient.api.tickers()
-                                    .filter { t -> t.symbol?.endsWith("USDT") == true }
-                                    .sortedByDescending { t -> t.quoteVolume?.toDoubleOrNull() ?: 0.0 }
-                                    .take(100)
+                                ApiClient.getTop1000Coins()
                             } catch (e: Exception) {
                                 emptyList()
                             }
                         }
 
-                        if (tickers.isEmpty()) {
+                        if (allCoins.isEmpty()) {
                             errorMsg = "❌ خطا در دریافت لیست ارزها"
                             isRunning = false
                             return@launch
                         }
 
+                        // جمع‌آوری ایندکس‌های مورد نیاز
                         val allIndices = mutableSetOf<Int>()
                         selectedRanges.forEach { label ->
                             RANGES.find { it.first == label }?.second?.forEach { allIndices.add(it) }
                         }
 
-                        val symbolsToTest = allIndices.map { idx ->
-                            idx to tickers.getOrNull(idx)?.symbol?.replace("USDT", "")
-                        }.filter { it.second != null }
+                        // فیلتر ارزها بر اساس ایندکس‌های انتخابی
+                        val coinsToTest = allIndices.mapNotNull { idx ->
+                            allCoins.getOrNull(idx)
+                        }
 
                         var processed = 0
-                        for ((rank, symbol) in symbolsToTest) {
-                            progress = "در حال تحلیل $symbol (${processed + 1}/${symbolsToTest.size})..."
+                        for (coin in coinsToTest) {
+                            val symbol = coin.symbol.uppercase(Locale.US)
+                            progress = "در حال تحلیل $symbol (${processed + 1}/${coinsToTest.size})..."
+
+                            // دریافت کندل‌های ۱ ساعته (۱۶۸ کندل = ۷ روز)
                             val klines = withContext(Dispatchers.IO) {
                                 try {
                                     BinanceClient.api.klines("${symbol}USDT", "1h", 168)
@@ -161,25 +165,28 @@ fun BacktestScreen() {
                                     emptyList()
                                 }
                             }
+
                             if (klines.size >= 48) {
-                                val closes = klines.map { it[4].asDouble }
-                                val volumes = klines.map { it[5].asDouble }
+                                val closes: List<Double> = klines.map { it[4].asDouble }
+                                val volumes: List<Double> = klines.map { it[5].asDouble }
+
                                 for (i in 24 until closes.size - 24) {
                                     val window = closes.subList(i - 24, i)
                                     val volWindow = volumes.subList(i - 24, i)
                                     val score = computeScore(window, volWindow)
+
                                     if (score >= 60 || score <= -60) {
                                         val entry = closes[i]
                                         val exit = closes[i + 24]
-                                        val pnl = if (score > 0) {
+                                        val pnl: Double = if (score > 0) {
                                             (exit - entry) / entry * 100
                                         } else {
                                             (entry - exit) / entry * 100
                                         }
                                         allResults.add(
                                             BacktestResult(
-                                                symbol = symbol!!,
-                                                rank = rank + 1,
+                                                symbol = symbol,
+                                                rank = allCoins.indexOf(coin) + 1,
                                                 side = if (score > 0) "BUY" else "SELL",
                                                 entry = entry,
                                                 exit = exit,
@@ -192,6 +199,7 @@ fun BacktestScreen() {
                             }
                             processed++
                         }
+
                         results = allResults
                         isRunning = false
                         progress = ""
@@ -266,7 +274,7 @@ fun BacktestScreen() {
 
             val displayResults = results.takeLast(30)
             Text(
-                " ۳۰ سیگنال آخر (${results.size} کل):",
+                "📋 ۰ سیگنال آخر (${results.size} کل):",
                 fontWeight = FontWeight.Bold,
                 fontSize = 13.sp
             )
