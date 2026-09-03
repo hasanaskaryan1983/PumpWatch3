@@ -33,9 +33,9 @@ class SignalScannerWorker(
         }
 
         val tickers = try {
-            BinanceClient.api.tickers()
+            BinanceClient.api.ticker24h()
                 .filter { it.symbol.endsWith("USDT") }
-                .sortedByDescending { it.quoteVolume.toDoubleOrNull() ?: 0.0 }
+                .sortedByDescending { it.quoteVolume?.toDoubleOrNull() ?: 0.0 }
                 .take(topCount)
         } catch (e: Exception) {
             return@withContext Result.retry()
