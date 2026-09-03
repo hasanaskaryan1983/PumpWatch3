@@ -77,7 +77,11 @@ object QuickScanner {
                     "$symbol | پایه:$baseScore پامپ:$pumpScore 60s:${sixty.signal} zz:${zigzag.direction} of:${of.cvdScore} => $adjusted"
                 )
 
-                if (adjusted >= threshold || adjusted <= -threshold) {
+                // اسپات = فقط خرید | فیوچرز = خرید + فروش
+                val isBuySignal = adjusted >= threshold
+                val isSellSignal = adjusted <= -threshold && mode == "FUTURES"
+
+                if (isBuySignal || isSellSignal) {
                     val price = closes.last()
                     val atr = calculateAtr(closes)
                     val risk = if (atr > 0) atr * 1.5 else price * 0.03
@@ -251,7 +255,6 @@ object QuickScanner {
             )
         }
 
-        // ✅ اینتنت برای باز کردن اپ با لمس نوتیفیکیشن
         val intent = Intent(ctx, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
