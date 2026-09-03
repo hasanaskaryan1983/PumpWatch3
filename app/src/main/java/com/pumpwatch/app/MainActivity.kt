@@ -80,14 +80,14 @@ private val TextSecondary = Color(0xFF8B949E)
 
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
-    ALERTS("هشدار", "🔔"),
+    ALERTS("هشدار", ""),
     WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
     BACKTEST("بک‌تست", "🧪"),
     TOP("برترین", "🏆"),
     MEME("میم", "🐸"),
     LOG("سیگنال", "📓"),
-    TRADES("معامله", ""),
+    TRADES("معامله", "📈"),
     HISTORY("تاریخچه", "📚")
 }
 
@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
 
         MonitorScheduler.start(this)
 
-        val scanRequest = PeriodicWorkRequestBuilder<SignalScannerWorker>(4, TimeUnit.HOURS)
+        val scanRequest = PeriodicWorkRequestBuilder<SignalScannerWorker>(1, TimeUnit.HOURS)
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -367,7 +367,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp)
             )
         }
@@ -443,7 +443,7 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             }
 
             Text(
-                "",
+                "📊",
                 fontSize = 18.sp,
                 modifier = Modifier
                     .clickable {
