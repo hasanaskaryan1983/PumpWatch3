@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,9 +25,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +49,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.work.*
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.cmcUrl
@@ -65,8 +64,10 @@ import com.pumpwatch.app.ui.TopPicksScreen
 import com.pumpwatch.app.ui.TradesScreen
 import com.pumpwatch.app.ui.WhaleRadarScreen
 import com.pumpwatch.app.worker.MonitorScheduler
+import com.pumpwatch.app.worker.SignalScannerWorker
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 private val DarkBackground = Color(0xFF0B0F14)
 private val DarkSurface = Color(0xFF121820)
@@ -78,14 +79,14 @@ private val TextSecondary = Color(0xFF8B949E)
 
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", ""),
-    ALERTS("هشدارها", "🔔"),
-    WHALE("نهنگ‌ها", "🐳"),
+    ALERTS("هشدار", ""),
+    WHALE("نهنگ", ""),
     ASSISTANT("دستیار", ""),
     BACKTEST("بک‌تست", ""),
-    TOP("برترین‌ها", "🏆"),
-    MEME("میم", "🐸"),
-    LOG("سیگنال‌ها", "📓"),
-    TRADES("معاملات", "📈"),
+    TOP("برترین", ""),
+    MEME("میم", ""),
+    LOG("سیگنال", ""),
+    TRADES("معامله", ""),
     HISTORY("تاریخچه", "")
 }
 
@@ -103,6 +104,20 @@ class MainActivity : ComponentActivity() {
         }
 
         MonitorScheduler.start(this)
+
+        // شروع اسکنر خودکار هر ۴ ساعت
+        val scanRequest = PeriodicWorkRequestBuilder<SignalScannerWorker>(4, TimeUnit.HOURS)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "SignalScanner",
+            ExistingPeriodicWorkPolicy.KEEP,
+            scanRequest
+        )
 
         setContent {
             PumpWatchTheme {
@@ -192,21 +207,65 @@ fun MainApp() {
                     }
                 },
                 bottomBar = {
-                    NavigationBar(containerColor = DarkSurface) {
-                        Tab.entries.forEach { tab ->
-                            NavigationBarItem(
-                                selected = selectedTab == tab,
-                                onClick = { selectedTab = tab },
-                                icon = { Text(tab.emoji, fontSize = 16.sp) },
-                                label = { Text(tab.title, fontSize = 9.sp) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = AccentGreen,
-                                    selectedTextColor = AccentGreen,
-                                    unselectedIconColor = TextSecondary,
-                                    unselectedTextColor = TextSecondary,
-                                    indicatorColor = DarkCard
-                                )
-                            )
+                    Surface(color = DarkSurface, modifier = Modifier.height(120.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                            verticalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceAround
+                            ) {
+                                Tab.entries.take(5).forEach { tab ->
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { selectedTab = tab }
+                                            .padding(4.dp)
+                                    ) {
+                                        Text(
+                                            tab.emoji,
+                                            fontSize = 20.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary
+                                        )
+                                        Text(
+                                            tab.title,
+                                            fontSize = 8.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceAround
+                            ) {
+                                Tab.entries.drop(5).forEach { tab ->
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { selectedTab = tab }
+                                            .padding(4.dp)
+                                    ) {
+                                        Text(
+                                            tab.emoji,
+                                            fontSize = 20.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary
+                                        )
+                                        Text(
+                                            tab.title,
+                                            fontSize = 8.sp,
+                                            color = if (selectedTab == tab) AccentGreen else TextSecondary,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
