@@ -4,7 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,13 +16,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.work.*
 import com.pumpwatch.app.data.RadarBinance
 import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.QuickScanner
 import com.pumpwatch.app.engine.SignalLogger
-import com.pumpwatch.app.worker.SignalScannerWorker
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 private val LG = Color(0xFF00E676)
@@ -66,13 +68,13 @@ fun SignalLogScreen() {
                 ev.count { it.status == "LOSS" },
                 ev.count { it.status == "EXP" }
             )
-            lastScores = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-                .getString("last_scores", "") ?: ""
         }
     }
 
     LaunchedEffect(Unit) {
         loadLogs()
+        lastScores = ctx.getSharedPreferences("pumpwatch_prefs", 0)
+            .getString("last_scores", "") ?: ""
     }
 
     val filteredLogs = when (selectedFilter) {
@@ -96,9 +98,14 @@ fun SignalLogScreen() {
                     if (!isScanning) {
                         isScanning = true
                         scope.launch {
-                            val workRequest = OneTimeWorkRequestBuilder<SignalScannerWorker>().build()
-                            WorkManager.getInstance(ctx).enqueue(workRequest)
-                            delay(15000)
+                            val mode = ctx.getSharedPreferences("pumpwatch_prefs", 0)
+                                .getString("mode", "SPOT") ?: "SPOT"
+                            val report = withContext(Dispatchers.IO) {
+                                QuickScanner.scan(ctx, QuickScanner.TOP_SYMBOLS.take(15), mode)
+                            }
+                            lastScores = "سیگنال جدید: ${report.signalCount}\n" + report.lines.joinToString("\n")
+                            ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
+                                .putString("last_scores", lastScores).apply()
                             loadLogs()
                             isScanning = false
                         }
@@ -157,25 +164,32 @@ fun SignalLogScreen() {
             )
         }
 
+        if (lastScores.isNotEmpty()) {
+            Surface(
+                color = LC,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 200.dp)
+            ) {
+                Column(
+                    Modifier
+                        .padding(10.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text("🔬 جزئیات آخرین اسکن:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(lastScores, fontSize = 10.sp, color = LGr, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+        }
+
         if (filteredLogs.isEmpty()) {
             Text(
-                if (logs.isEmpty()) "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن یا صبر کن تا اسکن خودکار اجرا بشه"
+                if (logs.isEmpty()) "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن"
                 else "سیگنالی با این فیلتر پیدا نشد",
                 color = LGr,
                 modifier = Modifier.padding(24.dp)
             )
-            if (lastScores.isNotEmpty()) {
-                Surface(
-                    color = LC,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text("📊 امتیاز ۱۰ ارز اخیر (برای عیب‌یابی):", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text(lastScores, fontSize = 11.sp, color = LGr, modifier = Modifier.padding(top = 6.dp))
-                    }
-                }
-            }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filteredLogs) { s ->
