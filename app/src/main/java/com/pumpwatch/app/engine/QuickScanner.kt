@@ -33,6 +33,7 @@ object QuickScanner {
         return if (mode == "FUTURES") scanFutures(ctx, symbols) else scanSpot(ctx, symbols)
     }
 
+    // ================= فیوچرز: کوتاه‌مدت =================
     private suspend fun scanFutures(ctx: Context, symbols: List<String>): ScanReport {
         val lines = mutableListOf<String>()
         var signalCount = 0
@@ -112,6 +113,7 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
+    // ================= اسپات: بلندمدت + ۴ ارتقا =================
     private suspend fun scanSpot(ctx: Context, symbols: List<String>): ScanReport {
         val lines = mutableListOf<String>()
         var signalCount = 0
@@ -126,24 +128,41 @@ object QuickScanner {
                 val closes = klines.map { it[4].asDouble }
                 val volumes = klines.map { it[5].asDouble }
 
-                val score = spotScore(closes, volumes)
+                // تایم‌فریم هفتگی برای تایید روند بزرگ
+                val weekly = try {
+                    BinanceClient.api.klines("${symbol}USDT", "1w", 60).map { it[4].asDouble }
+                } catch (e: Exception) {
+                    emptyList()
+                }
+
+                val score = spotScore(closes, volumes, weekly)
                 val e50 = emaLast(closes, 50)
                 val e200 = emaLast(closes, 200)
                 val trend = if (closes.last() > e50 && e50 > e200) "صعودی" else if (closes.last() < e50) "نزولی" else "خنثی"
+                val wScore = weeklyScore(weekly)
+                val oScore = obvScore(closes, volumes)
 
-                lines.add("$symbol | روند:$trend اسپات:$score")
+                lines.add("$symbol | روند:$trend هفتگی:$wScore OBV:$oScore => $score")
 
                 if (score >= 60) {
                     val entry = closes.last()
+                    // استاپ پویا با ATR
+                    val atr = calculateAtr(closes)
+                    val atrPct = if (entry > 0) atr / entry * 100 else 10.0
+                    val stopPct = (atrPct * 2.5).coerceIn(7.0, 15.0)
+                    val stop = entry * (1.0 - stopPct / 100.0)
+                    val target = entry * (1.0 + stopPct * 2.0 / 100.0)
+
                     val logged = SignalLogger.log(
                         ctx,
                         LoggedSignal(
                             symbol = symbol, side = "BUY", score = score,
-                            entry = entry, stop = entry * 0.88, target = entry * 1.30,
+                            entry = entry, stop = stop, target = target,
                             time = System.currentTimeMillis(), mode = "SPOT"
                         )
                     )
                     if (logged) signalCount++
+
                     if (score >= 75) {
                         sendNotification(
                             ctx, symbol, score, "BUY", entry, "SPOT", 0,
@@ -160,11 +179,13 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
-    private fun spotScore(closes: List<Double>, volumes: List<Double>): Int {
+    // امتیاز اسپات: روند روزانه + هفتگی + MACD + RSI + حجم + OBV
+    private fun spotScore(closes: List<Double>, volumes: List<Double>, weekly: List<Double>): Int {
         if (closes.size < 210) return 0
         val price = closes.last()
         val e50 = emaLast(closes, 50)
         val e200 = emaLast(closes, 200)
+
         var s = 0
         s += when {
             price > e50 && e50 > e200 -> 50
@@ -185,7 +206,47 @@ object QuickScanner {
             val prior = volumes.dropLast(20).takeLast(20).average()
             if (prior > 0 && recent > prior * 1.2) s += 10
         }
+        s += weeklyScore(weekly)
+        s += obvScore(closes, volumes)
         return s.coerceIn(-100, 100)
+    }
+
+    // تایید روند هفتگی
+    private fun weeklyScore(weekly: List<Double>): Int {
+        if (weekly.size < 25) return 0
+        val w = weekly.last()
+        val e10 = emaLast(weekly, 10)
+        val e20 = emaLast(weekly, 20)
+        return when {
+            w > e10 && e10 > e20 -> 15
+            w > e10 -> 8
+            w < e10 && e10 < e20 -> -20
+            else -> -8
+        }
+    }
+
+    // جریان پول (OBV)
+    private fun obvScore(closes: List<Double>, volumes: List<Double>): Int {
+        if (closes.size < 30) return 0
+        var obv = 0.0
+        val series = mutableListOf<Double>()
+        for (i in 1 until closes.size) {
+            obv += when {
+                closes[i] > closes[i - 1] -> volumes[i]
+                closes[i] < closes[i - 1] -> -volumes[i]
+                else -> 0.0
+            }
+            series.add(obv)
+        }
+        if (series.size < 21) return 0
+        val now = series.last()
+        val past = series[series.size - 21]
+        return when {
+            now > past * 1.05 -> 10
+            now > past -> 5
+            now < past * 0.95 -> -10
+            else -> -5
+        }
     }
 
     private fun emaLast(data: List<Double>, period: Int): Double {
@@ -331,7 +392,7 @@ object QuickScanner {
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
                     "امتیاز: $score/100\n" +
-                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "دیدگاه: نگهداری تا هدف ۳۰٪ یا شکست روند\n") +
+                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "هفتگی + OBV تایید | استاپ ATR پویا | تریلینگ: با رشد قیمت، استاپ رو بالا بیار\n") +
                             "قیمت: $$price"
                 )
             )
