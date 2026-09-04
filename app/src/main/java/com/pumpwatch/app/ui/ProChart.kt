@@ -55,8 +55,9 @@ private val PGray = Color(0xFF8B949E)
 private val PBg = Color(0xFF0B0F14)
 private val PBlue = Color(0xFF40C4FF)
 private val PGold = Color(0xFFFFD700)
+private val PTeal = Color(0xFF26A69A)
 
-private data class Candle(val o: Double, val h: Double, val l: Double, val c: Double)
+private data class Candle(val o: Double, val h: Double, val l: Double, val c: Double, val v: Double = 0.0)
 
 enum class IndicatorMode(val label: String, val emoji: String) {
     EMA("EMA 7/30", "📊"),
@@ -68,6 +69,16 @@ enum class IndicatorMode(val label: String, val emoji: String) {
     NONE("بدون اندیکاتور", "⚪")
 }
 
+private fun modeColor(m: IndicatorMode): Color = when (m) {
+    IndicatorMode.EMA -> POrange
+    IndicatorMode.RSI -> PPurple
+    IndicatorMode.MACD -> PBlue
+    IndicatorMode.BOLL -> PGray
+    IndicatorMode.SIXTY -> PCyan
+    IndicatorMode.OF -> PTeal
+    IndicatorMode.NONE -> PGray
+}
+
 private fun chunkEvery(v: List<Double>, n: Int): List<Double> =
     if (n <= 1) v else v.filterIndexed { i, _ -> (i + 1) % n == 0 }
 
@@ -77,7 +88,7 @@ private fun candlesFrom(prices: List<Double>): List<Candle> {
     for (i in 1 until prices.size) {
         val o = prices[i - 1]
         val c = prices[i]
-        out.add(Candle(o = o, c = c, h = max(o, c) * 1.0015, l = min(o, c) * 0.9985))
+        out.add(Candle(o = o, c = c, h = max(o, c) * 1.0015, l = min(o, c) * 0.9985, v = abs(c - o)))
     }
     return out
 }
@@ -88,7 +99,7 @@ private suspend fun buildCandles(coinId: String, tf: String, symbol: String): Li
             try {
                 val real = BinanceClient.candles(symbol, tf)
                 if (real.size >= 50) {
-                    return@withContext real.map { Candle(o = it.open, h = it.high, l = it.low, c = it.close) }
+                    return@withContext real.map { Candle(o = it.open, h = it.high, l = it.low, c = it.close, v = it.volume) }
                 }
             } catch (_: Exception) { }
         }
@@ -188,82 +199,6 @@ private fun bollingerSeries(v: List<Double>, p: Int = 20): Triple<List<Double>, 
     return Triple(upper, mid, lower)
 }
 
-// نقاط Sixty Second Trades
-private fun bsFromSixty(highs: List<Double>, lows: List<Double>, closes: List<Double>): List<Pair<Int, Boolean>> {
-    val out = mutableListOf<Pair<Int, Boolean>>()
-    if (closes.size < 40) return out
-    for (i in 30 until closes.size) {
-        val k = 2.0 / 15
-        val stoch = mutableListOf<Double>()
-        for (j in max(0, i - 14)..i) {
-            val slice = closes.subList(max(0, j - 13), j + 1)
-            val low14 = slice.minOrNull() ?: closes[j]
-            val high14 = slice.maxOrNull() ?: closes[j]
-            stoch.add(if (high14 != low14) (closes[j] - low14) / (high14 - low14) * 100 else 50.0)
-        }
-        if (stoch.size < 2) continue
-        val prev = stoch[stoch.size - 2]
-        val cur = stoch.last()
-
-        var fractalBuy = false
-        var fractalSell = false
-        if (i >= 2 && i < lows.size - 2) {
-            if (lows[i] <= lows[i - 1] && lows[i] <= lows[i - 2] &&
-                lows[i] <= lows[i + 1] && lows[i] <= lows[i + 2]) fractalBuy = true
-            if (highs[i] >= highs[i - 1] && highs[i] >= highs[i - 2] &&
-                highs[i] >= highs[i + 1] && highs[i] >= highs[i + 2]) fractalSell = true
-        }
-
-        if (prev < 20 && cur >= 20 && fractalBuy) out.add(i to true)
-        else if (prev > 80 && cur <= 80 && fractalSell) out.add(i to false)
-    }
-    return out
-}
-
-// نقاط Order Flow
-private fun bsFromOrderFlow(opens: List<Double>, highs: List<Double>, lows: List<Double>, closes: List<Double>, volumes: List<Double>): List<Pair<Int, Boolean>> {
-    val out = mutableListOf<Pair<Int, Boolean>>()
-    if (closes.size < 45) return out
-
-    val hist = mutableListOf<Double>()
-    var cvd = 0.0
-    for (i in 1 until closes.size) {
-        val range = highs[i] - lows[i]
-        if (range > 0) {
-            val body = abs(closes[i] - opens[i])
-            val buyRatio = if (closes[i] > opens[i]) 0.5 + (body / range) * 0.5 else 0.5 - (body / range) * 0.5
-            cvd += volumes[i] * (buyRatio - (1.0 - buyRatio))
-        }
-        hist.add(cvd)
-    }
-
-    for (i in 40 until closes.size) {
-        val before = hist.getOrNull(i - 1 - 20) ?: continue
-        val now = hist.getOrNull(i - 1) ?: continue
-        val base = closes.getOrNull(i - 20) ?: continue
-        if (base <= 0) continue
-        val priceChange = (closes[i] - base) / base * 100
-
-        if (now > before && abs(priceChange) < 3) out.add(i to true)
-        else if (now < before && abs(priceChange) < 3) out.add(i to false)
-    }
-    return out
-}
-
-private fun bsPoints(candles: List<Candle>, mode: IndicatorMode): List<Pair<Int, Boolean>> {
-    if (candles.isEmpty()) return emptyList()
-    val closes = candles.map { it.c }
-    return when (mode) {
-        IndicatorMode.EMA -> bsFromEma(closes)
-        IndicatorMode.RSI -> bsFromRsi(closes)
-        IndicatorMode.MACD -> bsFromMacd(closes)
-        IndicatorMode.BOLL -> bsFromBoll(closes)
-        IndicatorMode.SIXTY -> bsFromSixty(candles.map { it.h }, candles.map { it.l }, closes)
-        IndicatorMode.OF -> bsFromOrderFlow(candles.map { it.o }, candles.map { it.h }, candles.map { it.l }, closes, candles.map { it.c * 1000 })
-        IndicatorMode.NONE -> emptyList()
-    }
-}
-
 private fun bsFromEma(closes: List<Double>): List<Pair<Int, Boolean>> {
     val e20 = emaSeries(closes, 20)
     val e50 = emaSeries(closes, 50)
@@ -330,12 +265,82 @@ private fun bsFromBoll(closes: List<Double>): List<Pair<Int, Boolean>> {
     return out
 }
 
-// محاسبه نقاط مشترک
+private fun bsFromSixty(highs: List<Double>, lows: List<Double>, closes: List<Double>): List<Pair<Int, Boolean>> {
+    val out = mutableListOf<Pair<Int, Boolean>>()
+    if (closes.size < 40) return out
+    for (i in 30 until closes.size) {
+        val stoch = mutableListOf<Double>()
+        for (j in max(0, i - 14)..i) {
+            val slice = closes.subList(max(0, j - 13), j + 1)
+            val low14 = slice.minOrNull() ?: closes[j]
+            val high14 = slice.maxOrNull() ?: closes[j]
+            stoch.add(if (high14 != low14) (closes[j] - low14) / (high14 - low14) * 100 else 50.0)
+        }
+        if (stoch.size < 2) continue
+        val prev = stoch[stoch.size - 2]
+        val cur = stoch.last()
+
+        var fractalBuy = false
+        var fractalSell = false
+        if (i >= 2 && i <= lows.size - 3) {
+            if (lows[i] <= lows[i - 1] && lows[i] <= lows[i - 2] && lows[i] <= lows[i + 1] && lows[i] <= lows[i + 2]) fractalBuy = true
+            if (highs[i] >= highs[i - 1] && highs[i] >= highs[i - 2] && highs[i] >= highs[i + 1] && highs[i] >= highs[i + 2]) fractalSell = true
+        }
+
+        if (prev < 20 && cur >= 20 && fractalBuy) out.add(i to true)
+        else if (prev > 80 && cur <= 80 && fractalSell) out.add(i to false)
+    }
+    return out
+}
+
+private fun bsFromOrderFlow(candles: List<Candle>): List<Pair<Int, Boolean>> {
+    val out = mutableListOf<Pair<Int, Boolean>>()
+    if (candles.size < 45) return out
+    val hist = mutableListOf<Double>()
+    var cvd = 0.0
+    for (i in 1 until candles.size) {
+        val c = candles[i]
+        val range = c.h - c.l
+        if (range > 0) {
+            val body = abs(c.c - c.o)
+            val buyRatio = if (c.c > c.o) 0.5 + (body / range) * 0.5 else 0.5 - (body / range) * 0.5
+            cvd += c.v * (buyRatio - (1.0 - buyRatio))
+        }
+        hist.add(cvd)
+    }
+    for (i in 40 until candles.size) {
+        val before = hist.getOrNull(i - 1 - 20) ?: continue
+        val now = hist.getOrNull(i - 1) ?: continue
+        val base = candles.getOrNull(i - 20)?.c ?: continue
+        if (base <= 0) continue
+        val priceChange = (candles[i].c - base) / base * 100
+        if (now > before && abs(priceChange) < 3) out.add(i to true)
+        else if (now < before && abs(priceChange) < 3) out.add(i to false)
+    }
+    return out
+}
+
+private fun bsPoints(candles: List<Candle>, mode: IndicatorMode): List<Pair<Int, Boolean>> {
+    if (candles.isEmpty()) return emptyList()
+    val closes = candles.map { it.c }
+    return when (mode) {
+        IndicatorMode.EMA -> bsFromEma(closes)
+        IndicatorMode.RSI -> bsFromRsi(closes)
+        IndicatorMode.MACD -> bsFromMacd(closes)
+        IndicatorMode.BOLL -> bsFromBoll(closes)
+        IndicatorMode.SIXTY -> bsFromSixty(candles.map { it.h }, candles.map { it.l }, closes)
+        IndicatorMode.OF -> bsFromOrderFlow(candles)
+        IndicatorMode.NONE -> emptyList()
+    }
+}
+
 private fun consensusPoints(allSignals: Map<IndicatorMode, List<Pair<Int, Boolean>>>, minAgree: Int): List<Pair<Int, Boolean>> {
-    val allPoints = allSignals.values.flatten().distinctBy { it.first to it.second }
+    val active = allSignals.values.filter { it.isNotEmpty() }
+    if (active.size < 2) return emptyList()
+    val allPoints = active.flatten().distinctBy { it.first to it.second }
     val out = mutableListOf<Pair<Int, Boolean>>()
     for (p in allPoints) {
-        val agree = allSignals.values.count { list ->
+        val agree = active.count { list ->
             list.any { q -> q.second == p.second && abs(q.first - p.first) <= 2 }
         }
         if (agree >= minAgree) out.add(p)
@@ -367,10 +372,12 @@ private fun ChartCanvas(
         val h = size.height
         if (candles.size < 5) return@Canvas
 
-        val hasSubpanel = IndicatorMode.RSI in selectedModes || IndicatorMode.MACD in selectedModes
-        val mainH = if (hasSubpanel) h * 0.52f else h * 0.78f
-        val subTop = h * 0.58f
-        val subH = h * 0.38f
+        val showRsi = IndicatorMode.RSI in selectedModes && rsiS.isNotEmpty()
+        val showMacd = IndicatorMode.MACD in selectedModes && macd.hist.isNotEmpty()
+        val subCount = (if (showRsi) 1 else 0) + (if (showMacd) 1 else 0)
+        val mainH = when (subCount) { 0 -> h * 0.80f; 1 -> h * 0.55f; else -> h * 0.42f }
+        val subStart = mainH + h * 0.05f
+        val subEach = if (subCount > 0) (h - subStart - h * 0.02f) / subCount else 0f
 
         val n = min(70, candles.size)
         val vis = candles.takeLast(n)
@@ -419,17 +426,13 @@ private fun ChartCanvas(
         }
 
         val paint = android.graphics.Paint().apply {
-            textSize = 30f
+            textSize = 26f
             isFakeBoldText = true
         }
 
-        // رسم سیگنال‌های هر اندیکاتور
+        // نقاط هر اندیکاتور با رنگ خودش
         allSignals.forEach { (mode, signals) ->
-            val color = when (mode) {
-                IndicatorMode.SIXTY -> PCyan
-                IndicatorMode.OF -> PPurple
-                else -> PGray
-            }
+            val col = modeColor(mode)
             signals.forEach { (idx, isBuy) ->
                 val r = closes.size - 1 - idx
                 if (r >= n || r < 0) return@forEach
@@ -438,20 +441,14 @@ private fun ChartCanvas(
                 val c = vis[i]
                 val x = i * cw + cw / 2
                 if (isBuy) {
-                    val y = yMain(c.l) + 34f
-                    drawCircle(color, radius = 11f, center = Offset(x, y))
-                    paint.color = android.graphics.Color.BLACK
-                    drawContext.canvas.nativeCanvas.drawText(mode.emoji, x - 10f, y + 8f, paint)
+                    drawCircle(col, radius = 9f, center = Offset(x, yMain(c.l) + 26f))
                 } else {
-                    val y = yMain(c.h) - 34f
-                    drawCircle(color, radius = 11f, center = Offset(x, y))
-                    paint.color = android.graphics.Color.WHITE
-                    drawContext.canvas.nativeCanvas.drawText(mode.emoji, x - 10f, y + 8f, paint)
+                    drawCircle(col, radius = 9f, center = Offset(x, yMain(c.h) - 26f))
                 }
             }
         }
 
-        // رسم نقاط مشترک (Consensus) با رنگ طلایی
+        // نقاط مشترک طلایی ★
         consensusSignals.forEach { (idx, isBuy) ->
             val r = closes.size - 1 - idx
             if (r >= n || r < 0) return@forEach
@@ -460,21 +457,24 @@ private fun ChartCanvas(
             val c = vis[i]
             val x = i * cw + cw / 2
             if (isBuy) {
-                val y = yMain(c.l) + 50f
+                val y = yMain(c.l) + 48f
                 drawCircle(PGold, radius = 15f, center = Offset(x, y))
                 paint.color = android.graphics.Color.BLACK
-                drawContext.canvas.nativeCanvas.drawText("★", x - 9f, y + 10f, paint)
+                drawContext.canvas.nativeCanvas.drawText("B", x - 9f, y + 10f, paint)
             } else {
-                val y = yMain(c.h) - 50f
+                val y = yMain(c.h) - 48f
                 drawCircle(PGold, radius = 15f, center = Offset(x, y))
                 paint.color = android.graphics.Color.BLACK
-                drawContext.canvas.nativeCanvas.drawText("★", x - 9f, y + 10f, paint)
+                drawContext.canvas.nativeCanvas.drawText("S", x - 8f, y + 10f, paint)
             }
         }
 
-        if (IndicatorMode.RSI in selectedModes && rsiS.isNotEmpty()) {
-            drawLine(PGray, Offset(0f, subTop), Offset(w, subTop), strokeWidth = 1f)
-            fun yRsi(v: Double): Float = (subTop + subH - (v / 100.0 * subH)).toFloat()
+        var subCursor = subStart
+        if (showRsi) {
+            val top = subCursor
+            val sh = subEach
+            drawLine(PGray, Offset(0f, top), Offset(w, top), strokeWidth = 1f)
+            fun yRsi(v: Double): Float = (top + sh - (v / 100.0 * sh)).toFloat()
             drawLine(PGray, Offset(0f, yRsi(70.0)), Offset(w, yRsi(70.0)), strokeWidth = 1f)
             drawLine(PGray, Offset(0f, yRsi(30.0)), Offset(w, yRsi(30.0)), strokeWidth = 1f)
             var prev: Offset? = null
@@ -485,23 +485,25 @@ private fun ChartCanvas(
                 if (prev != null) drawLine(POrange, prev!!, cur, strokeWidth = 2f)
                 prev = cur
             }
+            subCursor += subEach
         }
 
-        if (IndicatorMode.MACD in selectedModes && macd.hist.isNotEmpty()) {
-            drawLine(PGray, Offset(0f, subTop), Offset(w, subTop), strokeWidth = 1f)
+        if (showMacd) {
+            val top = subCursor
+            val sh = subEach
+            drawLine(PGray, Offset(0f, top), Offset(w, top), strokeWidth = 1f)
             val all = macd.hist + macd.dif + macd.dea
             val mMax = all.maxOrNull() ?: 1.0
             val mMin = all.minOrNull() ?: -1.0
             val mRange = if (mMax > mMin) mMax - mMin else 1.0
-            fun yM(v: Double): Float = (subTop + subH - ((v - mMin) / mRange * subH)).toFloat()
+            fun yM(v: Double): Float = (top + sh - ((v - mMin) / mRange * sh)).toFloat()
             val zero = yM(0.0)
             for (i in 0 until n) {
                 val r = n - 1 - i
                 if (r >= macd.hist.size) continue
                 val v = macd.hist[macd.hist.size - 1 - r]
                 val x = i * cw + cw / 2
-                val y = yM(v)
-                drawLine(if (v >= 0) PGreen else PRed, Offset(x, zero), Offset(x, y), strokeWidth = bodyW)
+                drawLine(if (v >= 0) PGreen else PRed, Offset(x, zero), Offset(x, yM(v)), strokeWidth = bodyW)
             }
             fun drawL(series: List<Double>, color: Color) {
                 var prev: Offset? = null
@@ -531,16 +533,11 @@ private fun ChartBody(
 ) {
     val closes = remember(candles) { candles.map { it.c } }
     val allSignals = remember(candles, selectedModes) {
-        selectedModes.associateWith { mode -> bsPoints(candles, mode) }
+        selectedModes.filter { it != IndicatorMode.NONE }.associateWith { bsPoints(candles, it) }
     }
-    val consensus = remember(allSignals) {
-        val activeModes = allSignals.filter { it.value.isNotEmpty() }
-        if (activeModes.size >= 2) consensusPoints(activeModes, 2) else emptyList()
-    }
-
-    val totalBuys = allSignals.values.flatten().count { it.second }
-    val totalSells = allSignals.values.flatten().count { !it.second }
-    val consensusCount = consensus.size
+    val consensus = remember(allSignals) { consensusPoints(allSignals, 2) }
+    val buys = consensus.count { it.second }
+    val sells = consensus.count { !it.second }
 
     Column {
         Row(
@@ -548,11 +545,7 @@ private fun ChartBody(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text("${selectedModes.size} اندیکاتور", fontSize = 11.sp, color = PBlue, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-            Text("🟢 $totalBuys", fontSize = 11.sp, color = PGreen)
-            Text("🔴 $totalSells", fontSize = 11.sp, color = PRed)
-            if (consensusCount > 0) {
-                Text("⭐ $consensusCount مشترک", fontSize = 11.sp, color = PGold, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-            }
+            Text("⭐ مشترک: 🟢$buys 🔴$sells", fontSize = 11.sp, color = PGold, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
         }
         Spacer(Modifier.height(4.dp))
         when {
@@ -569,6 +562,48 @@ private fun ChartBody(
             else -> {
                 val mod = if (height != null) Modifier.height(height) else Modifier.weight(1f)
                 ChartCanvas(candles, closes, selectedModes, allSignals, consensus, mod)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TfChips(tf: String, onTf: (String) -> Unit, tfs: List<Pair<String, String>>) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        tfs.forEach { (key, label) ->
+            FilterChip(
+                selected = tf == key,
+                onClick = { onTf(key) },
+                label = { Text(label, fontSize = 11.sp) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModeChips(selected: Set<IndicatorMode>, onToggle: (IndicatorMode) -> Unit) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        IndicatorMode.values().forEach { m ->
+            if (m == IndicatorMode.NONE) {
+                FilterChip(
+                    selected = selected.isEmpty(),
+                    onClick = { onToggle(m) },
+                    label = { Text("${m.emoji} ${m.label}", fontSize = 11.sp) }
+                )
+            } else {
+                val isSel = m in selected
+                FilterChip(
+                    selected = isSel,
+                    onClick = { onToggle(m) },
+                    label = { Text("${m.emoji} ${m.label}", fontSize = 11.sp) },
+                    enabled = isSel || selected.size < 3
+                )
             }
         }
     }
@@ -600,7 +635,24 @@ fun ProChart(
         }
     }
 
-    val tfs = listOf("15m" to "۱۵د", "1h" to "۱س", "12h" to "۱۲س", "4h" to "۴س", "1d" to "روزانه", "1w" to "هفتگی")
+    fun toggleMode(m: IndicatorMode) {
+        selectedModes = when {
+            m == IndicatorMode.NONE -> emptySet()
+            m in selectedModes -> selectedModes - m
+            selectedModes.size < 3 -> selectedModes + m
+            else -> selectedModes
+        }
+        onModeChange?.invoke(selectedModes)
+    }
+
+    fun setTf(t: String) {
+        tf = t
+        onTfChange?.invoke(t)
+    }
+
+    val tfs = listOf(
+        "15m" to "۱۵د", "1h" to "۱س", "12h" to "۱۲س", "4h" to "۴س", "1d" to "روزانه", "1w" to "هفتگی"
+    )
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -619,48 +671,11 @@ fun ProChart(
 
             Spacer(Modifier.height(6.dp))
             Text("⏱️ تایم‌فریم:", fontSize = 11.sp, color = PGray)
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                tfs.forEach { (key, label) ->
-                    FilterChip(
-                        selected = tf == key,
-                        onClick = {
-                            tf = key
-                            onTfChange?.invoke(key)
-                        },
-                        label = { Text(label, fontSize = 11.sp) }
-                    )
-                }
-            }
+            TfChips(tf, ::setTf, tfs)
 
             Spacer(Modifier.height(6.dp))
-            Text("🧠 اندیکاتورها (حداکثر ۳ تا):", fontSize = 11.sp, color = PGray)
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                IndicatorMode.values().filter { it != IndicatorMode.NONE }.forEach { m ->
-                    val isSelected = m in selectedModes
-                    val canSelect = selectedModes.size < 3 || isSelected
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = {
-                            selectedModes = if (isSelected) {
-                                selectedModes - m
-                            } else if (canSelect) {
-                                selectedModes + m
-                            } else {
-                                selectedModes
-                            }
-                            onModeChange?.invoke(selectedModes)
-                        },
-                        label = { Text("${m.emoji} ${m.label}", fontSize = 11.sp) },
-                        enabled = canSelect
-                    )
-                }
-            }
+            Text("🧠 اندیکاتورها (حداکثر ۳ تا — نقاط مشترک ★):", fontSize = 11.sp, color = PGray)
+            ModeChips(selectedModes, ::toggleMode)
 
             Spacer(Modifier.height(8.dp))
             ChartBody(coinId, tf, symbol, candles, loading, selectedModes, height = 340.dp)
@@ -686,4 +701,15 @@ fun ProChart(
                 Spacer(Modifier.height(6.dp))
 
                 Text("⏱️ تایم‌فریم:", fontSize = 11.sp, color = PGray)
-                Row(
+                TfChips(tf, ::setTf, tfs)
+
+                Spacer(Modifier.height(6.dp))
+                Text("🧠 اندیکاتورها (حداکثر ۳ تا — نقاط مشترک ★):", fontSize = 11.sp, color = PGray)
+                ModeChips(selectedModes, ::toggleMode)
+
+                Spacer(Modifier.height(8.dp))
+                ChartBody(coinId, tf, symbol, candles, loading, selectedModes, height = null)
+            }
+        }
+    }
+}
