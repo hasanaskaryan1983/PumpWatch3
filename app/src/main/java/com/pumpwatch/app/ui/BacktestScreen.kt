@@ -47,10 +47,10 @@ private data class Tf(val label: String, val interval: String, val limit: Int, v
 private val FUT_TIMEFRAMES = listOf(
     Tf("۴ ساعته", "15m", 120, 16, 8),
     Tf("۱۲ ساعته", "30m", 120, 24, 12),
-    Tf("۱ روزه", "1h", 120, 24, 12),
+    Tf("۱ روزه", "1h", 168, 168, 24),
     Tf("۳ روزه", "1h", 168, 72, 24),
-    Tf("۷ روزه", "1h", 168, 168, 24),
-    Tf("ماهیانه", "4h", 180, 180, 30)
+    Tf("۷ روزه", "1h", 168, 168, 48),
+    Tf("ماهیانه", "4h", 180, 180, 60)
 )
 
 private val SPOT_HORIZONS = listOf(
@@ -86,7 +86,7 @@ fun BacktestScreen() {
     var isRunning by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var selectedRanges by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var selectedTf by remember { mutableStateOf("۷ روزه") }
+    var selectedTf by remember { mutableStateOf("۱ روزه") }
     var selectedHorizon by remember { mutableStateOf("۱ ماه") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
@@ -105,15 +105,14 @@ fun BacktestScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                if (isFutures) "⚡ حالت فیوچرز: کوتاه‌مدت، کندل ۱ ساعته، خرید+فروش، استاپ تنگ"
-                else "🏦 حالت اسپات: بلندمدت، کندل روزانه، فقط خرید، هدف ۳۰٪ یا شکست روند",
+                if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، کندل ۱ ساعته، خرید+فروش، خروج روی CLOSE کندل"
+                else "🏦 اسپات: بلندمدت، کندل روزانه، فقط خرید، هدف ۳۰٪ یا شکست روند",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
             )
         }
 
-        // انتخاب بازه زمانی / افق نگهداری
         if (isFutures) {
             Text("⏱ بازه زمانی:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -216,14 +215,12 @@ fun BacktestScreen() {
                             progress = "در حال تحلیل $symbol (${processed + 1}/${coinsToTest.size})..."
 
                             if (isFutures) {
-                                val tf = FUT_TIMEFRAMES.find { it.label == selectedTf } ?: FUT_TIMEFRAMES[4]
+                                val tf = FUT_TIMEFRAMES.find { it.label == selectedTf } ?: FUT_TIMEFRAMES[2]
                                 val klines = withContext(Dispatchers.IO) {
                                     try { BinanceClient.api.klines("${symbol}USDT", tf.interval, tf.limit) }
                                     catch (e: Exception) { emptyList() }
                                 }
                                 if (klines.size >= 60) {
-                                    val highs = klines.map { it[2].asDouble }
-                                    val lows = klines.map { it[3].asDouble }
                                     val closes = klines.map { it[4].asDouble }
                                     val volumes = klines.map { it[5].asDouble }
                                     val start = max(48, closes.size - tf.evalLast)
@@ -234,18 +231,20 @@ fun BacktestScreen() {
                                             val entry = closes[i]
                                             val side = if (score > 0) "BUY" else "SELL"
                                             val atr = atrAt(closes, i)
-                                            val risk = if (atr > 0) atr * 1.5 else entry * 0.03
+                                            val risk = if (atr > 0) atr * 2.5 else entry * 0.05
                                             val stop = if (side == "BUY") entry - risk else entry + risk
                                             val target = if (side == "BUY") entry + risk * 1.5 else entry - risk * 1.5
                                             var result = "EXP"
                                             var exit = closes[min(i + tf.hold, closes.size - 1)]
+                                            // خروج فقط روی CLOSE کندل (نه سایه)
                                             for (j in (i + 1)..min(i + tf.hold, closes.size - 1)) {
+                                                val cj = closes[j]
                                                 if (side == "BUY") {
-                                                    if (lows[j] <= stop) { result = "LOSS"; exit = stop; break }
-                                                    if (highs[j] >= target) { result = "WIN"; exit = target; break }
+                                                    if (cj <= stop) { result = "LOSS"; exit = stop; break }
+                                                    if (cj >= target) { result = "WIN"; exit = target; break }
                                                 } else {
-                                                    if (highs[j] >= stop) { result = "LOSS"; exit = stop; break }
-                                                    if (lows[j] <= target) { result = "WIN"; exit = target; break }
+                                                    if (cj >= stop) { result = "LOSS"; exit = stop; break }
+                                                    if (cj <= target) { result = "WIN"; exit = target; break }
                                                 }
                                             }
                                             val pnl = if (side == "BUY") (exit - entry) / entry * 100 else (entry - exit) / entry * 100
@@ -254,7 +253,6 @@ fun BacktestScreen() {
                                     }
                                 }
                             } else {
-                                // ===== اسپات: کندل روزانه =====
                                 val hold = SPOT_HORIZONS.find { it.first == selectedHorizon }?.second ?: 30
                                 val klines = withContext(Dispatchers.IO) {
                                     try { BinanceClient.api.klines("${symbol}USDT", "1d", 300) }
@@ -367,10 +365,7 @@ fun BacktestScreen() {
                 }
             }
         } else if (!isRunning && results.isEmpty()) {
-            Text(
-                "بازه‌ها رو انتخاب کن و شروع رو بزن",
-                color = LGr, modifier = Modifier.padding(24.dp)
-            )
+            Text("بازه‌ها رو انتخاب کن و شروع رو بزن", color = LGr, modifier = Modifier.padding(24.dp))
         }
     }
 }
