@@ -53,6 +53,19 @@ interface GateApi {
     ): List<List<String>>
 }
 
+// ========== کش سراسری — همه بخش‌های اپ از همین‌جا کندل می‌گیرن ==========
+private object GlobalKlineCache {
+    private val map = mutableMapOf<String, Pair<Long, List<BinanceCandle>>>()
+    fun get(key: String): List<BinanceCandle>? {
+        val e = map[key] ?: return null
+        if (System.currentTimeMillis() - e.first > 5 * 60 * 1000) return null
+        return e.second
+    }
+    fun put(key: String, v: List<BinanceCandle>) {
+        map[key] = System.currentTimeMillis() to v
+    }
+}
+
 object MultiExchange {
 
     private fun client(): OkHttpClient = OkHttpClient.Builder()
@@ -83,14 +96,20 @@ object MultiExchange {
     val gate: GateApi by lazy { create("https://api.gateio.ws/", GateApi::class.java) }
 
     suspend fun fetchKlines(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
+        val key = "$symbolUpper|$interval|$limit"
+        GlobalKlineCache.get(key)?.let { return it }
+        val out = fetchKlinesNetwork(symbolUpper, interval, limit)
+        if (out.isNotEmpty()) GlobalKlineCache.put(key, out)
+        return out
+    }
+
+    private suspend fun fetchKlinesNetwork(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
         // 1) Bybit
         try {
             val r = bybit.kline("spot", "${symbolUpper}USDT", bybitInterval(interval), limit)
             val list = r.result?.list
             if (!list.isNullOrEmpty()) {
-                val out = list.reversed().mapNotNull { a ->
-                    candle(a, 0, 1, 2, 3, 4, 5, true)
-                }
+                val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
                 if (out.isNotEmpty()) return out
             }
         } catch (_: Exception) { }
@@ -100,20 +119,16 @@ object MultiExchange {
             val r = okx.candles("${symbolUpper}-USDT", okxBar(interval), limit)
             val list = r.data
             if (!list.isNullOrEmpty()) {
-                val out = list.reversed().mapNotNull { a ->
-                    candle(a, 0, 1, 2, 3, 4, 5, true)
-                }
+                val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
                 if (out.isNotEmpty()) return out
             }
         } catch (_: Exception) { }
 
         // 3) Gate
         try {
-            val list = gate.candlesticks("${symbolUpper}_USDT", interval, limit)
+            val list = gate.candlesticks("${symbolUpper}_USDT", gateInterval(interval), limit)
             if (list.isNotEmpty()) {
-                val out = list.mapNotNull { a ->
-                    candle(a, 0, 2, 3, 4, 5, 6, false)
-                }
+                val out = list.mapNotNull { a -> candle(a, 0, 2, 3, 4, 5, 6, false) }
                 if (out.isNotEmpty()) return out
             }
         } catch (_: Exception) { }
@@ -123,12 +138,7 @@ object MultiExchange {
 
     private fun candle(
         a: List<String>,
-        t: Int,
-        o: Int,
-        h: Int,
-        l: Int,
-        c: Int,
-        v: Int,
+        t: Int, o: Int, h: Int, l: Int, c: Int, v: Int,
         timeMs: Boolean
     ): BinanceCandle? {
         val close = a.getOrNull(c)?.toDoubleOrNull() ?: return null
@@ -172,9 +182,13 @@ object MultiExchange {
         "1w" -> "1W"
         else -> "1H"
     }
+
+    private fun gateInterval(i: String): String = when (i) {
+        "1w" -> "7d"
+        else -> i
+    }
 }
 
-// ---------- همان BinanceClient قبلی، با موتور ۳ صرافی ----------
 object BinanceClient {
 
     val api: KlineCompat = KlineCompat
