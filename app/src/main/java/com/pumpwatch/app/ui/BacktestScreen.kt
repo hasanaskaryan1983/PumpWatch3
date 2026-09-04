@@ -15,9 +15,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.gson.JsonArray
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -32,6 +34,31 @@ private val LY = Color(0xFFFFC107)
 private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
+
+// کش کندل‌ها — ۱۰ دقیقه اعتبار
+private object KlineCache {
+    private val map = mutableMapOf<String, Pair<Long, List<JsonArray>>>()
+    fun get(key: String): List<JsonArray>? {
+        val e = map[key] ?: return null
+        if (System.currentTimeMillis() - e.first > 10 * 60 * 1000) return null
+        return e.second
+    }
+    fun put(key: String, v: List<JsonArray>) {
+        map[key] = System.currentTimeMillis() to v
+    }
+}
+
+private suspend fun getKlinesCached(symbol: String, interval: String, limit: Int): List<JsonArray> {
+    val key = "$symbol|$interval|$limit"
+    KlineCache.get(key)?.let { return it }
+    val data = try {
+        BinanceClient.api.klines(symbol, interval, limit)
+    } catch (e: Exception) {
+        emptyList()
+    }
+    if (data.isNotEmpty()) KlineCache.put(key, data)
+    return data
+}
 
 data class BacktestResult(
     val symbol: String,
@@ -89,6 +116,7 @@ fun BacktestScreen() {
     var selectedTf by remember { mutableStateOf("۱ روزه") }
     var selectedHorizon by remember { mutableStateOf("۱ ماه") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    var analyzedInfo by remember { mutableStateOf("") }
 
     Column(
         Modifier
@@ -105,8 +133,8 @@ fun BacktestScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، کندل ۱ ساعته، خرید+فروش، خروج روی CLOSE کندل"
-                else "🏦 اسپات: بلندمدت، کندل روزانه، فقط خرید، هدف ۳۰٪ یا شکست روند",
+                if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، خروج روی CLOSE کندل"
+                else "🏦 اسپات: بلندمدت، فقط خرید، هدف ۳۰٪ یا شکست روند",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
@@ -210,6 +238,7 @@ fun BacktestScreen() {
                         val coinsToTest = allIndices.mapNotNull { idx -> allCoins.getOrNull(idx)?.let { idx to it } }
 
                         var processed = 0
+                        var analyzed = 0
                         for ((idx, coin) in coinsToTest) {
                             val symbol = coin.symbol.uppercase(Locale.US)
                             progress = "در حال تحلیل $symbol (${processed + 1}/${coinsToTest.size})..."
@@ -217,17 +246,21 @@ fun BacktestScreen() {
                             if (isFutures) {
                                 val tf = FUT_TIMEFRAMES.find { it.label == selectedTf } ?: FUT_TIMEFRAMES[2]
                                 val klines = withContext(Dispatchers.IO) {
-                                    try { BinanceClient.api.klines("${symbol}USDT", tf.interval, tf.limit) }
-                                    catch (e: Exception) { emptyList() }
+                                    getKlinesCached("${symbol}USDT", tf.interval, tf.limit)
                                 }
                                 if (klines.size >= 60) {
+                                    analyzed++
                                     val closes = klines.map { it[4].asDouble }
                                     val volumes = klines.map { it[5].asDouble }
                                     val start = max(48, closes.size - tf.evalLast)
                                     val end = closes.size - tf.hold
+                                    var prev = 0
                                     for (i in start until end) {
                                         val score = computeScore(closes.subList(i - 24, i + 1), volumes.subList(i - 24, i + 1))
-                                        if (score >= 60 || score <= -60) {
+                                        // فقط شروع روند — نه تکراری
+                                        val freshBuy = score >= 60 && prev < 60
+                                        val freshSell = score <= -60 && prev > -60
+                                        if (freshBuy || freshSell) {
                                             val entry = closes[i]
                                             val side = if (score > 0) "BUY" else "SELL"
                                             val atr = atrAt(closes, i)
@@ -236,7 +269,6 @@ fun BacktestScreen() {
                                             val target = if (side == "BUY") entry + risk * 1.5 else entry - risk * 1.5
                                             var result = "EXP"
                                             var exit = closes[min(i + tf.hold, closes.size - 1)]
-                                            // خروج فقط روی CLOSE کندل (نه سایه)
                                             for (j in (i + 1)..min(i + tf.hold, closes.size - 1)) {
                                                 val cj = closes[j]
                                                 if (side == "BUY") {
@@ -250,23 +282,26 @@ fun BacktestScreen() {
                                             val pnl = if (side == "BUY") (exit - entry) / entry * 100 else (entry - exit) / entry * 100
                                             allResults.add(BacktestResult(symbol, idx + 1, side, pnl, score, result))
                                         }
+                                        prev = score
                                     }
                                 }
                             } else {
                                 val hold = SPOT_HORIZONS.find { it.first == selectedHorizon }?.second ?: 30
                                 val klines = withContext(Dispatchers.IO) {
-                                    try { BinanceClient.api.klines("${symbol}USDT", "1d", 300) }
-                                    catch (e: Exception) { emptyList() }
+                                    getKlinesCached("${symbol}USDT", "1d", 300)
                                 }
                                 if (klines.size >= 210) {
+                                    analyzed++
                                     val highs = klines.map { it[2].asDouble }
                                     val lows = klines.map { it[3].asDouble }
                                     val closes = klines.map { it[4].asDouble }
                                     val volumes = klines.map { it[5].asDouble }
                                     val e50s = emaSeries(closes, 50)
+                                    var prev = 0
                                     for (i in 200 until closes.size) {
                                         val score = spotScore(closes.subList(0, i + 1), volumes.subList(0, i + 1))
-                                        if (score >= 60) {
+                                        // فقط شروع روند صعودی
+                                        if (score >= 60 && prev < 60) {
                                             val entry = closes[i]
                                             val stop = entry * 0.88
                                             val target = entry * 1.30
@@ -284,12 +319,15 @@ fun BacktestScreen() {
                                             val pnl = (exit - entry) / entry * 100
                                             allResults.add(BacktestResult(symbol, idx + 1, "BUY", pnl, score, result))
                                         }
+                                        prev = score
                                     }
                                 }
                             }
                             processed++
+                            delay(150) // احترام به Rate Limit
                         }
 
+                        analyzedInfo = "ارزهای تحلیل‌شده: $analyzed از ${coinsToTest.size}"
                         results = allResults
                         isRunning = false
                         progress = ""
@@ -327,6 +365,7 @@ fun BacktestScreen() {
                         "📊 نتایج ${if (isFutures) "فیوچرز $selectedTf" else "اسپات $selectedHorizon"} — ${selectedRanges.sorted().joinToString(", ")}",
                         fontWeight = FontWeight.Bold, fontSize = 13.sp
                     )
+                    Text(analyzedInfo, fontSize = 10.sp, color = LY)
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                         Text("تعداد: ${results.size}", fontSize = 11.sp, color = LGr)
                         Text("✅ برد: $wins", fontSize = 11.sp, color = LG)
