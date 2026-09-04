@@ -113,7 +113,7 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
-    // ================= اسپات: بلندمدت + ۴ ارتقا =================
+    // ================= اسپات: بلندمدت کامل =================
     private suspend fun scanSpot(ctx: Context, symbols: List<String>): ScanReport {
         val lines = mutableListOf<String>()
         var signalCount = 0
@@ -126,27 +126,37 @@ object QuickScanner {
                     continue
                 }
                 val closes = klines.map { it[4].asDouble }
+                val highs = klines.map { it[2].asDouble }
+                val lows = klines.map { it[3].asDouble }
                 val volumes = klines.map { it[5].asDouble }
 
-                // تایم‌فریم هفتگی برای تایید روند بزرگ
                 val weekly = try {
                     BinanceClient.api.klines("${symbol}USDT", "1w", 60).map { it[4].asDouble }
                 } catch (e: Exception) {
                     emptyList()
                 }
 
-                val score = spotScore(closes, volumes, weekly)
+                var score = spotScore(closes, volumes, weekly)
+
+                // Sixty Second Trades روی کندل روزانه = زمان‌بندی ورود
+                val sixty = PumpDetector.analyzeSixtySecond(highs, lows, closes)
+                score += when (sixty.signal) {
+                    "BUY" -> 15
+                    "SELL" -> -15
+                    else -> 0
+                }
+                score = score.coerceIn(-100, 100)
+
                 val e50 = emaLast(closes, 50)
                 val e200 = emaLast(closes, 200)
                 val trend = if (closes.last() > e50 && e50 > e200) "صعودی" else if (closes.last() < e50) "نزولی" else "خنثی"
                 val wScore = weeklyScore(weekly)
                 val oScore = obvScore(closes, volumes)
 
-                lines.add("$symbol | روند:$trend هفتگی:$wScore OBV:$oScore => $score")
+                lines.add("$symbol | روند:$trend هفتگی:$wScore OBV:$oScore 60s:${sixty.signal} => $score")
 
                 if (score >= 60) {
                     val entry = closes.last()
-                    // استاپ پویا با ATR
                     val atr = calculateAtr(closes)
                     val atrPct = if (entry > 0) atr / entry * 100 else 10.0
                     val stopPct = (atrPct * 2.5).coerceIn(7.0, 15.0)
@@ -179,7 +189,6 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
-    // امتیاز اسپات: روند روزانه + هفتگی + MACD + RSI + حجم + OBV
     private fun spotScore(closes: List<Double>, volumes: List<Double>, weekly: List<Double>): Int {
         if (closes.size < 210) return 0
         val price = closes.last()
@@ -211,7 +220,6 @@ object QuickScanner {
         return s.coerceIn(-100, 100)
     }
 
-    // تایید روند هفتگی
     private fun weeklyScore(weekly: List<Double>): Int {
         if (weekly.size < 25) return 0
         val w = weekly.last()
@@ -225,7 +233,6 @@ object QuickScanner {
         }
     }
 
-    // جریان پول (OBV)
     private fun obvScore(closes: List<Double>, volumes: List<Double>): Int {
         if (closes.size < 30) return 0
         var obv = 0.0
@@ -392,7 +399,7 @@ object QuickScanner {
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
                     "امتیاز: $score/100\n" +
-                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "هفتگی + OBV تایید | استاپ ATR پویا | تریلینگ: با رشد قیمت، استاپ رو بالا بیار\n") +
+                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "هفتگی + OBV + 60s تایید | استاپ ATR پویا + تریلینگ\n") +
                             "قیمت: $$price"
                 )
             )
