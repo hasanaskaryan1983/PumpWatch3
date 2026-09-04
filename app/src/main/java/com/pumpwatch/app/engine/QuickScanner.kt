@@ -33,7 +33,6 @@ object QuickScanner {
         return if (mode == "FUTURES") scanFutures(ctx, symbols) else scanSpot(ctx, symbols)
     }
 
-    // ================= فیوچرز: کوتاه‌مدت =================
     private suspend fun scanFutures(ctx: Context, symbols: List<String>): ScanReport {
         val lines = mutableListOf<String>()
         var signalCount = 0
@@ -113,7 +112,6 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
-    // ================= اسپات: بلندمدت کامل =================
     private suspend fun scanSpot(ctx: Context, symbols: List<String>): ScanReport {
         val lines = mutableListOf<String>()
         var signalCount = 0
@@ -130,15 +128,11 @@ object QuickScanner {
                 val lows = klines.map { it[3].asDouble }
                 val volumes = klines.map { it[5].asDouble }
 
-                val weekly = try {
-                    BinanceClient.api.klines("${symbol}USDT", "1w", 60).map { it[4].asDouble }
-                } catch (e: Exception) {
-                    emptyList()
-                }
+                // هفتگی از خود روزانه‌ها — بدون درخواست اضافه
+                val weekly = closes.chunked(7).map { it.last() }
 
                 var score = spotScore(closes, volumes, weekly)
 
-                // Sixty Second Trades روی کندل روزانه = زمان‌بندی ورود
                 val sixty = PumpDetector.analyzeSixtySecond(highs, lows, closes)
                 score += when (sixty.signal) {
                     "BUY" -> 15
