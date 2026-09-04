@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -20,7 +21,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 private val LG = Color(0xFF00E676)
@@ -34,10 +37,27 @@ data class BacktestResult(
     val symbol: String,
     val rank: Int,
     val side: String,
-    val entry: Double,
-    val exit: Double,
     val pnl: Double,
-    val score: Int
+    val score: Int,
+    val result: String
+)
+
+private data class Tf(val label: String, val interval: String, val limit: Int, val evalLast: Int, val hold: Int)
+
+private val FUT_TIMEFRAMES = listOf(
+    Tf("۴ ساعته", "15m", 120, 16, 8),
+    Tf("۱۲ ساعته", "30m", 120, 24, 12),
+    Tf("۱ روزه", "1h", 120, 24, 12),
+    Tf("۳ روزه", "1h", 168, 72, 24),
+    Tf("۷ روزه", "1h", 168, 168, 24),
+    Tf("ماهیانه", "4h", 180, 180, 30)
+)
+
+private val SPOT_HORIZONS = listOf(
+    "۱ هفته" to 7,
+    "۲ هفته" to 14,
+    "۱ ماه" to 30,
+    "۳ ماه" to 90
 )
 
 private val RANGES = listOf(
@@ -57,11 +77,17 @@ private val RANGES = listOf(
 
 @Composable
 fun BacktestScreen() {
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("pumpwatch_prefs", 0) }
+    val isFutures = prefs.getString("mode", "SPOT") == "FUTURES"
+
     val scope = rememberCoroutineScope()
     var results by remember { mutableStateOf<List<BacktestResult>>(emptyList()) }
     var isRunning by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var selectedRanges by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedTf by remember { mutableStateOf("۷ روزه") }
+    var selectedHorizon by remember { mutableStateOf("۱ ماه") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -71,30 +97,70 @@ fun BacktestScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(" بک‌تست استراتژی", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        Text(
-            "یک یا چند بازه رتبه ارزها (بر اساس حجم ۲۴ ساعته) رو انتخاب کن:",
-            fontSize = 12.sp, color = LGr
-        )
+        Text("🧪 بک‌تست استراتژی", fontWeight = FontWeight.Bold, fontSize = 18.sp)
 
+        Surface(
+            color = if (isFutures) LR.copy(alpha = 0.15f) else LG.copy(alpha = 0.15f),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                if (isFutures) "⚡ حالت فیوچرز: کوتاه‌مدت، کندل ۱ ساعته، خرید+فروش، استاپ تنگ"
+                else "🏦 حالت اسپات: بلندمدت، کندل روزانه، فقط خرید، هدف ۳۰٪ یا شکست روند",
+                fontSize = 11.sp,
+                color = if (isFutures) LR else LG,
+                modifier = Modifier.padding(10.dp)
+            )
+        }
+
+        // انتخاب بازه زمانی / افق نگهداری
+        if (isFutures) {
+            Text("⏱ بازه زمانی:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FUT_TIMEFRAMES.take(3).forEach { tf ->
+                    FilterChip(
+                        selected = selectedTf == tf.label,
+                        onClick = { selectedTf = tf.label },
+                        label = { Text(tf.label, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = LY.copy(alpha = 0.3f))
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FUT_TIMEFRAMES.drop(3).forEach { tf ->
+                    FilterChip(
+                        selected = selectedTf == tf.label,
+                        onClick = { selectedTf = tf.label },
+                        label = { Text(tf.label, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = LY.copy(alpha = 0.3f))
+                    )
+                }
+            }
+        } else {
+            Text("📅 افق نگهداری:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SPOT_HORIZONS.forEach { (label, _) ->
+                    FilterChip(
+                        selected = selectedHorizon == label,
+                        onClick = { selectedHorizon = label },
+                        label = { Text(label, fontSize = 10.sp) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = LY.copy(alpha = 0.3f))
+                    )
+                }
+            }
+        }
+
+        Text("🏆 بازه رتبه ارزها:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             RANGES.forEach { (label, range) ->
                 FilterChip(
                     selected = label in selectedRanges,
                     onClick = {
-                        selectedRanges = if (label in selectedRanges) {
-                            selectedRanges - label
-                        } else {
-                            selectedRanges + label
-                        }
+                        selectedRanges = if (label in selectedRanges) selectedRanges - label else selectedRanges + label
                         errorMsg = null
                     },
-                    label = {
-                        Text("$label (${range.last - range.first + 1} ارز)", fontSize = 11.sp)
-                    },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = LBlue
-                    ),
+                    label = { Text("$label (${range.last - range.first + 1} ارز)", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = LBlue),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -102,21 +168,17 @@ fun BacktestScreen() {
 
         if (selectedRanges.isNotEmpty()) {
             Text(
-                "✅ ${selectedRanges.size} بازه انتخاب شد: ${selectedRanges.sorted().joinToString(", ")}",
-                fontSize = 11.sp,
-                color = LG,
-                fontWeight = FontWeight.Bold
+                "✅ ${if (isFutures) selectedTf else selectedHorizon} | ${selectedRanges.sorted().joinToString(", ")}",
+                fontSize = 11.sp, color = LG, fontWeight = FontWeight.Bold
             )
         }
 
-        errorMsg?.let { msg ->
-            Text(msg, color = LR, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        }
+        errorMsg?.let { msg -> Text(msg, color = LR, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
 
         Button(
             onClick = {
                 if (selectedRanges.isEmpty()) {
-                    errorMsg = "⚠️ حداقل یک بازه انتخاب کن!"
+                    errorMsg = "⚠️ حداقل یک بازه رتبه انتخاب کن!"
                     return@Button
                 }
                 if (!isRunning) {
@@ -126,10 +188,11 @@ fun BacktestScreen() {
                     scope.launch {
                         val allResults = mutableListOf<BacktestResult>()
 
-                        // دریافت لیست ارزها با ApiClient (که قبلاً کار کرده)
                         val allCoins = withContext(Dispatchers.IO) {
                             try {
                                 ApiClient.getTop1000Coins()
+                                    .sortedByDescending { it.total_volume ?: 0.0 }
+                                    .take(100)
                             } catch (e: Exception) {
                                 emptyList()
                             }
@@ -141,59 +204,88 @@ fun BacktestScreen() {
                             return@launch
                         }
 
-                        // جمع‌آوری ایندکس‌های مورد نیاز
                         val allIndices = mutableSetOf<Int>()
                         selectedRanges.forEach { label ->
                             RANGES.find { it.first == label }?.second?.forEach { allIndices.add(it) }
                         }
-
-                        // فیلتر ارزها بر اساس ایندکس‌های انتخابی
-                        val coinsToTest = allIndices.mapNotNull { idx ->
-                            allCoins.getOrNull(idx)
-                        }
+                        val coinsToTest = allIndices.mapNotNull { idx -> allCoins.getOrNull(idx)?.let { idx to it } }
 
                         var processed = 0
-                        for (coin in coinsToTest) {
+                        for ((idx, coin) in coinsToTest) {
                             val symbol = coin.symbol.uppercase(Locale.US)
                             progress = "در حال تحلیل $symbol (${processed + 1}/${coinsToTest.size})..."
 
-                            // دریافت کندل‌های ۱ ساعته (۱۶۸ کندل = ۷ روز)
-                            val klines = withContext(Dispatchers.IO) {
-                                try {
-                                    BinanceClient.api.klines("${symbol}USDT", "1h", 168)
-                                } catch (e: Exception) {
-                                    emptyList()
+                            if (isFutures) {
+                                val tf = FUT_TIMEFRAMES.find { it.label == selectedTf } ?: FUT_TIMEFRAMES[4]
+                                val klines = withContext(Dispatchers.IO) {
+                                    try { BinanceClient.api.klines("${symbol}USDT", tf.interval, tf.limit) }
+                                    catch (e: Exception) { emptyList() }
                                 }
-                            }
-
-                            if (klines.size >= 48) {
-                                val closes: List<Double> = klines.map { it[4].asDouble }
-                                val volumes: List<Double> = klines.map { it[5].asDouble }
-
-                                for (i in 24 until closes.size - 24) {
-                                    val window = closes.subList(i - 24, i)
-                                    val volWindow = volumes.subList(i - 24, i)
-                                    val score = computeScore(window, volWindow)
-
-                                    if (score >= 60 || score <= -60) {
-                                        val entry = closes[i]
-                                        val exit = closes[i + 24]
-                                        val pnl: Double = if (score > 0) {
-                                            (exit - entry) / entry * 100
-                                        } else {
-                                            (entry - exit) / entry * 100
+                                if (klines.size >= 60) {
+                                    val highs = klines.map { it[2].asDouble }
+                                    val lows = klines.map { it[3].asDouble }
+                                    val closes = klines.map { it[4].asDouble }
+                                    val volumes = klines.map { it[5].asDouble }
+                                    val start = max(48, closes.size - tf.evalLast)
+                                    val end = closes.size - tf.hold
+                                    for (i in start until end) {
+                                        val score = computeScore(closes.subList(i - 24, i + 1), volumes.subList(i - 24, i + 1))
+                                        if (score >= 60 || score <= -60) {
+                                            val entry = closes[i]
+                                            val side = if (score > 0) "BUY" else "SELL"
+                                            val atr = atrAt(closes, i)
+                                            val risk = if (atr > 0) atr * 1.5 else entry * 0.03
+                                            val stop = if (side == "BUY") entry - risk else entry + risk
+                                            val target = if (side == "BUY") entry + risk * 1.5 else entry - risk * 1.5
+                                            var result = "EXP"
+                                            var exit = closes[min(i + tf.hold, closes.size - 1)]
+                                            for (j in (i + 1)..min(i + tf.hold, closes.size - 1)) {
+                                                if (side == "BUY") {
+                                                    if (lows[j] <= stop) { result = "LOSS"; exit = stop; break }
+                                                    if (highs[j] >= target) { result = "WIN"; exit = target; break }
+                                                } else {
+                                                    if (highs[j] >= stop) { result = "LOSS"; exit = stop; break }
+                                                    if (lows[j] <= target) { result = "WIN"; exit = target; break }
+                                                }
+                                            }
+                                            val pnl = if (side == "BUY") (exit - entry) / entry * 100 else (entry - exit) / entry * 100
+                                            allResults.add(BacktestResult(symbol, idx + 1, side, pnl, score, result))
                                         }
-                                        allResults.add(
-                                            BacktestResult(
-                                                symbol = symbol,
-                                                rank = allCoins.indexOf(coin) + 1,
-                                                side = if (score > 0) "BUY" else "SELL",
-                                                entry = entry,
-                                                exit = exit,
-                                                pnl = pnl,
-                                                score = score
-                                            )
-                                        )
+                                    }
+                                }
+                            } else {
+                                // ===== اسپات: کندل روزانه =====
+                                val hold = SPOT_HORIZONS.find { it.first == selectedHorizon }?.second ?: 30
+                                val klines = withContext(Dispatchers.IO) {
+                                    try { BinanceClient.api.klines("${symbol}USDT", "1d", 300) }
+                                    catch (e: Exception) { emptyList() }
+                                }
+                                if (klines.size >= 210) {
+                                    val highs = klines.map { it[2].asDouble }
+                                    val lows = klines.map { it[3].asDouble }
+                                    val closes = klines.map { it[4].asDouble }
+                                    val volumes = klines.map { it[5].asDouble }
+                                    val e50s = emaSeries(closes, 50)
+                                    for (i in 200 until closes.size) {
+                                        val score = spotScore(closes.subList(0, i + 1), volumes.subList(0, i + 1))
+                                        if (score >= 60) {
+                                            val entry = closes[i]
+                                            val stop = entry * 0.88
+                                            val target = entry * 1.30
+                                            var result = "EXP"
+                                            var exit = closes[min(i + hold, closes.size - 1)]
+                                            for (j in (i + 1)..min(i + hold, closes.size - 1)) {
+                                                if (lows[j] <= stop) { result = "LOSS"; exit = stop; break }
+                                                if (highs[j] >= target) { result = "WIN"; exit = target; break }
+                                                if (closes[j] < e50s[j]) {
+                                                    exit = closes[j]
+                                                    result = if (exit >= entry) "WIN" else "LOSS"
+                                                    break
+                                                }
+                                            }
+                                            val pnl = (exit - entry) / entry * 100
+                                            allResults.add(BacktestResult(symbol, idx + 1, "BUY", pnl, score, result))
+                                        }
                                     }
                                 }
                             }
@@ -208,87 +300,51 @@ fun BacktestScreen() {
             },
             enabled = !isRunning,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (selectedRanges.isEmpty()) LGr else LBlue
-            )
+            colors = ButtonDefaults.buttonColors(containerColor = if (selectedRanges.isEmpty()) LGr else LBlue)
         ) {
             if (isRunning) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    color = Color.White,
-                    strokeWidth = 2.dp
-                )
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
             }
             Text(
-                if (isRunning) "در حال اجرا..." else "▶ شروع بک‌تست (${selectedRanges.size} بازه)",
+                if (isRunning) "در حال اجرا..." else "▶ شروع بک‌تست ${if (isFutures) selectedTf else selectedHorizon}",
                 fontSize = 13.sp
             )
         }
 
-        if (isRunning) {
-            Text(progress, color = LGr, fontSize = 12.sp)
-        }
+        if (isRunning) Text(progress, color = LGr, fontSize = 12.sp)
 
         if (results.isNotEmpty()) {
-            val wins = results.count { it.pnl > 0 }
-            val losses = results.count { it.pnl <= 0 }
-            val total = results.size
-            val winRate = if (total > 0) wins * 100.0 / total else 0.0
-            val avgPnl = if (total > 0) results.map { it.pnl }.average() else 0.0
+            val wins = results.count { it.result == "WIN" }
+            val losses = results.count { it.result == "LOSS" }
+            val expired = results.count { it.result == "EXP" }
+            val decided = wins + losses
+            val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
+            val avgPnl = results.map { it.pnl }.average()
             val totalPnl = results.sumOf { it.pnl }
 
-            Surface(
-                color = LC,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Surface(color = LC, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "📊 نتایج بک‌تست (۷ روز) — بازه‌های: ${selectedRanges.sorted().joinToString(", ")}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        "📊 نتایج ${if (isFutures) "فیوچرز $selectedTf" else "اسپات $selectedHorizon"} — ${selectedRanges.sorted().joinToString(", ")}",
+                        fontWeight = FontWeight.Bold, fontSize = 13.sp
                     )
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
-                        Text("تعداد: $total", fontSize = 11.sp, color = LGr)
+                        Text("تعداد: ${results.size}", fontSize = 11.sp, color = LGr)
                         Text("✅ برد: $wins", fontSize = 11.sp, color = LG)
                         Text("❌ باخت: $losses", fontSize = 11.sp, color = LR)
+                        Text("⌛ منقضی: $expired", fontSize = 11.sp, color = LY)
                     }
-                    Text(
-                        "وین‌ریت: ${String.format(Locale.US, "%.1f%%", winRate)}",
-                        fontWeight = FontWeight.Bold,
-                        color = if (winRate >= 55) LG else LR
-                    )
-                    Text(
-                        "میانگین PnL: ${String.format(Locale.US, "%+.2f%%", avgPnl)}",
-                        fontWeight = FontWeight.Bold,
-                        color = if (avgPnl >= 0) LG else LR
-                    )
-                    Text(
-                        "مجموع PnL: ${String.format(Locale.US, "%+.2f%%", totalPnl)}",
-                        fontWeight = FontWeight.Bold,
-                        color = if (totalPnl >= 0) LG else LR
-                    )
+                    Text("وین‌ریت: ${String.format(Locale.US, "%.1f%%", winRate)}", fontWeight = FontWeight.Bold, color = if (winRate >= 55) LG else LR)
+                    Text("میانگین PnL: ${String.format(Locale.US, "%+.2f%%", avgPnl)}", fontWeight = FontWeight.Bold, color = if (avgPnl >= 0) LG else LR)
+                    Text("مجموع PnL: ${String.format(Locale.US, "%+.2f%%", totalPnl)}", fontWeight = FontWeight.Bold, color = if (totalPnl >= 0) LG else LR)
                 }
             }
 
-            val displayResults = results.takeLast(30)
-            Text(
-                "📋 ۰ سیگنال آخر (${results.size} کل):",
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
-            )
-
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.heightIn(max = 400.dp)
-            ) {
-                items(displayResults) { r ->
-                    Surface(
-                        color = LC,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+            Text("📋 ۳۰ سیگنال آخر (${results.size} کل):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.heightIn(max = 400.dp)) {
+                items(results.takeLast(30)) { r ->
+                    Surface(color = LC, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
                         Row(
                             Modifier.padding(10.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -296,17 +352,15 @@ fun BacktestScreen() {
                         ) {
                             Column {
                                 Text(
-                                    "#${r.rank} ${r.symbol} • ${if (r.side == "BUY") "🟢" else "🔴"}",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
+                                    "#${r.rank} ${r.symbol} • ${if (r.side == "BUY") "🟢" else "🔴"} • ${when (r.result) { "WIN" -> "✅"; "LOSS" -> "❌"; else -> "⌛" }}",
+                                    fontWeight = FontWeight.Bold, fontSize = 12.sp
                                 )
                                 Text("امتیاز: ${r.score}", fontSize = 10.sp, color = LGr)
                             }
                             Text(
                                 "${String.format(Locale.US, "%+.2f%%", r.pnl)}",
                                 fontWeight = FontWeight.Bold,
-                                color = if (r.pnl >= 0) LG else LR,
-                                fontSize = 13.sp
+                                color = if (r.pnl >= 0) LG else LR, fontSize = 13.sp
                             )
                         }
                     }
@@ -314,12 +368,59 @@ fun BacktestScreen() {
             }
         } else if (!isRunning && results.isEmpty()) {
             Text(
-                "یک یا چند بازه انتخاب کن و دکمه شروع بک‌تست رو بزن",
-                color = LGr,
-                modifier = Modifier.padding(24.dp)
+                "بازه‌ها رو انتخاب کن و شروع رو بزن",
+                color = LGr, modifier = Modifier.padding(24.dp)
             )
         }
     }
+}
+
+private fun emaSeries(data: List<Double>, period: Int): List<Double> {
+    val out = MutableList(data.size) { 0.0 }
+    if (data.size < period) return out
+    var ema = data.take(period).average()
+    out[period - 1] = ema
+    val k = 2.0 / (period + 1)
+    for (i in period until data.size) {
+        ema = data[i] * k + ema * (1 - k)
+        out[i] = ema
+    }
+    return out
+}
+
+private fun spotScore(closes: List<Double>, volumes: List<Double>): Int {
+    if (closes.size < 210) return 0
+    val price = closes.last()
+    val e50 = emaLast(closes, 50)
+    val e200 = emaLast(closes, 200)
+    var s = 0
+    s += when {
+        price > e50 && e50 > e200 -> 50
+        price > e50 -> 25
+        price < e50 && e50 < e200 -> -50
+        else -> -25
+    }
+    s += if (macdUp(closes)) 20 else -20
+    val r = rsiOf(closes)
+    s += when {
+        r in 45.0..65.0 -> 15
+        r < 35 -> 20
+        r > 75 -> -25
+        else -> 5
+    }
+    if (volumes.size > 40) {
+        val recent = volumes.takeLast(20).average()
+        val prior = volumes.dropLast(20).takeLast(20).average()
+        if (prior > 0 && recent > prior * 1.2) s += 10
+    }
+    return s.coerceIn(-100, 100)
+}
+
+private fun atrAt(data: List<Double>, index: Int, period: Int = 14): Double {
+    if (index < period) return 0.0
+    var s = 0.0
+    for (k in (index - period + 1)..index) s += abs(data[k] - data[k - 1])
+    return s / period
 }
 
 private fun emaLast(data: List<Double>, period: Int): Double {
@@ -394,13 +495,11 @@ private fun computeScore(closes: List<Double>, volumes: List<Double>): Int {
         c < (bu + bl) / 2 && macd == -25 -> -15
         else -> 0
     }
-
     val vol = if (volumes.size > 15) {
         val lv = volumes.last()
         val av = volumes.dropLast(1).takeLast(14).average()
         val bd = if (c >= pc) 15 else -15
         if (av > 0 && lv >= 1.5 * av) bd else 0
     } else 0
-
     return (ema + rsi + macd + vol + boll).coerceIn(-100, 100)
 }
