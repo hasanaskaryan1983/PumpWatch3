@@ -33,7 +33,6 @@ object QuickScanner {
         return if (mode == "FUTURES") scanFutures(ctx, symbols) else scanSpot(ctx, symbols)
     }
 
-    // ================= فیوچرز: کوتاه‌مدت =================
     private suspend fun scanFutures(ctx: Context, symbols: List<String>): ScanReport {
         val lines = mutableListOf<String>()
         var signalCount = 0
@@ -81,19 +80,15 @@ object QuickScanner {
                     "$symbol | پایه:$baseScore پامپ:$pumpScore 60s:${sixty.signal} zz:${zigzag.direction} of:${of.cvdScore} => $adjusted"
                 )
 
-                val isBuy = adjusted >= threshold
-                val isSell = adjusted <= -threshold
-
-                if (isBuy || isSell) {
+                if (adjusted >= threshold || adjusted <= -threshold) {
                     val price = closes.last()
                     val atr = calculateAtr(closes)
-                    val risk = if (atr > 0) atr * 1.5 else price * 0.03
+                    val risk = if (atr > 0) atr * 2.5 else price * 0.05
                     val side = if (adjusted > 0) "BUY" else "SELL"
-                    val sr = risk * 0.7
                     val (stop, target) = if (side == "BUY") {
-                        price - sr to price + sr * 1.5
+                        price - risk to price + risk * 1.5
                     } else {
-                        price + sr to price - sr * 1.5
+                        price + risk to price - risk * 1.5
                     }
 
                     val logged = SignalLogger.log(
@@ -117,14 +112,12 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
-    // ================= اسپات: بلندمدت =================
     private suspend fun scanSpot(ctx: Context, symbols: List<String>): ScanReport {
         val lines = mutableListOf<String>()
         var signalCount = 0
 
         for (symbol in symbols) {
             try {
-                // کندل روزانه — دیدگاه بلندمدت
                 val klines = BinanceClient.api.klines("${symbol}USDT", "1d", 300)
                 if (klines.size < 210) {
                     lines.add("$symbol: تاریخچه کم (${klines.size})")
@@ -138,24 +131,19 @@ object QuickScanner {
                 val e200 = emaLast(closes, 200)
                 val trend = if (closes.last() > e50 && e50 > e200) "صعودی" else if (closes.last() < e50) "نزولی" else "خنثی"
 
-                lines.add("$symbol | روند:$trend اسپات:$score => $score")
+                lines.add("$symbol | روند:$trend اسپات:$score")
 
-                // اسپات = فقط خرید، آستانه ۶
                 if (score >= 60) {
                     val entry = closes.last()
-                    val stop = entry * 0.88      // استاپ باز ۱۲٪
-                    val target = entry * 1.30    // هدف ۳۰٪
-
                     val logged = SignalLogger.log(
                         ctx,
                         LoggedSignal(
                             symbol = symbol, side = "BUY", score = score,
-                            entry = entry, stop = stop, target = target,
+                            entry = entry, stop = entry * 0.88, target = entry * 1.30,
                             time = System.currentTimeMillis(), mode = "SPOT"
                         )
                     )
                     if (logged) signalCount++
-
                     if (score >= 75) {
                         sendNotification(
                             ctx, symbol, score, "BUY", entry, "SPOT", 0,
@@ -172,16 +160,14 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
-    // امتیاز اسپات (کندل روزانه)
     private fun spotScore(closes: List<Double>, volumes: List<Double>): Int {
         if (closes.size < 210) return 0
         val price = closes.last()
         val e50 = emaLast(closes, 50)
         val e200 = emaLast(closes, 200)
-
         var s = 0
         s += when {
-            price > e50 && e50 > e200 -> 50   // روند صعودی کامل
+            price > e50 && e50 > e200 -> 50
             price > e50 -> 25
             price < e50 && e50 < e200 -> -50
             else -> -25
@@ -189,9 +175,9 @@ object QuickScanner {
         s += if (macdUp(closes)) 20 else -20
         val r = rsiOf(closes)
         s += when {
-            r in 45.0..65.0 -> 15   // مومنتوم سالم
-            r < 35 -> 20            // اشباع فروش = فرصت خرید
-            r > 75 -> -25           // اشباع خرید = نخر!
+            r in 45.0..65.0 -> 15
+            r < 35 -> 20
+            r > 75 -> -25
             else -> 5
         }
         if (volumes.size > 40) {
@@ -281,14 +267,12 @@ object QuickScanner {
             c < (bu + bl) / 2 && macd == -25 -> -15
             else -> 0
         }
-
         val vol = if (volumes.size > 15) {
             val lv = volumes.last()
             val av = volumes.dropLast(1).takeLast(14).average()
             val bd = if (c >= pc) 15 else -15
             if (av > 0 && lv >= 1.5 * av) bd else 0
         } else 0
-
         return (ema + rsi + macd + vol + boll).coerceIn(-100, 100)
     }
 
