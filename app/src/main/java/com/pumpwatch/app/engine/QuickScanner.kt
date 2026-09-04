@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.pumpwatch.app.MainActivity
+import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import java.util.Locale
 import kotlin.math.max
@@ -43,9 +44,12 @@ object QuickScanner {
 
     // ---------- پارامترهای استراتژی (نتیجه بک‌تست — دست نزن مگر با تست جدید) ----------
     private const val RSI2_MAX_BUY = 15.0     // اشباع فروش کوتاه‌مدت برای خرید
+    private const val ADX_MIN = 30.0          // حداقل قدرت روند (بک‌تست: WR 77.6% → 82.8%!)
     private const val RSI2_MIN_SELL = 85.0    // قرینه برای شورت (فقط فیوچرز)
-    private const val STOP_ATR = 2.4          // استاپ = ۲.۴ برابر ATR (دور)
-    private const val TARGET_ATR = 0.9        // هدف = ۰.۹ برابر ATR (نزدیک)
+    private const val STOP_ATR = 2.4          // استاپ اولیه = ۲.۴ برابر ATR
+    private const val TARGET_ATR = 1.2        // هدف۱ = ۱.۲ برابر ATR (نصف پوزیشن) — نیمه دوم با استاپ شناور
+    private const val SIXTY_K_BUY = 35.0      // تأیید SixtySecond: Stoch%K زیر ۳۵ (بک‌تست: WR 87%)
+    private const val SIXTY_K_SELL = 65.0     // قرینه برای شورت
     private const val MIN_SCORE = 60          // آستانه امتیاز کیفیت
     private const val NOTIFY_SCORE = 75       // حد نوتیفیکیشن
     private const val COOLDOWN_HOURS = 12     // فاصله سیگنال‌های هر کوین
@@ -59,15 +63,18 @@ object QuickScanner {
 
         // ---------- رژیم بازار بیت‌کوین (یک بار برای کل اسکن) ----------
         val btcUp = btcUptrend()
+        val extra = trendingMovers()
+        val universe = (symbols + extra).distinct()
+        lines.add("🌐 جهان اسکن: ${universe.size} کوین (پایه ${symbols.size} + موج‌دار ${extra.size})")
         lines.add(
             "📈 BTC: ${if (btcUp) "صعودی ↑" else "نزولی ↓"} | استراتژی: " +
-                    if (btcUp) "خرید افت شدید در روند صعودی" else "انتظار برای رژیم صعودی"
+                    if (btcUp) "خرید افت شدید + روند قوی + تأیید SixtySecond" else "انتظار برای رژیم صعودی"
         )
 
         val log = SignalLogger.load(ctx)
         val now = System.currentTimeMillis()
 
-        for (symbol in symbols) {
+        for (symbol in universe) {
             try {
                 // ---------- کول‌داون: برای همین کوین سیگنال اخیر داریم؟ ----------
                 val lastForSymbol = log.firstOrNull { it.symbol == symbol }?.time ?: 0L
@@ -90,6 +97,8 @@ object QuickScanner {
                 val e50 = emaLast(closes, 50)
                 val rsi2 = rsiOf(closes, 2)
                 val rsi14 = rsiOf(closes, 14)
+                val adx = adxWilder(highs, lows, closes, 14)
+                val k14 = stochK(highs, lows, closes, 14)
                 val atr = atrWilder(highs, lows, closes, 14)
                 if (atr <= 0.0) {
                     lines.add("$symbol: ATR نامعتبر")
@@ -105,8 +114,8 @@ object QuickScanner {
                 val aboveE50 = price > e50
 
                 // ---------- ستاپ‌ها ----------
-                val buySetup = btcUp && aboveE50 && rsi2 <= RSI2_MAX_BUY
-                val sellSetup = !btcUp && !aboveE50 && rsi2 >= RSI2_MIN_SELL && allowSell
+                val buySetup = btcUp && aboveE50 && rsi2 <= RSI2_MAX_BUY && adx >= ADX_MIN && k14 <= SIXTY_K_BUY
+                val sellSetup = !btcUp && !aboveE50 && rsi2 >= RSI2_MIN_SELL && adx >= ADX_MIN && k14 >= SIXTY_K_SELL && allowSell
 
                 // ---------- امتیاز کیفیت (برای نمایش و فیلتر) ----------
                 var score = 0
@@ -115,15 +124,18 @@ object QuickScanner {
                     score += 30 // خود ستاپ اصلی
                     if (buySetup) {
                         reasons.add("افت شدید داخل روند صعودی 🩸")
+                        reasons.add("تأیید SixtySecond (K=${k14.toInt()}) ⏱")
                         if (rsi2 <= 10) { score += 25; reasons.add("اشباع فروش فرسایشی RSI2=${rsi2.toInt()} 💧") }
                         else score += 18
                         score += 20 // بالای EMA50
                         if (ch24 > -12.0) score += 10 // در حال کرش نیست، فقط اصلاح
                         else reasons.add("⚠️ افت ۲۴س سنگین (${String.format(Locale.US, "%+.0f%%", ch24)})")
                         if (rsi14 < 45) score += 10
+                        if (adx >= 35) { score += 5; reasons.add("روند بسیار قوی ADX=${adx.toInt()} 💪") }
                         if (volRatio >= 1.3) { score += 5; reasons.add("حجم بالای فروش 🔻") }
                     } else {
                         reasons.add("جهش فروش داخل روند نزولی 📉")
+                        reasons.add("تأیید SixtySecond (K=${k14.toInt()}) ⏱")
                         if (rsi2 >= 90) { score += 25; reasons.add("اشباع خرید فرسایشی RSI2=${rsi2.toInt()} 🔥") }
                         else score += 18
                         score += 20
@@ -142,6 +154,8 @@ object QuickScanner {
                 lines.add(
                     "$symbol | RSI2:${String.format(Locale.US, "%.0f", rsi2)} " +
                             "RSI14:${String.format(Locale.US, "%.0f", rsi14)} " +
+                            "ADX:${String.format(Locale.US, "%.0f", adx)} " +
+                            "K:${String.format(Locale.US, "%.0f", k14)} " +
                             "EMA50:${if (aboveE50) "بالای" else "زیر"} => امتیاز:$score ${side ?: ""}"
                 )
 
@@ -176,6 +190,35 @@ object QuickScanner {
         }
 
         return ScanReport(lines, signalCount)
+    }
+
+    /** Stochastic %K — فیلتر زمان‌بندی «Sixty Second» */
+    private fun stochK(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
+        if (closes.size < period) return 50.0
+        val hh = highs.takeLast(period).maxOrNull() ?: return 50.0
+        val ll = lows.takeLast(period).minOrNull() ?: return 50.0
+        if (hh <= ll) return 50.0
+        return (closes.last() - ll) / (hh - ll) * 100.0
+    }
+
+    /**
+     * جهان پویا: کوین‌های موج‌دار از کوین‌گکو (کش اپ) به لیست پایه اضافه می‌شن —
+     * USELESS و امثالش رو می‌گیره حتی اگر در لیست ثابت نباشن (کندل از Bybit/OKX/Gate).
+     */
+    private suspend fun trendingMovers(): List<String> {
+        return try {
+            ApiClient.getTop1000Coins()
+                .mapNotNull { c ->
+                    val h1 = kotlin.math.abs(c.change1h ?: 0.0)
+                    val h24 = kotlin.math.abs(c.price_change_percentage_24h ?: 0.0)
+                    if (h1 >= 3.0 || h24 >= 8.0) h1 to c.symbol.uppercase(Locale.US) else null
+                }
+                .sortedByDescending { it.first }
+                .take(30)
+                .map { it.second }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     // ---------- رژیم بیت‌کوین: روند صعودی = قیمت بالای EMA50 و EMA20 بالای EMA50 ----------
@@ -236,6 +279,45 @@ object QuickScanner {
             sum += tr
         }
         return sum / period
+    }
+
+    /** ADX استاندارد Wilder — قوی‌ترین اندیکاتور در بک‌تست (IC=0.167) */
+    private fun adxWilder(highs: List<Double>, lows: List<Double>, closes: List<Double>, period: Int = 14): Double {
+        val n = closes.size
+        if (n < period * 2 + 1) return 0.0
+        val tr = DoubleArray(n)
+        val pdm = DoubleArray(n)
+        val mdm = DoubleArray(n)
+        for (i in 1 until n) {
+            val up = highs[i] - highs[i - 1]
+            val dn = lows[i - 1] - lows[i]
+            pdm[i] = if (up > dn && up > 0) up else 0.0
+            mdm[i] = if (dn > up && dn > 0) dn else 0.0
+            tr[i] = maxOf(
+                highs[i] - lows[i],
+                kotlin.math.abs(highs[i] - closes[i - 1]),
+                kotlin.math.abs(lows[i] - closes[i - 1])
+            )
+        }
+        var atr = 0.0
+        var sp = 0.0
+        var sm = 0.0
+        for (i in 1..period) { atr += tr[i]; sp += pdm[i]; sm += mdm[i] }
+        val dx = DoubleArray(n)
+        for (i in period + 1 until n) {
+            atr = atr - atr / period + tr[i]
+            sp = sp - sp / period + pdm[i]
+            sm = sm - sm / period + mdm[i]
+            val pdi = if (atr > 0) 100 * sp / atr else 0.0
+            val mdi = if (atr > 0) 100 * sm / atr else 0.0
+            val sum = pdi + mdi
+            dx[i] = if (sum > 0) 100 * kotlin.math.abs(pdi - mdi) / sum else 0.0
+        }
+        var a = 0.0
+        for (i in period + 1..2 * period) a += dx[i]
+        a /= period
+        for (i in 2 * period + 1 until n) a = (a * (period - 1) + dx[i]) / period
+        return a
     }
 
     // ---------- نوتیفیکیشن ----------
