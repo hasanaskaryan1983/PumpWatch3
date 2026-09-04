@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 import com.google.gson.JsonArray
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.engine.PumpDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -35,7 +36,6 @@ private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
 
-// کش کندل‌ها — ۱۰ دقیقه اعتبار
 private object KlineCache {
     private val map = mutableMapOf<String, Pair<Long, List<JsonArray>>>()
     fun get(key: String): List<JsonArray>? {
@@ -134,7 +134,7 @@ fun BacktestScreen() {
         ) {
             Text(
                 if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، خروج روی CLOSE کندل"
-                else "🏦 اسپات: بلندمدت، فقط خرید، هدف ۳۰٪ یا شکست روند",
+                else "🏦 اسپات: بلندمدت، فقط خرید، ATR پویا + تریلینگ + Sixty",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
@@ -257,7 +257,6 @@ fun BacktestScreen() {
                                     var prev = 0
                                     for (i in start until end) {
                                         val score = computeScore(closes.subList(i - 24, i + 1), volumes.subList(i - 24, i + 1))
-                                        // فقط شروع روند — نه تکراری
                                         val freshBuy = score >= 60 && prev < 60
                                         val freshSell = score <= -60 && prev > -60
                                         if (freshBuy || freshSell) {
@@ -290,6 +289,9 @@ fun BacktestScreen() {
                                 val klines = withContext(Dispatchers.IO) {
                                     getKlinesCached("${symbol}USDT", "1d", 300)
                                 }
+                                val weekly = withContext(Dispatchers.IO) {
+                                    getKlinesCached("${symbol}USDT", "1w", 60).map { it[4].asDouble }
+                                }
                                 if (klines.size >= 210) {
                                     analyzed++
                                     val highs = klines.map { it[2].asDouble }
@@ -299,22 +301,39 @@ fun BacktestScreen() {
                                     val e50s = emaSeries(closes, 50)
                                     var prev = 0
                                     for (i in 200 until closes.size) {
-                                        val score = spotScore(closes.subList(0, i + 1), volumes.subList(0, i + 1))
-                                        // فقط شروع روند صعودی
+                                        var score = spotScore(closes.subList(0, i + 1), volumes.subList(0, i + 1), weekly)
+                                        val sixty = PumpDetector.analyzeSixtySecond(
+                                            highs.subList(0, i + 1),
+                                            lows.subList(0, i + 1),
+                                            closes.subList(0, i + 1)
+                                        )
+                                        score += when (sixty.signal) {
+                                            "BUY" -> 15
+                                            "SELL" -> -15
+                                            else -> 0
+                                        }
+                                        score = score.coerceIn(-100, 100)
+
                                         if (score >= 60 && prev < 60) {
                                             val entry = closes[i]
-                                            val stop = entry * 0.88
-                                            val target = entry * 1.30
+                                            val atr = atrAt(closes, i)
+                                            val atrPct = if (entry > 0) atr / entry * 100 else 10.0
+                                            val stopPct = (atrPct * 2.5).coerceIn(7.0, 15.0)
+                                            var trail = entry * (1.0 - stopPct / 100.0)
+                                            val target = entry * (1.0 + stopPct * 2.0 / 100.0)
+
                                             var result = "EXP"
                                             var exit = closes[min(i + hold, closes.size - 1)]
                                             for (j in (i + 1)..min(i + hold, closes.size - 1)) {
-                                                if (lows[j] <= stop) { result = "LOSS"; exit = stop; break }
+                                                if (lows[j] <= trail) { result = "LOSS"; exit = trail; break }
                                                 if (highs[j] >= target) { result = "WIN"; exit = target; break }
                                                 if (closes[j] < e50s[j]) {
                                                     exit = closes[j]
                                                     result = if (exit >= entry) "WIN" else "LOSS"
                                                     break
                                                 }
+                                                val nt = closes[j] * (1.0 - stopPct / 100.0)
+                                                if (nt > trail) trail = nt
                                             }
                                             val pnl = (exit - entry) / entry * 100
                                             allResults.add(BacktestResult(symbol, idx + 1, "BUY", pnl, score, result))
@@ -324,7 +343,7 @@ fun BacktestScreen() {
                                 }
                             }
                             processed++
-                            delay(150) // احترام به Rate Limit
+                            delay(150)
                         }
 
                         analyzedInfo = "ارزهای تحلیل‌شده: $analyzed از ${coinsToTest.size}"
@@ -422,7 +441,7 @@ private fun emaSeries(data: List<Double>, period: Int): List<Double> {
     return out
 }
 
-private fun spotScore(closes: List<Double>, volumes: List<Double>): Int {
+private fun spotScore(closes: List<Double>, volumes: List<Double>, weekly: List<Double>): Int {
     if (closes.size < 210) return 0
     val price = closes.last()
     val e50 = emaLast(closes, 50)
@@ -447,7 +466,45 @@ private fun spotScore(closes: List<Double>, volumes: List<Double>): Int {
         val prior = volumes.dropLast(20).takeLast(20).average()
         if (prior > 0 && recent > prior * 1.2) s += 10
     }
+    s += weeklyScore(weekly)
+    s += obvScore(closes, volumes)
     return s.coerceIn(-100, 100)
+}
+
+private fun weeklyScore(weekly: List<Double>): Int {
+    if (weekly.size < 25) return 0
+    val w = weekly.last()
+    val e10 = emaLast(weekly, 10)
+    val e20 = emaLast(weekly, 20)
+    return when {
+        w > e10 && e10 > e20 -> 15
+        w > e10 -> 8
+        w < e10 && e10 < e20 -> -20
+        else -> -8
+    }
+}
+
+private fun obvScore(closes: List<Double>, volumes: List<Double>): Int {
+    if (closes.size < 30) return 0
+    var obv = 0.0
+    val series = mutableListOf<Double>()
+    for (i in 1 until closes.size) {
+        obv += when {
+            closes[i] > closes[i - 1] -> volumes[i]
+            closes[i] < closes[i - 1] -> -volumes[i]
+            else -> 0.0
+        }
+        series.add(obv)
+    }
+    if (series.size < 21) return 0
+    val now = series.last()
+    val past = series[series.size - 21]
+    return when {
+        now > past * 1.05 -> 10
+        now > past -> 5
+        now < past * 0.95 -> -10
+        else -> -5
+    }
 }
 
 private fun atrAt(data: List<Double>, index: Int, period: Int = 14): Double {
