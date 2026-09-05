@@ -113,7 +113,7 @@ fun AssistantScreen() {
         )
 
         Text(
-            "تحلیل ۱۰۰۰ ارز برتر CEX + تمام DEX‌ها",
+            "تحلیل ۱۰۰ ارز برتر CEX + تمام DEX‌ها",
             fontSize = 12.sp,
             color = AGray,
             modifier = Modifier.padding(bottom = 16.dp)
@@ -165,7 +165,7 @@ fun AssistantScreen() {
                                             searchStatus = "✅ پیدا شد در DEX"
                                             searchResult = dexResult
                                         } else {
-                                            searchStatus = " پیدا نشد"
+                                            searchStatus = "❌ پیدا نشد"
                                             error = "ارز پیدا نشد"
                                         }
                                     }
@@ -313,7 +313,7 @@ private fun CoinAnalysisCard(context: android.content.Context, analysis: CoinAna
 
             Spacer(Modifier.height(6.dp))
 
-            Text(" فعالیت نهنگ‌ها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ABlue)
+            Text("🐳 فعالیت نهنگ‌ها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ABlue)
             Text(analysis.whaleActivity, fontSize = 10.sp, color = AGray)
 
             Spacer(Modifier.height(6.dp))
@@ -391,7 +391,7 @@ private suspend fun analyzeCoin(
                     score -= 15
                     indicators["RSI"] = "${rsi.toInt()} (اشباع خرید ❌)"
                 }
-                else -> indicators["RSI"] = "${rsi.toInt()} (نرمال )"
+                else -> indicators["RSI"] = "${rsi.toInt()} (نرمال ⚪)"
             }
             
             if (macdUp) {
@@ -417,13 +417,13 @@ private suspend fun analyzeCoin(
             when {
                 volumeRatio > 2.0 -> {
                     score += 10
-                    indicators["حجم"] = "${String.format("%.1f", volumeRatio)}x (بالا 🔥)"
+                    indicators["حجم"] = "${String.format(Locale.US, "%.1f", volumeRatio)}x (بالا 🔥)"
                 }
                 volumeRatio < 0.5 -> {
                     score -= 5
-                    indicators["حجم"] = "${String.format("%.1f", volumeRatio)}x (پایین ⚠️)"
+                    indicators["حجم"] = "${String.format(Locale.US, "%.1f", volumeRatio)}x (پایین ️)"
                 }
-                else -> indicators["حجم"] = "${String.format("%.1f", volumeRatio)}x (نرمال)"
+                else -> indicators["حجم"] = "${String.format(Locale.US, "%.1f", volumeRatio)}x (نرمال)"
             }
         } else {
             indicators["داده"] = "کندل کافی نیست"
@@ -440,7 +440,7 @@ private suspend fun analyzeCoin(
                 val volH1 = pool.attributes?.volume?.h1 ?: 0.0
                 if (total > 0) {
                     val buyRatio = buys / total * 100
-                    "خرید ۱س: ${buyRatio.toInt()}٪ • حجم: $${String.format("%.0f", volH1)}"
+                    "خرید ۱س: ${buyRatio.toInt()}٪ • حجم: ${String.format(Locale.US, "$%.0f", volH1)}"
                 } else "بدون داده"
             } else "بدون داده"
         } catch (_: Exception) {
@@ -449,7 +449,7 @@ private suspend fun analyzeCoin(
         
         val recommendation = when {
             isDex && closes.size < 35 -> "تحلیل محدود (DEX) ⚪"
-            score >= 80 -> "خرید قوی "
+            score >= 80 -> "خرید قوی 🟢"
             score >= 65 -> "خرید ✅"
             score >= 45 -> "صبر ⚪"
             score >= 30 -> "فروش 🔴"
