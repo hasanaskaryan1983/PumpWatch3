@@ -134,7 +134,7 @@ fun BacktestScreen() {
         ) {
             Text(
                 if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، خروج روی CLOSE کندل"
-                else "🏦 اسپات: بلندمدت، فقط خرید، ATR پویا + تریلینگ + Sixty",
+                else "🏦 اسپات: امتیاز ≥۷۰ + هفتگی مثبت + OBV مثبت",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
@@ -295,10 +295,9 @@ fun BacktestScreen() {
                                     val lows = klines.map { it[3].asDouble }
                                     val closes = klines.map { it[4].asDouble }
                                     val volumes = klines.map { it[5].asDouble }
-                                    // هفتگی از خود روزانه‌ها — بدون درخواست اضافه
                                     val weekly = closes.chunked(7).map { it.last() }
                                     val e50s = emaSeries(closes, 50)
-                                    var prev = 0
+                                    var prevSig = false
                                     for (i in 200 until closes.size) {
                                         var score = spotScore(closes.subList(0, i + 1), volumes.subList(0, i + 1), weekly)
                                         val sixty = PumpDetector.analyzeSixtySecond(
@@ -313,7 +312,12 @@ fun BacktestScreen() {
                                         }
                                         score = score.coerceIn(-100, 100)
 
-                                        if (score >= 60 && prev < 60) {
+                                        // فیلتر کیفیت: امتیاز ۷۰ + هفتگی مثبت + OBV مثبت
+                                        val wScore = weeklyScore(closes.subList(0, i + 1).chunked(7).map { it.last() })
+                                        val oScore = obvScore(closes.subList(0, i + 1), volumes.subList(0, i + 1))
+                                        val sig = score >= 70 && wScore > 0 && oScore > 0
+
+                                        if (sig && !prevSig) {
                                             val entry = closes[i]
                                             val atr = atrAt(closes, i)
                                             val atrPct = if (entry > 0) atr / entry * 100 else 10.0
@@ -337,7 +341,7 @@ fun BacktestScreen() {
                                             val pnl = (exit - entry) / entry * 100
                                             allResults.add(BacktestResult(symbol, idx + 1, "BUY", pnl, score, result))
                                         }
-                                        prev = score
+                                        prevSig = sig
                                     }
                                 }
                             }
