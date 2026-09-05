@@ -128,7 +128,6 @@ object QuickScanner {
                 val lows = klines.map { it[3].asDouble }
                 val volumes = klines.map { it[5].asDouble }
 
-                // هفتگی از خود روزانه‌ها — بدون درخواست اضافه
                 val weekly = closes.chunked(7).map { it.last() }
 
                 var score = spotScore(closes, volumes, weekly)
@@ -141,15 +140,17 @@ object QuickScanner {
                 }
                 score = score.coerceIn(-100, 100)
 
-                val e50 = emaLast(closes, 50)
-                val e200 = emaLast(closes, 200)
-                val trend = if (closes.last() > e50 && e50 > e200) "صعودی" else if (closes.last() < e50) "نزولی" else "خنثی"
+                // فیلتر کیفیت: امتیاز ۷۰ + هفتگی مثبت + OBV مثبت
                 val wScore = weeklyScore(weekly)
                 val oScore = obvScore(closes, volumes)
 
+                val e50 = emaLast(closes, 50)
+                val e200 = emaLast(closes, 200)
+                val trend = if (closes.last() > e50 && e50 > e200) "صعودی" else if (closes.last() < e50) "نزولی" else "خنثی"
+
                 lines.add("$symbol | روند:$trend هفتگی:$wScore OBV:$oScore 60s:${sixty.signal} => $score")
 
-                if (score >= 60) {
+                if (score >= 70 && wScore > 0 && oScore > 0) {
                     val entry = closes.last()
                     val atr = calculateAtr(closes)
                     val atrPct = if (entry > 0) atr / entry * 100 else 10.0
@@ -393,7 +394,7 @@ object QuickScanner {
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
                     "امتیاز: $score/100\n" +
-                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "هفتگی + OBV + 60s تایید | استاپ ATR پویا + تریلینگ\n") +
+                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "امتیاز ≥۷۰ + هفتگی مثبت + OBV مثبت | استاپ ATR پویا + تریلینگ\n") +
                             "قیمت: $$price"
                 )
             )
