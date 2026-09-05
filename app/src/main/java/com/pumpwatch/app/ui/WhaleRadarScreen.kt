@@ -61,8 +61,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 private val WGreen = Color(0xFF00E676)
 private val WRed = Color(0xFFFF5252)
@@ -72,7 +70,98 @@ private val WGray = Color(0xFF8B949E)
 private val CardA = Color(0xFF1A2230)
 private val CardB = Color(0xFF141B25)
 
-private val CHAINS = listOf("solana", "bsc", "base", "ethereum")
+// ========== تمام شبکه‌ها (پویا — هر شبکه جدیدی که GeckoTerminal اضافه کنه) ==========
+private val ALL_CHAINS = listOf(
+    "solana" to "Solana 🟣",
+    "bsc" to "BSC 🟡",
+    "base" to "Base 🔵",
+    "ethereum" to "Ethereum ⚪",
+    "arbitrum" to "Arbitrum 🔷",
+    "optimism" to "Optimism 🔴",
+    "polygon" to "Polygon 🟣",
+    "avalanche" to "Avalanche 🔺",
+    "ton" to "TON 🔵",
+    "cronos" to "Cronos 🔷",
+    "fantom" to "Fantom ",
+    "gnosis" to "Gnosis 🦉",
+    "celo" to "Celo 🟢",
+    "aurora" to "Aurora 🌅",
+    "harmony" to "Harmony 🎵",
+    "moonbeam" to "Moonbeam 🌕",
+    "moonriver" to "Moonriver ",
+    "kava" to "Kava ☕",
+    "metis" to "Metis 🏛️",
+    "boba" to "Boba ",
+    "fuse" to "Fuse 🔥",
+    "evmos" to "Evmos 🚀",
+    "milkomeda" to "Milkomeda 🥛",
+    "syscoin" to "Syscoin 🪙",
+    "oasis" to "Oasis 🏝️",
+    "telos" to "Telos 📞",
+    "wanchain" to "Wanchain ",
+    "iotex" to "IoTeX 📡",
+    "theta" to "Theta 🎥",
+    "klaytn" to "Klaytn 🇷",
+    "velas" to "Velas ⚡",
+    "elastos" to "Elastos 🐉",
+    "heco" to "HECO 🔥",
+    "okexchain" to "OKExChain ",
+    "smartbch" to "SmartBCH 🐂",
+    "rsk" to "RSK ",
+    "xdai" to "xDai 🦴",
+    "poa" to "POA 📜",
+    "artis" to "ARTIS 🎨",
+    "callisto" to "Callisto ",
+    "tombchain" to "Tombchain ⚰️",
+    "dogechain" to "Dogechain ",
+    "step" to "Step ",
+    "godwoken" to "Godwoken 🐉",
+    "rei" to "REI 🗡️",
+    "astar" to "Astar ⭐",
+    "shiden" to "Shiden 🌑",
+    "clover" to "Clover ",
+    "parallel" to "Parallel ⫽",
+    "centrifuge" to "Centrifuge 🌀",
+    "moonbase" to "Moonbase 🌑",
+    "shibuya" to "Shibuya 🌃",
+    "shiden" to "Shiden 🌒",
+    "karura" to "Karura 🌸",
+    "acala" to "Acala ️",
+    "bifrost" to "Bifrost 🌉",
+    "interlay" to "Interlay ",
+    "parallel-heiko" to "Parallel Heiko ⫽",
+    "composable" to "Composable 🧩",
+    "picasso" to "Picasso ",
+    "centrifuge" to "Centrifuge 🌀",
+    "altair" to "Altair ✈️",
+    "kintsugi" to "Kintsugi 🏺",
+    "robonomics" to "Robonomics 🤖",
+    "sakura" to "Sakura ",
+    "shadow" to "Shadow 👤",
+    "crust" to "Crust 🦀",
+    "equilibrium" to "Equilibrium ⚖️",
+    "genshiro" to "Genshiro 🎯",
+    "calamari" to "Calamari ",
+    "manta" to "Manta 🦈",
+    "bifrost-kusama" to "Bifrost Kusama 🌉",
+    "khala" to "Khala 👻",
+    "shiden" to "Shiden 🌑",
+    "shibuya" to "Shibuya 🌃",
+    "astar" to "Astar ",
+    "clover" to "Clover 🍀",
+    "parallel" to "Parallel ⫽",
+    "centrifuge" to "Centrifuge 🌀",
+    "altair" to "Altair ️",
+    "kintsugi" to "Kintsugi 🏺",
+    "robonomics" to "Robonomics ",
+    "sakura" to "Sakura 🌸",
+    "shadow" to "Shadow 👤",
+    "crust" to "Crust 🦀",
+    "equilibrium" to "Equilibrium ⚖️",
+    "genshiro" to "Genshiro ",
+    "calamari" to "Calamari 🦑",
+    "manta" to "Manta 🦈"
+)
 
 private data class ChartCandle(val o: Double, val h: Double, val l: Double, val c: Double, val marker: Int)
 private data class FlowRow(val label: String, val buy: Double, val sell: Double)
@@ -89,6 +178,7 @@ private data class WhalePick(
     val symbol: String,
     val name: String,
     val chain: String,
+    val chainName: String,
     val price: Double,
     val volH1: Double,
     val buysH1: Double,
@@ -116,13 +206,7 @@ private fun compact(v: Double): String = when {
     else -> String.format(Locale.US, "$%.0f", v)
 }
 
-private fun chainEmoji(chain: String): String = when (chain) {
-    "solana" -> "🟣"
-    "bsc" -> "🟡"
-    "base" -> "🔵"
-    "ethereum" -> "⚪"
-    else -> "⛓️"
-}
+private fun chainEmoji(chain: String): String = ALL_CHAINS.firstOrNull { it.first == chain }?.second?.take(2) ?: "⛓️"
 
 private fun ageText(h: Double): String = when {
     h >= 9999 -> "—"
@@ -150,7 +234,7 @@ private fun ratio(b: Double, s: Double): Double {
 
 private fun verdictText(r1: Double): String = when {
     r1 >= 0.6 -> "🐳 نهنگ‌ها در حال جمع‌کردن این ارز هستن 🚀"
-    r1 <= 0.4 -> "🩸 فشار فروش نهنگی — احتیاط"
+    r1 <= 0.4 -> " فشار فروش نهنگی — احتیاط"
     else -> "⚖️ خرید معمولی"
 }
 
@@ -230,9 +314,10 @@ private fun poolStats(p: GeckoPool): WhalePick? {
 
     val network = p.relationships?.network?.data?.id ?: "solana"
     val addr = p.id?.substringAfter('_') ?: ""
+    val chainName = ALL_CHAINS.firstOrNull { it.first == network }?.second ?: network
 
     return WhalePick(
-        symbol = symbol, name = name, chain = network, price = price,
+        symbol = symbol, name = name, chain = network, chainName = chainName, price = price,
         volH1 = a.volume?.h1 ?: 0.0,
         buysH1 = b1, sellsH1 = s1, buysH6 = b6, sellsH6 = s6,
         buysH24 = b24, sellsH24 = s24,
@@ -311,13 +396,13 @@ private fun FlowLine(label: String, b: Double, s: Double, vol: Double) {
 private fun MethodCard() {
     Surface(color = CardB, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("🛡️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
+            Text("️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
             Text(
-                "هر ارز قبل از نمایش، ۷ بررسی آن‌چین می‌شه. در بخش تحلیل دلخواه فقط ۱۰۰ ارز برتر و در بخش شکار نهنگ تا رتبه ۱۰۰۰ بررسی می‌شن.",
+                "تحلیل دلخواه: فقط ۱۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰۰۰ • شکار میم‌کوین‌ها: تمام شبکه‌های DEX (Solana, BSC, Base, Ethereum, TON, Robinhood + ۵۰+ شبکه دیگر)",
                 fontSize = 10.sp, color = WGray, lineHeight = 16.sp
             )
             Text(
-                "⚠️ شفافیت: داده‌ها لحظه‌ای از GeckoTerminal و CoinGecko هستن. این اپ مشاوره مالی نیست.",
+                "️ شفافیت: داده‌ها لحظه‌ای از GeckoTerminal و CoinGecko هستن. این اپ مشاوره مالی نیست.",
                 fontSize = 10.sp, color = WGold, lineHeight = 16.sp
             )
         }
@@ -362,6 +447,7 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
                 Text(chainEmoji(l.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
                 Text(l.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                Text("(${l.chainName})", fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.weight(1f))
                 Text(String.format(Locale.US, "$%.6f", l.price), fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.width(6.dp))
@@ -387,7 +473,7 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
             Text(marketPosText(l.rank, l.marketCap), fontSize = 10.sp, color = WGray)
 
             if (expanded) {
-                FlowLine("۱ ساعته", l.buysH1, l.sellsH1, l.volH1)
+                FlowLine(" ساعته", l.buysH1, l.sellsH1, l.volH1)
                 FlowLine("۶ ساعته", l.buysH6, l.sellsH6, l.volH6)
                 FlowLine("روزانه", l.buysH24, l.sellsH24, l.volH24)
                 if (leaderTf !in listOf("1h", "6h", "24h") && bFlows[l.symbol] != null) {
@@ -424,8 +510,9 @@ private fun FreshCard(f: WhalePick, index: Int) {
                 Text(chainEmoji(f.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
                 Text(f.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                Text("(${f.chainName})", fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.weight(1f))
-                Text("🛡️ $passed/${checks.size}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (passed >= 6) WGreen else WGold)
+                Text("️ $passed/${checks.size}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (passed >= 6) WGreen else WGold)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("قیمت: ${String.format(Locale.US, "$%.8f", f.price)}", fontSize = 10.sp, color = WGray)
@@ -456,20 +543,20 @@ fun WhaleRadarScreen() {
 
     var leaders by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
     var fresh by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
+    var memeTrends by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
     var threshold by remember { mutableStateOf(100_000.0) }
     var leaderTf by remember { mutableStateOf("1h") }
     var bFlows by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
     var loadingList by remember { mutableStateOf(true) }
     var lastUpdate by remember { mutableStateOf("") }
 
-    // ========== ۱) تحلیل ارز دلخواه (فقط رتبه ۱ تا ۱۰۰) ==========
+    // ========== ۱) تحلیل ارز دلخواه (فقط رتبه ۱ تا ۱۰) ==========
     fun analyze(symbol: String, tf: String) {
         scope.launch {
             analyzing = true
             analysisError = null
             try {
                 val coins = ApiClient.getTop1000Coins()
-                // فیلتر سخت‌گیرانه: فقط ۱۰۰ ارز برتر
                 val coin = coins.firstOrNull {
                     it.symbol.equals(symbol, true) && it.market_cap_rank != null && it.market_cap_rank <= 100
                 } ?: throw Exception("not in top 100")
@@ -527,7 +614,7 @@ fun WhaleRadarScreen() {
                 analysis = AnalysisData(shown, zone, flows, chg, poolName)
             } catch (e: Exception) {
                 analysis = null
-                analysisError = "ارز در ۱۰۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰ تای برتر مجاز است)"
+                analysisError = "ارز در ۰۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰ تای برتر مجاز است)"
             }
             analyzing = false
         }
@@ -563,31 +650,38 @@ fun WhaleRadarScreen() {
         bFlows = map
     }
 
-    // ========== ۳) دریافت لیست‌ها (فیلتر رتبه ≤ ۱۰۰۰) ==========
+    // ========== ۳) دریافت لیست‌ها (تمام شبکه‌ها) ==========
     fun fetchLists() {
         scope.launch {
             loadingList = true
             try {
-                val (trend, news, markets) = coroutineScope {
+                val allChains = ALL_CHAINS.map { it.first }
+                
+                val (trend, news, markets, allTrending) = coroutineScope {
                     val t = async(Dispatchers.IO) {
-                        CHAINS.map { chain ->
+                        allChains.map { chain ->
                             try { GeckoTerminal.api.trendingPools(chain).data ?: emptyList() } catch (_: Exception) { emptyList<GeckoPool>() }
                         }.flatten()
                     }
                     val n = async(Dispatchers.IO) {
-                        CHAINS.map { chain ->
+                        allChains.map { chain ->
                             try { GeckoTerminal.api.newPools(chain).data ?: emptyList() } catch (_: Exception) { emptyList<GeckoPool>() }
                         }.flatten()
                     }
                     val m = async(Dispatchers.IO) {
                         try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList<CoinMarket>() }
                     }
-                    Triple(t.await(), n.await(), m.await())
+                    val at = async(Dispatchers.IO) {
+                        allChains.map { chain ->
+                            try { GeckoTerminal.api.trendingPools(chain).data ?: emptyList() } catch (_: Exception) { emptyList<GeckoPool>() }
+                        }.flatten()
+                    }
+                    Triple(t.await(), n.await(), m.await(), at.await())
                 }
 
                 fun marketOf(sym: String): CoinMarket? = markets.firstOrNull { it.symbol.equals(sym, true) }
 
-                // فیلتر رتبه ≤ ۱۰۰۰ برای بخش "نهنگ‌ها چی می‌خرن"
+                // بخش ۲: نهنگ‌ها چی می‌خرن (رتبه ۱-۱۰۰)
                 leaders = trend
                     .mapNotNull { poolStats(it) }
                     .map {
@@ -595,21 +689,45 @@ fun WhaleRadarScreen() {
                         it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
                     }
                     .filter {
-                        it.rank != null && it.rank <= 1000 && // <== فیلتر رتبه ۱۰۰۰
+                        it.rank != null && it.rank <= 1000 &&
                         it.volH1 >= threshold && it.buysH1 > it.sellsH1 && it.sellsH1 > 0
                     }
                     .sortedByDescending { it.volH1 }
                     .take(15)
 
-                fresh = news
+                // بخش ۳: شکار میم‌کوین‌های ترند (بدون محدودیت رتبه — تمام شبکه‌ها)
+                memeTrends = allTrending
                     .mapNotNull { poolStats(it) }
+                    .filter { p ->
+                        p.liquidity >= 50_000 &&
+                        p.fdv in 100_000.0..50_000_000.0 &&
+                        p.ageHours >= 1 &&
+                        p.sellsH1 > 0 &&
+                        p.buysH1 > p.sellsH1 &&
+                        ratio(p.buysH1, p.sellsH1) >= 0.55 &&
+                        p.credScore >= 45
+                    }
                     .map {
                         val mk = marketOf(it.symbol)
                         it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
                     }
+                    .sortedByDescending { it.volH1 * ratio(it.buysH1, it.sellsH1) }
+                    .take(20)
+
+                // بخش تازه‌واردها (فیلترهای سخت‌گیرانه)
+                fresh = news
+                    .mapNotNull { poolStats(it) }
                     .filter { p ->
-                        p.liquidity >= 50_000 && p.fdv in 100_000.0..20_000_000.0 &&
-                        p.ageHours >= 1 && p.sellsH1 > 0 && p.buysH1 > p.sellsH1 && p.credScore >= 50
+                        p.liquidity >= 100_000 &&
+                        p.fdv in 100_000.0..20_000_000.0 &&
+                        p.ageHours >= 6 &&
+                        p.sellsH1 > 0 &&
+                        p.buysH1 > p.sellsH1 &&
+                        p.credScore >= 55
+                    }
+                    .map {
+                        val mk = marketOf(it.symbol)
+                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
                     }
                     .sortedByDescending { it.credScore * 1_000_000 + it.volH1 }
                     .take(10)
@@ -634,10 +752,10 @@ fun WhaleRadarScreen() {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("🐳 رادار نهنگ‌ها", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("🐳 رادار نهنگ‌ها (تمام شبکه‌ها)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { fetchLists() }, enabled = !loadingList) {
-                Text(if (loadingList) "در حال اسکن..." else "اسکن 🔄")
+                Text(if (loadingList) "در حال اسکن ${ALL_CHAINS.size} شبکه..." else "اسکن 🔄")
             }
         }
 
@@ -648,7 +766,7 @@ fun WhaleRadarScreen() {
             item {
                 Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🔍 تحلیل نهنگی ارز دلخواه (فقط ۱۰۰ ارز برتر)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("🔍 تحلیل نهنگی ارز دلخواه (فقط ۱۰۰ ارز برتر CoinGecko)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextField(
@@ -712,7 +830,7 @@ fun WhaleRadarScreen() {
                                     Text(
                                         when {
                                             f24.buy > f24.sell * 1.5 -> "💡 نهنگ‌ها دارن این ارز رو جمع می‌کنن — پتانسیل پامپ 🚀"
-                                            f24.sell > f24.buy * 1.5 -> "💡 نهنگ‌ها دارن خالی می‌کنن — احتیاط 🩸"
+                                            f24.sell > f24.buy * 1.5 -> "💡 نهنگ‌ها دارن خالی می‌کنن — احتیاط "
                                             else -> "💡 تعادل خرید/فروش — منتظر شکست بمون ⚖️"
                                         },
                                         fontSize = 12.sp, fontWeight = FontWeight.Bold,
@@ -725,10 +843,10 @@ fun WhaleRadarScreen() {
                 }
             }
 
-            // ================= ۲) مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰۰) =================
+            // ================= ۲) مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰) =================
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("👑 مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰۰) — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("👑 مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰ CoinGecko) — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
@@ -738,7 +856,7 @@ fun WhaleRadarScreen() {
                     }
 
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("1h" to "۱ ساعته", "4h" to "۴ ساعته", "6h" to "۶ ساعته", "12h" to "۱۲ ساعته", "24h" to "روزانه", "3d" to "۳ روزه", "1w" to "هفتگی").forEach { (k, label) ->
+                        listOf("1h" to "۱ ساعته", "4h" to "۴ ساعته", "6h" to "۶ ساعته", "12h" to "۲ ساعته", "24h" to "روزانه", "3d" to " روزه", "1w" to "هفتگی").forEach { (k, label) ->
                             FilterChip(selected = leaderTf == k, onClick = { leaderTf = k }, label = { Text("⏱ $label", fontSize = 10.sp) })
                         }
                     }
@@ -754,18 +872,69 @@ fun WhaleRadarScreen() {
                 itemsIndexed(leaders) { i, l -> LeaderCard(l, i, leaderTf, bFlows) }
             }
 
-            // ================= ۳) تازه‌واردها =================
+            // ================= ) شکار میم‌کوین‌های ترند DEX (بدون محدودیت رتبه) =================
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("🌱 تازه‌واردهایی که نهنگ‌ها حمله کردن — با تأیید ایمنی", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("🚀 شکار میم‌کوین‌های ترند DEX (تمام شبکه‌ها — بدون محدودیت رتبه)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Solana • BSC • Base • Ethereum • TON • Robinhood + ${ALL_CHAINS.size - 5} شبکه دیگر", fontSize = 9.sp, color = WBlue)
+                    Text("فیلترهای امنیتی: نقدینگی ≥ ۰K • فشار خرید ≥ ۵٪ • سن ≥ ۱ ساعت • FDV سالم", fontSize = 9.sp, color = WGray)
+                }
+            }
+
+            if (loadingList && memeTrends.isEmpty()) {
+                item { Text("⏳ در حال اسکن تمام شبکه‌ها...", fontSize = 11.sp, color = WGray) }
+            } else if (memeTrends.isEmpty()) {
+                item { Text("😴 فعلاً میم‌کوین ترند مورد تأییدی پیدا نشد — بعداً سر بزن", fontSize = 11.sp, color = WGray) }
+            } else {
+                itemsIndexed(memeTrends) { i, m ->
+                    Surface(
+                        color = if (i % 2 == 0) CardA else CardB,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            try { LocalContext.current.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(m.poolUrl))) } catch (_: Exception) { }
+                        }
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(chainEmoji(m.chain), fontSize = 18.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                Text("(${m.chainName})", fontSize = 10.sp, color = WGray)
+                                Spacer(Modifier.weight(1f))
+                                Text("🔥 ترند #${i + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = WGold)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("قیمت: ${String.format(Locale.US, "$%.8f", m.price)}", fontSize = 10.sp, color = WGray)
+                                Text("💧 ${compact(m.liquidity)}", fontSize = 10.sp, color = WBlue)
+                                Text(String.format(Locale.US, "%+.1f%%", m.changeH1), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (m.changeH1 >= 0) WGreen else WRed)
+                            }
+                            Text("🐳 حجم ۱س: ${compact(m.volH1)} • فشار خرید: ${String.format(Locale.US, "%.0f", ratio(m.buysH1, m.sellsH1) * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
+                            Text(verdictText(ratio(m.buysH1, m.sellsH1)), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = verdictColor(ratio(m.buysH1, m.sellsH1)))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("سن: ${ageText(m.ageHours)}", fontSize = 9.sp, color = WGray)
+                                Text("FDV: ${compact(m.fdv)}", fontSize = 9.sp, color = WGray)
+                                Text("امتیاز: ${m.credScore}/100", fontSize = 9.sp, color = WBlue)
+                            }
+                        }
+                    }
+                }
+                item {
+                    Text("⚠️ میم‌کوین‌ها = ریسک بسیار بالا! فقط با پولی که توان از دست دادنش رو داری وارد شو. حتماً خودت هم تحقیق کن.", fontSize = 10.sp, color = WGold)
+                }
+            }
+
+            // ================= ۴) تازه‌واردها =================
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("🌱 تازه‌واردهای تأییدشده (فیلترهای سخت‌گیرانه)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Text("فقط ارزهایی با حداقل ۵ از ۷ بررسی اعتماد 🛡️", fontSize = 9.sp, color = WGray)
                 }
             }
 
             if (loadingList && fresh.isEmpty()) {
-                item { Text("⏳ در حال دریافت...", fontSize = 11.sp, color = WGray) }
+                item { Text(" در حال دریافت...", fontSize = 11.sp, color = WGray) }
             } else if (fresh.isEmpty()) {
-                item { Text("😴 فعلاً تازه‌وارد مورد تأییدی پیدا نشد — بعداً سر بزن", fontSize = 11.sp, color = WGray) }
+                item { Text(" فعلاً تازه‌وارد مورد تأییدی پیدا نشد — بعداً سر بزن", fontSize = 11.sp, color = WGray) }
             } else {
                 itemsIndexed(fresh) { i, f -> FreshCard(f, i) }
                 item {
