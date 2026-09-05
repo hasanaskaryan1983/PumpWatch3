@@ -71,7 +71,7 @@ private data class CoinAnalysis(
 )
 
 @Composable
-fun AssistantScreen(onOpenCoin: ((String) -> Unit)? = null) {
+fun AssistantScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
@@ -195,11 +195,11 @@ fun AssistantScreen(onOpenCoin: ((String) -> Unit)? = null) {
         searchResult?.let { analysis ->
             Text("📊 نتیجه: ${analysis.symbol}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = AGreen)
             Spacer(Modifier.height(8.dp))
-            CoinAnalysisCard(context, analysis, onOpenCoin)
+            CoinAnalysisCard(context, analysis)
             Spacer(Modifier.height(16.dp))
         }
 
-        Text("🏆 ۰ ارز برتر", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AGold)
+        Text("🏆 ۲۰ ارز برتر", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AGold)
         Spacer(Modifier.height(8.dp))
 
         if (loading && topCoins.isEmpty()) {
@@ -211,7 +211,7 @@ fun AssistantScreen(onOpenCoin: ((String) -> Unit)? = null) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(topCoins) { analysis ->
-                    CoinAnalysisCard(context, analysis, onOpenCoin)
+                    CoinAnalysisCard(context, analysis)
                 }
             }
         }
@@ -227,7 +227,7 @@ fun AssistantScreen(onOpenCoin: ((String) -> Unit)? = null) {
                 Text("💡 راهنما:", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = ABlue)
                 Spacer(Modifier.height(8.dp))
                 Text("• جستجو: CEX (رتبه ۱-۱۰۰۰) + DEX‌ها", fontSize = 11.sp, color = AGray)
-                Text("• دکمه : نمودار CoinGecko", fontSize = 11.sp, color = AGray)
+                Text("• دکمه 📈: باز کردن نمودار CoinGecko در مرورگر", fontSize = 11.sp, color = AGray)
                 Text("• این توصیه مالی نیست", fontSize = 11.sp, color = ARed)
             }
         }
@@ -235,11 +235,7 @@ fun AssistantScreen(onOpenCoin: ((String) -> Unit)? = null) {
 }
 
 @Composable
-private fun CoinAnalysisCard(
-    context: android.content.Context, 
-    analysis: CoinAnalysis,
-    onOpenCoin: ((String) -> Unit)? = null
-) {
+private fun CoinAnalysisCard(context: android.content.Context, analysis: CoinAnalysis) {
     Card(
         colors = CardDefaults.cardColors(containerColor = ACard),
         shape = RoundedCornerShape(12.dp),
@@ -281,13 +277,9 @@ private fun CoinAnalysisCard(
             if (analysis.coingeckoId != null) {
                 Button(
                     onClick = {
-                        if (onOpenCoin != null) {
-                            onOpenCoin(analysis.coingeckoId)
-                        } else {
-                            val url = "https://www.coingecko.com/en/coins/${analysis.coingeckoId}/chart"
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                            context.startActivity(intent)
-                        }
+                        val url = "https://www.coingecko.com/en/coins/${analysis.coingeckoId}/chart"
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                        context.startActivity(intent)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ABlue),
                     shape = RoundedCornerShape(8.dp),
@@ -308,7 +300,7 @@ private fun CoinAnalysisCard(
 
             Spacer(Modifier.height(8.dp))
 
-            Text(" اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGreen)
+            Text("📈 اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGreen)
             analysis.indicators.forEach { (key, value) ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -321,12 +313,12 @@ private fun CoinAnalysisCard(
 
             Spacer(Modifier.height(6.dp))
 
-            Text(" فعالیت نهنگ‌ها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ABlue)
+            Text("🐳 فعالیت نهنگ‌ها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ABlue)
             Text(analysis.whaleActivity, fontSize = 10.sp, color = AGray)
 
             Spacer(Modifier.height(6.dp))
 
-            Text(" دلیل:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGold)
+            Text("💡 دلیل:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGold)
             Text(analysis.reason, fontSize = 10.sp, color = AGray)
         }
     }
@@ -372,9 +364,9 @@ private suspend fun analyzeCoin(
                 val klines = withContext(Dispatchers.IO) {
                     BinanceClient.api.klines("${symbol}USDT", "1h", 100)
                 }
-                // ✅ اصلاح: استفاده از asDouble به جای toDouble
-                closes = klines.map { it[4].asDouble }
-                volumes = klines.map { it[5].asDouble }
+                // ✅ اصلاح امن: تبدیل JsonElement به String و سپس Double
+                closes = klines.map { it[4].asString.toDoubleOrNull() ?: 0.0 }
+                volumes = klines.map { it[5].asString.toDoubleOrNull() ?: 0.0 }
             } catch (_: Exception) { }
         }
         
@@ -420,7 +412,7 @@ private suspend fun analyzeCoin(
                     score -= 20
                     indicators["EMA"] = "نزولی ❌"
                 }
-                else -> indicators["EMA"] = "خنثی "
+                else -> indicators["EMA"] = "خنثی ⚪"
             }
             
             when {
@@ -458,7 +450,7 @@ private suspend fun analyzeCoin(
         
         val recommendation = when {
             isDex && closes.size < 35 -> "تحلیل محدود (DEX) ⚪"
-            score >= 80 -> "خرید قوی "
+            score >= 80 -> "خرید قوی 🟢"
             score >= 65 -> "خرید ✅"
             score >= 45 -> "صبر ⚪"
             score >= 30 -> "فروش 🔴"
