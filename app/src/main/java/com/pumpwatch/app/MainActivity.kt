@@ -80,8 +80,8 @@ private val TextSecondary = Color(0xFF8B949E)
 
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
-    ALERTS("هشدار", ""),
-    WHALE("نهنگ", ""),
+    ALERTS("هشدار", "🔔"),
+    WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
     BACKTEST("بک‌تست", "🧪"),
     TOP("برترین", "🏆"),
@@ -367,7 +367,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp)
             )
         }
@@ -473,30 +473,4 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             }
         }
     }
-}
-
-@Composable
-fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
-    // این تابع باید از فایل دیگه‌ای بیاد یا اینجا تعریف بشه
-    // اگر خطا داد، بگو تا کاملش کنم
-}
-
-fun formatPrice(price: Double?): String {
-    return if (price == null) "—"
-    else if (price < 1) String.format(Locale.US, "$%.6f", price)
-    else String.format(Locale.US, "$%,.2f", price)
-}
-
-fun formatMarketCap(cap: Double?): String {
-    return when {
-        cap == null -> "—"
-        cap >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", cap / 1_000_000_000_000)
-        cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
-        cap >= 1_000_000 -> String.format(Locale.US, "$%.2fM", cap / 1_000_000)
-        else -> String.format(Locale.US, "$%.0f", cap)
-    }
-}
-
-fun cmcUrl(id: String): String {
-    return "https://coinmarketcap.com/currencies/$id/"
 }
