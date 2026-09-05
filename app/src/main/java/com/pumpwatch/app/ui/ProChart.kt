@@ -62,7 +62,7 @@ private data class Candle(val o: Double, val h: Double, val l: Double, val c: Do
 enum class IndicatorMode(val label: String, val emoji: String) {
     EMA("EMA 7/30", "📊"),
     RSI("RSI", "📈"),
-    MACD("MACD", "📉"),
+    MACD("MACD", ""),
     BOLL("بولینگر", "🎯"),
     SIXTY("Sixty", "⚡"),
     OF("Order Flow", "💰"),
@@ -280,22 +280,16 @@ private fun bsFromSixty(highs: List<Double>, lows: List<Double>, closes: List<Do
         val prev = stoch[stoch.size - 2]
         val cur = stoch.last()
 
-        var fractalBuy = false
-        var fractalSell = false
-        if (i >= 2 && i <= lows.size - 3) {
-            if (lows[i] <= lows[i - 1] && lows[i] <= lows[i - 2] && lows[i] <= lows[i + 1] && lows[i] <= lows[i + 2]) fractalBuy = true
-            if (highs[i] >= highs[i - 1] && highs[i] >= highs[i - 2] && highs[i] >= highs[i + 1] && highs[i] >= highs[i + 2]) fractalSell = true
-        }
-
-        if (prev < 20 && cur >= 20 && fractalBuy) out.add(i to true)
-        else if (prev > 80 && cur <= 80 && fractalSell) out.add(i to false)
+        // فقط برگشت از اشباع — بدون نیاز به fractal
+        if (prev < 20 && cur >= 20) out.add(i to true)
+        else if (prev > 80 && cur <= 80) out.add(i to false)
     }
     return out
 }
 
 private fun bsFromOrderFlow(candles: List<Candle>): List<Pair<Int, Boolean>> {
     val out = mutableListOf<Pair<Int, Boolean>>()
-    if (candles.size < 45) return out
+    if (candles.size < 25) return out
     val hist = mutableListOf<Double>()
     var cvd = 0.0
     for (i in 1 until candles.size) {
@@ -308,14 +302,12 @@ private fun bsFromOrderFlow(candles: List<Candle>): List<Pair<Int, Boolean>> {
         }
         hist.add(cvd)
     }
-    for (i in 40 until candles.size) {
-        val before = hist.getOrNull(i - 1 - 20) ?: continue
+    // فقط تغییر CVD — بدون محدودیت priceChange
+    for (i in 20 until candles.size) {
+        val before = hist.getOrNull(i - 1 - 10) ?: continue
         val now = hist.getOrNull(i - 1) ?: continue
-        val base = candles.getOrNull(i - 20)?.c ?: continue
-        if (base <= 0) continue
-        val priceChange = (candles[i].c - base) / base * 100
-        if (now > before && abs(priceChange) < 3) out.add(i to true)
-        else if (now < before && abs(priceChange) < 3) out.add(i to false)
+        if (now > before) out.add(i to true)
+        else if (now < before) out.add(i to false)
     }
     return out
 }
@@ -430,9 +422,8 @@ private fun ChartCanvas(
             isFakeBoldText = true
         }
 
-        // نقاط هر اندیکاتور با رنگ خودش
+        // نقاط هر اندیکاتور با رنگ سبز/قرمز
         allSignals.forEach { (mode, signals) ->
-            val col = modeColor(mode)
             signals.forEach { (idx, isBuy) ->
                 val r = closes.size - 1 - idx
                 if (r >= n || r < 0) return@forEach
@@ -440,6 +431,7 @@ private fun ChartCanvas(
                 if (i >= vis.size) return@forEach
                 val c = vis[i]
                 val x = i * cw + cw / 2
+                val col = if (isBuy) PGreen else PRed
                 if (isBuy) {
                     drawCircle(col, radius = 9f, center = Offset(x, yMain(c.l) + 26f))
                 } else {
@@ -448,7 +440,7 @@ private fun ChartCanvas(
             }
         }
 
-        // نقاط مشترک طلایی ★
+        // نقاط مشترک طلایی
         consensusSignals.forEach { (idx, isBuy) ->
             val r = closes.size - 1 - idx
             if (r >= n || r < 0) return@forEach
