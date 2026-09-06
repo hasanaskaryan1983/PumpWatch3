@@ -63,16 +63,23 @@ private val VPurple = Color(0xFFCE93D8)
 private val VOrange = Color(0xFFFFA726)
 private val VCard = Color(0xFF1A2230)
 
-private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?)
+private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?, val kind: String)
 
 private val CHAINS = listOf(
-    ChainCfg("solana", "Solana 🟣", "solana", null),
-    ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/"),
-    ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/"),
-    ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/"),
-    ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/"),
-    ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/"),
-    ChainCfg("gnosis", "Gnosis 🦉", "gnosis", "https://gnosis.blockscout.com/")
+    ChainCfg("auto", "Auto 🌐", "", null, "auto"),
+    ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
+    ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/", "evm"),
+    ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/", "evm"),
+    ChainCfg("bsc", "BNB 🟡", "bsc", null, "evm"),
+    ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
+    ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
+    ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
+    ChainCfg("avalanche", "Avalanche 🔺", "avalanche", null, "evm"),
+    ChainCfg("ton", "TON 🔵", "ton", null, "ton"),
+    ChainCfg("sui", "SUI 💧", "sui", null, "sui"),
+    ChainCfg("sei", "SEI 🌊", "sei", null, "evm"),
+    ChainCfg("gnosis", "Gnosis 🦉", "gnosis", "https://gnosis.blockscout.com/", "evm"),
+    ChainCfg("robinhood", "Robinhood 🪽", "robinhood", "https://robinhoodchain.blockscout.com/", "evm")
 )
 
 private data class WalletHolding(val symbol: String, val name: String, val amount: Double, val price: Double, val value: Double)
@@ -83,7 +90,7 @@ private data class SusWallet(
     val statusText: String, val multiplier: Double
 )
 private data class HunterReport(
-    val poolName: String, val bottomPrice: Double, val peakPrice: Double,
+    val poolName: String, val chainName: String, val bottomPrice: Double, val peakPrice: Double,
     val currentPrice: Double, val pumpStartText: String, val risePct: Double,
     val wallets: List<SusWallet>
 )
@@ -92,7 +99,7 @@ private data class InsiderSus(
     val avgLeadMin: Long, val avgEntry: Double, val multiplier: Double,
     val score: Int, val lastSeenText: String
 )
-private data class InsiderReport(val poolName: String, val eventsCount: Int, val suspects: List<InsiderSus>)
+private data class InsiderReport(val poolName: String, val chainName: String, val eventsCount: Int, val suspects: List<InsiderSus>)
 private data class SavedTrader(val addr: String, val symbol: String, val score: Int, val note: String)
 
 private fun num(v: Any?): Double? = when (v) {
@@ -102,6 +109,13 @@ private fun num(v: Any?): Double? = when (v) {
 }
 
 private fun shortAddr(a: String): String = if (a.length > 12) "${a.take(6)}...${a.takeLast(4)}" else a
+
+private fun detectKind(a: String): String = when {
+    a.startsWith("0x") && a.length == 42 -> "evm"
+    a.startsWith("0x") && a.length >= 64 -> "sui"
+    a.startsWith("EQ") || a.startsWith("UQ") || a.startsWith("kQ") || a.startsWith("0:") -> "ton"
+    else -> "solana"
+}
 
 private fun loadTraders(ctx: Context): MutableList<SavedTrader> = try {
     val json = ctx.getSharedPreferences("pumpwatch_prefs", 0).getString("top_traders", "") ?: ""
@@ -121,7 +135,6 @@ fun WalletScreen() {
 
     var chain by remember { mutableStateOf(CHAINS[0]) }
 
-    // موتور ۱
     var address by remember { mutableStateOf("") }
     var holdings by remember { mutableStateOf<List<WalletHolding>>(emptyList()) }
     var txs by remember { mutableStateOf<List<WalletTx>>(emptyList()) }
@@ -130,19 +143,16 @@ fun WalletScreen() {
     var total by remember { mutableStateOf(0.0) }
     var info by remember { mutableStateOf("") }
 
-    // موتور ۲
     var hunterSymbol by remember { mutableStateOf("") }
     var hunterLoading by remember { mutableStateOf(false) }
     var hunterError by remember { mutableStateOf<String?>(null) }
     var report by remember { mutableStateOf<HunterReport?>(null) }
 
-    // موتور ۳
     var insiderSymbol by remember { mutableStateOf("") }
     var insiderLoading by remember { mutableStateOf(false) }
     var insiderError by remember { mutableStateOf<String?>(null) }
     var iReport by remember { mutableStateOf<InsiderReport?>(null) }
 
-    // لیست ستاره‌ها
     var topTraders by remember { mutableStateOf(loadTraders(context)) }
     var manualAddr by remember { mutableStateOf("") }
 
@@ -163,77 +173,102 @@ fun WalletScreen() {
             info = "🔍 در حال اسکن کیف پول..."
             try {
                 withContext(Dispatchers.IO) {
-                    if (cfg.bs == null) {
-                        val body = mapOf(
-                            "jsonrpc" to "2.0", "id" to 1,
-                            "method" to "getTokenAccountsByOwner",
-                            "params" to listOf(
-                                addr,
-                                mapOf("programId" to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-                                mapOf("encoding" to "jsonParsed")
+                    val kind = if (cfg.kind == "auto") detectKind(addr) else cfg.kind
+                    when (kind) {
+                        "sui" -> info = "⚠️ بررسی کیف SUI به‌زودی اضافه می‌شه"
+                        "ton" -> info = "⚠️ بررسی کیف TON به‌زودی اضافه می‌شه"
+                        "solana" -> {
+                            val body = mapOf(
+                                "jsonrpc" to "2.0", "id" to 1,
+                                "method" to "getTokenAccountsByOwner",
+                                "params" to listOf(
+                                    addr,
+                                    mapOf("programId" to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+                                    mapOf("encoding" to "jsonParsed")
+                                )
                             )
-                        )
-                        val res = SolanaRpc.api.rpc(body)
-                        val raw = res.result?.value?.mapNotNull { a ->
-                            val inf = a.account?.data?.parsed?.info ?: return@mapNotNull null
-                            val mint = inf.mint ?: return@mapNotNull null
-                            val amt = inf.tokenAmount?.uiAmountString?.toDoubleOrNull() ?: 0.0
-                            if (amt <= 0.0) null else mint to amt
-                        } ?: emptyList()
+                            val res = SolanaRpc.api.rpc(body)
+                            val raw = res.result?.value?.mapNotNull { a ->
+                                val inf = a.account?.data?.parsed?.info ?: return@mapNotNull null
+                                val mint = inf.mint ?: return@mapNotNull null
+                                val amt = inf.tokenAmount?.uiAmountString?.toDoubleOrNull() ?: 0.0
+                                if (amt <= 0.0) null else mint to amt
+                            } ?: emptyList()
 
-                        val list = mutableListOf<WalletHolding>()
-                        for ((mint, amt) in raw.take(15)) {
-                            try {
-                                val t = GeckoPrice.api.tokenInfo(cfg.gt, mint).data?.attributes
-                                val px = t?.price_usd?.toDoubleOrNull() ?: 0.0
-                                list.add(WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * px))
-                            } catch (_: Exception) { }
-                        }
-                        holdings = list.sortedByDescending { it.value }
-                        total = list.sumOf { it.value }
-                        txs = emptyList()
-                        info = "✅ Solana: ${list.size} توکن پیدا شد"
-                    } else {
-                        val bs = Blockscout.api(cfg.bs)
-                        val tokens = try { bs.tokenList("account", "tokenlist", addr).result } catch (_: Exception) { null }
-                        val list = mutableListOf<WalletHolding>()
-                        tokens?.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }?.take(15)?.forEach { t ->
-                            try {
-                                val dec = t.decimals?.toDoubleOrNull() ?: 18.0
-                                val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
-                                val contract = t.contractAddress ?: return@forEach
-                                val px = try {
-                                    GeckoPrice.api.tokenInfo(cfg.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0
-                                } catch (_: Exception) { 0.0 }
-                                list.add(WalletHolding(t.symbol ?: "?", t.name ?: "", amt, px, amt * px))
-                            } catch (_: Exception) { }
-                        }
-                        holdings = list.sortedByDescending { it.value }
-                        total = list.sumOf { it.value }
-
-                        val all = try { bs.tokenTx("account", "tokentx", addr, "desc").result } catch (_: Exception) { null }
-                        val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                        val sdfShow = SimpleDateFormat("MM/dd", Locale.US)
-                        val rawTxs = all?.take(20)?.mapNotNull { t ->
-                            val ts = (t.timeStamp?.toLongOrNull() ?: return@mapNotNull null) * 1000
-                            val dec = t.tokenDecimal?.toDoubleOrNull() ?: 18.0
-                            val amt = (t.value?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
-                            WalletTx(sdfShow.format(Date(ts)), sdfDay.format(Date(ts)), t.tokenSymbol ?: "?", amt, (t.to ?: "").equals(addr, true), null)
-                        } ?: emptyList()
-
-                        try {
-                            val coins = ApiClient.getTop1000Coins()
-                            for (sym in rawTxs.map { it.symbol }.distinct().take(3)) {
-                                val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
+                            val list = mutableListOf<WalletHolding>()
+                            for ((mint, amt) in raw.take(15)) {
                                 try {
-                                    val chart = ApiClient.getCoinChart(coin.id, days = 365)
-                                    val byDay = chart.prices.associate { p -> sdfDay.format(Date(p[0].toLong())) to p[1] }
-                                    rawTxs.forEach { b -> if (b.symbol.equals(sym, true)) b.priceUsd = byDay[b.dateDay] }
+                                    val t = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
+                                    val px = t?.price_usd?.toDoubleOrNull() ?: 0.0
+                                    list.add(WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * px))
                                 } catch (_: Exception) { }
                             }
-                        } catch (_: Exception) { }
-                        txs = rawTxs
-                        info = "✅ ${cfg.label}: ${list.size} توکن + ${rawTxs.size} تراکنش"
+                            holdings = list.sortedByDescending { it.value }
+                            total = list.sumOf { it.value }
+                            txs = emptyList()
+                            info = "✅ Solana: ${list.size} توکن پیدا شد"
+                        }
+                        else -> {
+                            val hosts = if (cfg.kind == "auto") CHAINS.filter { it.kind == "evm" && it.bs != null }
+                            else listOf(cfg).filter { it.bs != null }
+                            if (hosts.isEmpty()) { info = "⚠️ بررسی کیف روی این شبکه پشتیبانی نمی‌شه"; return@withContext }
+
+                            val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
+                            val allHold = mutableListOf<WalletHolding>()
+                            var txHost: ChainCfg? = null
+
+                            for (h in hosts) {
+                                try {
+                                    val bs = Blockscout.api(h.bs!!)
+                                    val tokens = bs.tokenList("account", "tokenlist", addr).result ?: continue
+                                    val list = mutableListOf<WalletHolding>()
+                                    tokens.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.take(10).forEach { t ->
+                                        val dec = t.decimals?.toDoubleOrNull() ?: 18.0
+                                        val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
+                                        val contract = t.contractAddress ?: return@forEach
+                                        var px = try {
+                                            GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0
+                                        } catch (_: Exception) { 0.0 }
+                                        if (px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price ?: 0.0
+                                        list.add(WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * px))
+                                    }
+                                    if (list.isNotEmpty()) {
+                                        allHold.addAll(list)
+                                        if (txHost == null) txHost = h
+                                    }
+                                } catch (_: Exception) { }
+                            }
+
+                            holdings = allHold.sortedByDescending { it.value }
+                            total = allHold.sumOf { it.value }
+
+                            val th = txHost
+                            if (th != null) {
+                                val all = try { Blockscout.api(th.bs!!).tokenTx("account", "tokentx", addr, "desc").result } catch (_: Exception) { null }
+                                val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                                val sdfShow = SimpleDateFormat("MM/dd", Locale.US)
+                                val rawTxs = all?.take(20)?.mapNotNull { t ->
+                                    val ts = (t.timeStamp?.toLongOrNull() ?: return@mapNotNull null) * 1000
+                                    val dec = t.tokenDecimal?.toDoubleOrNull() ?: 18.0
+                                    val amt = (t.value?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
+                                    WalletTx(sdfShow.format(Date(ts)), sdfDay.format(Date(ts)), t.tokenSymbol ?: "?", amt, (t.to ?: "").equals(addr, true), null)
+                                } ?: emptyList()
+
+                                try {
+                                    for (sym in rawTxs.map { it.symbol }.distinct().take(3)) {
+                                        val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
+                                        try {
+                                            val chart = ApiClient.getCoinChart(coin.id, days = 365)
+                                            val byDay = chart.prices.associate { p -> sdfDay.format(Date(p[0].toLong())) to p[1] }
+                                            rawTxs.forEach { b -> if (b.symbol.equals(sym, true)) b.priceUsd = byDay[b.dateDay] }
+                                        } catch (_: Exception) { }
+                                    }
+                                } catch (_: Exception) { }
+                                txs = rawTxs
+                            }
+                            info = if (allHold.isEmpty()) "😴 موجودی پیدا نشد (آدرس یا شبکه رو چک کن)"
+                            else "✅ ${allHold.size} توکن روی ${hosts.size} شبکه بررسی شد"
+                        }
                     }
                 }
             } catch (t: Throwable) {
@@ -246,16 +281,14 @@ fun WalletScreen() {
     fun hunt() {
         val sym = hunterSymbol.trim()
         if (sym.isEmpty()) { hunterError = "❌ نماد ارز رو وارد کن"; return }
-        val cfg = chain
         scope.launch {
             hunterLoading = true; hunterError = null; report = null
             try {
                 val rep = withContext(Dispatchers.IO) {
                     val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
-                    val sameChain = pools.filter { it.relationships?.network?.data?.id == cfg.gt }
-                    val pool = (if (sameChain.isNotEmpty()) sameChain else pools)
-                        .maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
-                    val net = pool.relationships?.network?.data?.id ?: cfg.gt
+                    val pool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
+                    val net = pool.relationships?.network?.data?.id ?: "solana"
+                    val chainName = CHAINS.firstOrNull { it.gt == net }?.label ?: net
                     val poolAddr = pool.id?.substringAfter('_') ?: ""
 
                     val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
@@ -296,11 +329,11 @@ fun WalletScreen() {
                             if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
                     }.sortedByDescending { it.boughtUsd }.take(10)
 
-                    HunterReport(pool.attributes?.name ?: sym, bottomPrice, peakPrice, currentPrice,
+                    HunterReport(pool.attributes?.name ?: sym, chainName, bottomPrice, peakPrice, currentPrice,
                         if (pumpTs > 0) sdf.format(Date(pumpTs)) else "—", risePct, suspects)
                 }
                 report = rep
-                if (rep.wallets.isEmpty()) hunterError = "😴 کیف مشکوکی پیدا نشد"
+                if (rep.wallets.isEmpty()) hunterError = "😴 کیف مشکوکی پیدا نشد (تریدها فقط اخیرن — موتور ۴ رو امتحان کن)"
             } catch (t: Throwable) { hunterError = "⚠️ خطا: ${t.message}" }
             hunterLoading = false
         }
@@ -309,16 +342,14 @@ fun WalletScreen() {
     fun huntInsider() {
         val sym = insiderSymbol.trim()
         if (sym.isEmpty()) { insiderError = "❌ نماد ارز رو وارد کن"; return }
-        val cfg = chain
         scope.launch {
             insiderLoading = true; insiderError = null; iReport = null
             try {
                 val rep = withContext(Dispatchers.IO) {
                     val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
-                    val sameChain = pools.filter { it.relationships?.network?.data?.id == cfg.gt }
-                    val pool = (if (sameChain.isNotEmpty()) sameChain else pools)
-                        .maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
-                    val net = pool.relationships?.network?.data?.id ?: cfg.gt
+                    val pool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
+                    val net = pool.relationships?.network?.data?.id ?: "solana"
+                    val chainName = CHAINS.firstOrNull { it.gt == net }?.label ?: net
                     val poolAddr = pool.id?.substringAfter('_') ?: ""
 
                     val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
@@ -364,7 +395,7 @@ fun WalletScreen() {
                             if (acc.last > 0) sdf.format(Date(acc.last)) else "—")
                     }.sortedByDescending { it.score }.take(10)
 
-                    InsiderReport(pool.attributes?.name ?: sym, events.size, suspects)
+                    InsiderReport(pool.attributes?.name ?: sym, chainName, events.size, suspects)
                 }
                 iReport = rep
                 if (rep.suspects.isEmpty()) insiderError = "😴 هیچ کیفی قبل از جهش‌ها خرید سنگین نکرده"
@@ -388,7 +419,7 @@ fun WalletScreen() {
         // ================= موتور ۱ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("🔍 موتور ۱: بررسی کیف پول مشکوک", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue)
+                Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue)
                 TextField(value = address, onValueChange = { address = it },
                     placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -447,7 +478,7 @@ fun WalletScreen() {
         // ================= موتور ۲ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("🕵️ موتور ۲: کی کف خرید قبل از پامپ؟", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VPurple)
+                Text("🕵️ موتور ۲: کی کف خرید قبل از پامپ؟ (شبکه خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VPurple)
                 TextField(value = hunterSymbol, onValueChange = { hunterSymbol = it },
                     placeholder = { Text("نماد ارز پامپ‌شده...", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -464,7 +495,7 @@ fun WalletScreen() {
         report?.let { r ->
             Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("🎯 ${r.poolName}", fontWeight = FontWeight.Black, fontSize = 14.sp, color = VBlue)
+                    Text("🎯 ${r.poolName} • ${r.chainName}", fontWeight = FontWeight.Black, fontSize = 14.sp, color = VBlue)
                     Text("کف: ${String.format(Locale.US, "$%.8f", r.bottomPrice)} • اوج: ${String.format(Locale.US, "$%.8f", r.peakPrice)} • الان: ${String.format(Locale.US, "$%.8f", r.currentPrice)}", fontSize = 10.sp, color = VGray)
                     Text("🚀 رشد از کف: ${String.format(Locale.US, "%.0f%%", r.risePct)} • شروع: ${r.pumpStartText}", fontSize = 10.sp, color = VGreen, fontWeight = FontWeight.Bold)
                 }
@@ -501,7 +532,7 @@ fun WalletScreen() {
         // ================= موتور ۳ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
+                Text("📰 موتور ۳: شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
                 Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
                 TextField(value = insiderSymbol, onValueChange = { insiderSymbol = it },
                     placeholder = { Text("نماد ارز خبرساز... (TRUMP, MAGA...)", fontSize = 11.sp) },
@@ -517,7 +548,7 @@ fun WalletScreen() {
         }
 
         iReport?.let { r ->
-            Text("⚡ ${r.eventsCount} جهش خبری پیدا شد — مظنون‌ها:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = VOrange)
+            Text("⚡ ${r.eventsCount} جهش خبری در ${r.chainName} — مظنون‌ها:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = VOrange)
             r.suspects.forEach { w ->
                 Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -545,6 +576,9 @@ fun WalletScreen() {
                 }
             }
         }
+
+        // ================= موتور ۴: شکارچی تاریخی =================
+        HistoryHunterSection()
 
         // ================= ⭐ بهترین تریدرها =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
