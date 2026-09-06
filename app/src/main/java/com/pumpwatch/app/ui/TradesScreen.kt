@@ -193,17 +193,26 @@ fun TradesScreen() {
         state.cash -= sizeUsd
     }
 
+    // ---------- مدیریت پوزیشن: تریلینگ + حالت دونده 🏃 ----------
     fun updateTrail(t: PaperTrade, px: Double): Boolean {
         t.price = px
+
+        // ۱) رسیدن به هدف → حالت دونده: دیگه نمی‌بندیم، سود رو قفل می‌کنیم
+        if (t.target > 0 && px >= t.target) {
+            t.target = -1.0
+            val lock = t.entry * (1 + t.stopPct / 100)
+            if (lock > t.stop) t.stop = lock
+        }
+
+        // ۲) تریلینگ (بعد از هدف، تنگ‌تر برای محافظت از سود بزرگ)
         if (t.trailing != false) {
-            val nt = px * (1 - t.stopPct / 100)
+            val dist = if (t.target < 0) t.stopPct * 0.7 else t.stopPct
+            val nt = px * (1 - dist / 100)
             if (nt > t.stop) t.stop = nt
         }
-        return when {
-            px <= t.stop -> { closeTrade(t, px); true }
-            px >= t.target -> { closeTrade(t, px); true }
-            else -> false
-        }
+
+        // ۳) فقط برخورد با استاپ (= برگشت روند) می‌بنده
+        return if (px <= t.stop) { closeTrade(t, px); true } else false
     }
 
     fun findPrice() {
@@ -275,7 +284,7 @@ fun TradesScreen() {
                     if (px != null && px > 0) if (updateTrail(t, px)) closedNow++
                 }
 
-                // ---------- ساخت لیست اجماع (ترکیب همه تب‌ها) ----------
+                // ---------- اجماع ----------
                 val picks = mutableListOf<ConsensusPick>()
                 val seen = mutableSetOf<String>()
 
@@ -366,7 +375,7 @@ fun TradesScreen() {
                     }
                 }
 
-                // ---------- معامله خودکار از اجماع (ANSEM‌ها اینجا شکار می‌شن) ----------
+                // ---------- معامله از اجماع ----------
                 var consensusOpened = 0
                 for (pk in consensus) {
                     if (consensusOpened >= 2 || state.cash < 10) break
@@ -476,7 +485,7 @@ fun TradesScreen() {
         }
         if (confirmReset) Text("⚠️ دکمه ریست رو دوباره بزن تا همه چی صفر بشه", fontSize = 9.sp, color = TRed)
 
-        // ---------- اجماع تمام تب‌ها ----------
+        // ---------- اجماع ----------
         Text("🧠 اجماع همه تب‌ها (نهنگ🐳 + روند📈 + مومنتوم⚡ + ترند🐸) — بررسی کن و انتخاب کن:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TPurple)
         if (consensus.isEmpty()) {
             Text("⏳ در حال محاسبه اجماع...", fontSize = 11.sp, color = TGray)
@@ -519,7 +528,7 @@ fun TradesScreen() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextField(
                         value = mSymbol, onValueChange = { mSymbol = it },
-                        placeholder = { Text("نماد ارز... (BTC, ANSEM...)", fontSize = 11.sp) },
+                        placeholder = { Text("نماد ارز... (BTC, ZCAT...)", fontSize = 11.sp) },
                         modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true
                     )
                     Spacer(Modifier.width(6.dp))
@@ -612,6 +621,7 @@ fun TradesScreen() {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${t.symbol} • ${t.tier}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Text(if (t.trailing != false) " 🔄" else " 📌", fontSize = 12.sp)
+                        if (t.target < 0) Text(" 🏃", fontSize = 12.sp)
                         Text(" (${t.score})", fontSize = 9.sp, color = TGray)
                         Spacer(Modifier.weight(1f))
                         Text(String.format(Locale.US, "%+.2f%%", pnl), fontWeight = FontWeight.Black, fontSize = 14.sp,
@@ -621,8 +631,9 @@ fun TradesScreen() {
                         Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = TGray)
                         Text("الان: ${usd(t.price)}", fontSize = 9.sp, color = TGray)
                         Text("استاپ: ${usd(t.stop)}", fontSize = 9.sp, color = TRed)
-                        Text("هدف: ${usd(t.target)}", fontSize = 9.sp, color = TGreen)
+                        Text(if (t.target > 0) "هدف: ${usd(t.target)}" else "هدف: 🏃 آزاد", fontSize = 9.sp, color = TGreen)
                     }
+                    if (t.target < 0) Text("🏃 حالت دونده: سود قفل شده، تا برگشت روند ادامه می‌ده", fontSize = 9.sp, color = TGold)
                     Button(
                         onClick = { closeTrade(t, t.price); save(); status = "✋ ${t.symbol} دستی بسته شد" },
                         colors = ButtonDefaults.buttonColors(containerColor = TRed.copy(alpha = 0.25f)),
