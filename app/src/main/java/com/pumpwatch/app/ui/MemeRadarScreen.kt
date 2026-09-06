@@ -2,6 +2,7 @@ package com.pumpwatch.app.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.GeckoPool
@@ -234,7 +236,7 @@ fun MemeRadarScreen() {
             if (loading && items.isEmpty()) {
                 item { Text("⏳ در حال اسکن ${MEME_CHAINS.size} شبکه...", fontSize = 12.sp, color = MGray) }
             } else if (error != null && items.isEmpty()) {
-                item { Text(error ?: "", fontSize = 12.sp, color = MGold, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+                item { Text(error ?: "", fontSize = 12.sp, color = MGold, textAlign = TextAlign.Center) }
             } else {
                 itemsIndexed(items) { i, m ->
                     val r1 = ratio(m.buysH1, m.sellsH1)
@@ -295,6 +297,3 @@ fun MemeRadarScreen() {
         }
     }
 }
-
-private fun Modifier.clickable(block: () -> Unit): Modifier =
-    androidx.compose.foundation.clickable(onClick = block)
