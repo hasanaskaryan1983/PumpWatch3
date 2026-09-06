@@ -47,6 +47,7 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 private val AGreen = Color(0xFF00E676)
 private val ARed = Color(0xFFFF5252)
@@ -122,7 +123,7 @@ fun AssistantScreen() {
         modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
     ) {
         Text("🤖 دستیار هوشمند", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = AGreen)
-        Text("تحلیل کامل CEX (رتبه ۱-۱۰۰) + DEX با نمودار و اندیکاتور", fontSize = 12.sp, color = AGray,
+        Text("تحلیل کامل CEX (رتبه ۱-۱۰) + DEX با نمودار و اندیکاتور", fontSize = 12.sp, color = AGray,
             modifier = Modifier.padding(vertical = 8.dp))
 
         Card(colors = CardDefaults.cardColors(containerColor = ACard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -236,11 +237,11 @@ private fun DexChart(candles: List<DexCandle>) {
         val vis = candles.takeLast(80)
         if (vis.size < 5) return@Canvas
         val w = size.width; val h = size.height
-        val min = vis.minOf { it.l }; val max = vis.maxOf { it.h }
-        val range = if (max > min) max - min else 1.0
+        val minV = vis.minOf { it.l }; val maxV = vis.maxOf { it.h }
+        val range = if (maxV > minV) maxV - minV else 1.0
         val cw = w / vis.size
         val bw = cw * 0.55f
-        fun y(v: Double) = (h - ((v - min) / range * h * 0.9 + h * 0.05)).toFloat()
+        fun y(v: Double) = (h - ((v - minV) / range * h * 0.9 + h * 0.05)).toFloat()
 
         vis.forEachIndexed { i, c ->
             val x = i * cw + cw / 2
@@ -378,7 +379,7 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
         val ch24 = a.priceChange?.h24 ?: 0.0
         val ratio = if (b1 + s1 > 0) b1 / (b1 + s1) else 0.5
 
-        // ---------- کندل ساعتی از GeckoTerminal (فایل جدید GeckoOhlcv) ----------
+        // ---------- کندل ساعتی از GeckoTerminal (فایل GeckoOhlcv) ----------
         var candles = emptyList<DexCandle>()
         try {
             val oh = GeckoOhlcv.api.poolOhlcvHour(net, addr)
