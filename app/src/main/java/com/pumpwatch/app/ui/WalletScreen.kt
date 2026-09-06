@@ -157,12 +157,13 @@ fun WalletScreen() {
     fun check() {
         val addr = address.trim()
         if (addr.isEmpty()) { error = "❌ آدرس کیف پول رو وارد کن"; return }
+        val cfg = chain
         scope.launch {
             loading = true; error = null; holdings = emptyList(); txs = emptyList()
             info = "🔍 در حال اسکن کیف پول..."
             try {
                 withContext(Dispatchers.IO) {
-                    if (chain.bs == null) {
+                    if (cfg.bs == null) {
                         val body = mapOf(
                             "jsonrpc" to "2.0", "id" to 1,
                             "method" to "getTokenAccountsByOwner",
@@ -183,7 +184,7 @@ fun WalletScreen() {
                         val list = mutableListOf<WalletHolding>()
                         for ((mint, amt) in raw.take(15)) {
                             try {
-                                val t = GeckoPrice.api.tokenInfo(chain.gt, mint).data?.attributes
+                                val t = GeckoPrice.api.tokenInfo(cfg.gt, mint).data?.attributes
                                 val px = t?.price_usd?.toDoubleOrNull() ?: 0.0
                                 list.add(WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * px))
                             } catch (_: Exception) { }
@@ -193,7 +194,7 @@ fun WalletScreen() {
                         txs = emptyList()
                         info = "✅ Solana: ${list.size} توکن پیدا شد"
                     } else {
-                        val bs = Blockscout.api(chain.bs)
+                        val bs = Blockscout.api(cfg.bs)
                         val tokens = try { bs.tokenList("account", "tokenlist", addr).result } catch (_: Exception) { null }
                         val list = mutableListOf<WalletHolding>()
                         tokens?.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }?.take(15)?.forEach { t ->
@@ -202,7 +203,7 @@ fun WalletScreen() {
                                 val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                                 val contract = t.contractAddress ?: return@forEach
                                 val px = try {
-                                    GeckoPrice.api.tokenInfo(chain.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0
+                                    GeckoPrice.api.tokenInfo(cfg.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0
                                 } catch (_: Exception) { 0.0 }
                                 list.add(WalletHolding(t.symbol ?: "?", t.name ?: "", amt, px, amt * px))
                             } catch (_: Exception) { }
@@ -232,7 +233,7 @@ fun WalletScreen() {
                             }
                         } catch (_: Exception) { }
                         txs = rawTxs
-                        info = "✅ ${chain.label}: ${list.size} توکن + ${rawTxs.size} تراکنش"
+                        info = "✅ ${cfg.label}: ${list.size} توکن + ${rawTxs.size} تراکنش"
                     }
                 }
             } catch (t: Throwable) {
@@ -245,15 +246,16 @@ fun WalletScreen() {
     fun hunt() {
         val sym = hunterSymbol.trim()
         if (sym.isEmpty()) { hunterError = "❌ نماد ارز رو وارد کن"; return }
+        val cfg = chain
         scope.launch {
             hunterLoading = true; hunterError = null; report = null
             try {
                 val rep = withContext(Dispatchers.IO) {
                     val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
-                    val sameChain = pools.filter { it.relationships?.network?.data?.id == chain.gt }
+                    val sameChain = pools.filter { it.relationships?.network?.data?.id == cfg.gt }
                     val pool = (if (sameChain.isNotEmpty()) sameChain else pools)
                         .maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
-                    val net = pool.relationships?.network?.data?.id ?: chain.gt
+                    val net = pool.relationships?.network?.data?.id ?: cfg.gt
                     val poolAddr = pool.id?.substringAfter('_') ?: ""
 
                     val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
@@ -307,15 +309,16 @@ fun WalletScreen() {
     fun huntInsider() {
         val sym = insiderSymbol.trim()
         if (sym.isEmpty()) { insiderError = "❌ نماد ارز رو وارد کن"; return }
+        val cfg = chain
         scope.launch {
             insiderLoading = true; insiderError = null; iReport = null
             try {
                 val rep = withContext(Dispatchers.IO) {
                     val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
-                    val sameChain = pools.filter { it.relationships?.network?.data?.id == chain.gt }
+                    val sameChain = pools.filter { it.relationships?.network?.data?.id == cfg.gt }
                     val pool = (if (sameChain.isNotEmpty()) sameChain else pools)
                         .maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
-                    val net = pool.relationships?.network?.data?.id ?: chain.gt
+                    val net = pool.relationships?.network?.data?.id ?: cfg.gt
                     val poolAddr = pool.id?.substringAfter('_') ?: ""
 
                     val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
@@ -498,7 +501,7 @@ fun WalletScreen() {
         // ================= موتور ۳ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📰 موتور ۳: شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
+                Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
                 Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
                 TextField(value = insiderSymbol, onValueChange = { insiderSymbol = it },
                     placeholder = { Text("نماد ارز خبرساز... (TRUMP, MAGA...)", fontSize = 11.sp) },
