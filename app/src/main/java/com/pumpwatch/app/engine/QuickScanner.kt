@@ -7,11 +7,15 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import com.google.gson.Gson
 import com.pumpwatch.app.MainActivity
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.BinanceFutures
+import com.pumpwatch.app.ui.PaperState
+import com.pumpwatch.app.ui.PaperTrade
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sqrt
 
 data class ScanReport(
@@ -31,6 +35,37 @@ object QuickScanner {
 
     suspend fun scan(ctx: Context, symbols: List<String>, mode: String): ScanReport {
         return if (mode == "FUTURES") scanFutures(ctx, symbols) else scanSpot(ctx, symbols)
+    }
+
+    // ---------- معامله کاغذی خودکار روی سیگنال (حتی وقتی اپ بسته‌ست) ----------
+    private fun openPaperTrade(
+        ctx: Context, symbol: String, entry: Double, stop: Double,
+        target: Double, stopPct: Double, score: Int
+    ) {
+        try {
+            val prefs = ctx.getSharedPreferences("pumpwatch_prefs", 0)
+            if (!prefs.getBoolean("paper_bot", true)) return
+            val gson = Gson()
+            val state = try {
+                val json = prefs.getString("paper_state", "") ?: ""
+                if (json.isEmpty()) PaperState() else gson.fromJson(json, PaperState::class.java) ?: PaperState()
+            } catch (_: Exception) { PaperState() }
+
+            if (state.trades.any { it.status == "OPEN" && it.symbol == symbol }) return
+            val size = min(50.0, state.cash * 0.1)
+            if (size < 10 || entry <= 0) return
+
+            state.trades.add(
+                PaperTrade(
+                    symbol = symbol, tier = "هشدار 🔔", entry = entry, sizeUsd = size,
+                    qty = size / entry, price = entry, stop = stop, stopPct = stopPct,
+                    target = target, openTime = System.currentTimeMillis(),
+                    score = score, trailing = true
+                )
+            )
+            state.cash -= size
+            prefs.edit().putString("paper_state", gson.toJson(state)).apply()
+        } catch (_: Exception) { }
     }
 
     private suspend fun scanFutures(ctx: Context, symbols: List<String>): ScanReport {
@@ -99,7 +134,13 @@ object QuickScanner {
                             time = System.currentTimeMillis(), mode = "FUT"
                         )
                     )
-                    if (logged) signalCount++
+                    if (logged) {
+                        signalCount++
+                        // فقط سیگنال‌های خرید → معامله کاغذی پس‌زمینه
+                        if (side == "BUY") {
+                            openPaperTrade(ctx, symbol, price, stop, target, risk / price * 100, adjusted)
+                        }
+                    }
 
                     if (adjusted >= 75 || adjusted <= -75) {
                         sendNotification(ctx, symbol, adjusted, side, price, "FUT", pumpScore, sixty, zigzag, of)
@@ -140,7 +181,6 @@ object QuickScanner {
                 }
                 score = score.coerceIn(-100, 100)
 
-                // فیلتر کیفیت: امتیاز ۷۰ + هفتگی مثبت + OBV مثبت
                 val wScore = weeklyScore(weekly)
                 val oScore = obvScore(closes, volumes)
 
@@ -166,7 +206,11 @@ object QuickScanner {
                             time = System.currentTimeMillis(), mode = "SPOT"
                         )
                     )
-                    if (logged) signalCount++
+                    if (logged) {
+                        signalCount++
+                        // معامله کاغذی پس‌زمینه روی سیگنال اسپات
+                        openPaperTrade(ctx, symbol, entry, stop, target, stopPct, score)
+                    }
 
                     if (score >= 75) {
                         sendNotification(
