@@ -55,7 +55,6 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.ui.AssistantScreen
 import com.pumpwatch.app.ui.BacktestScreen
-import com.pumpwatch.app.ui.HistoryScreen
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.MemeRadarScreen
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -63,6 +62,7 @@ import com.pumpwatch.app.ui.SignalLogScreen
 import com.pumpwatch.app.ui.SmartAlertsScreen
 import com.pumpwatch.app.ui.TopPicksScreen
 import com.pumpwatch.app.ui.TradesScreen
+import com.pumpwatch.app.ui.WalletScreen
 import com.pumpwatch.app.ui.WhaleRadarScreen
 import com.pumpwatch.app.worker.MonitorScheduler
 import com.pumpwatch.app.worker.SignalScannerWorker
@@ -88,7 +88,7 @@ enum class Tab(val title: String, val emoji: String) {
     MEME("میم", "🐸"),
     LOG("سیگنال", "📓"),
     TRADES("معامله", "📈"),
-    HISTORY("تاریخچه", "📚")
+    WALLETS("کیف پول", "👛")
 }
 
 class MainActivity : ComponentActivity() {
@@ -285,7 +285,7 @@ fun MainApp() {
                         Tab.MEME -> MemeRadarScreen()
                         Tab.LOG -> SignalLogScreen()
                         Tab.TRADES -> TradesScreen()
-                        Tab.HISTORY -> HistoryScreen(if (isFutures) "FUT" else "SPOT")
+                        Tab.WALLETS -> WalletScreen()
                     }
                 }
             }
