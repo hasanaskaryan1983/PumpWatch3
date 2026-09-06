@@ -37,7 +37,7 @@ data class GeckoPoolAttributes(
 
 data class GeckoRelData(val id: String?)
 data class GeckoRel(val data: GeckoRelData?)
-data class GeckoRelationships(val network: GeckoRel?, val dex: GeckoRel?)
+data class GeckoRelationships(val network: GeckoRel?, val dex: GeckoRel?, val base_token: GeckoRel?)
 
 data class GeckoPool(
     val id: String?,
