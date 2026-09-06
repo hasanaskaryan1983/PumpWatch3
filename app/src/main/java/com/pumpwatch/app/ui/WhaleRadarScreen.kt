@@ -1,13 +1,11 @@
 package com.pumpwatch.app.ui
 
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,20 +13,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,903 +32,551 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.ApiClient
-import com.pumpwatch.app.data.BinanceClient
-import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.GeckoPool
+import com.pumpwatch.app.data.Blockscout
+import com.pumpwatch.app.data.GeckoOhlcv
+import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.SolanaRpc
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
+import kotlin.math.pow
 
-private val WGreen = Color(0xFF00E676)
-private val WRed = Color(0xFFFF5252)
-private val WBlue = Color(0xFF40C4FF)
-private val WGold = Color(0xFFFFC107)
-private val WGray = Color(0xFF8B949E)
-private val CardA = Color(0xFF1A2230)
-private val CardB = Color(0xFF141B25)
+private val WGSON = Gson()
+private val VGreen = Color(0xFF00E676)
+private val VRed = Color(0xFFFF5252)
+private val VBlue = Color(0xFF40C4FF)
+private val VGold = Color(0xFFFFC107)
+private val VGray = Color(0xFF8B949E)
+private val VPurple = Color(0xFFCE93D8)
+private val VOrange = Color(0xFFFFA726)
+private val VCard = Color(0xFF1A2230)
 
-private val ALL_CHAINS = listOf(
-    "solana" to "Solana 🟣",
-    "bsc" to "BSC 🟡",
-    "base" to "Base 🔵",
-    "ethereum" to "Ethereum ⚪",
-    "arbitrum" to "Arbitrum 🔷",
-    "optimism" to "Optimism 🔴",
-    "polygon" to "Polygon 🟣",
-    "avalanche" to "Avalanche 🔺",
-    "ton" to "TON 🔵",
-    "cronos" to "Cronos 🔷",
-    "fantom" to "Fantom 👻",
-    "gnosis" to "Gnosis 🦉",
-    "celo" to "Celo 🟢",
-    "aurora" to "Aurora 🌅",
-    "harmony" to "Harmony 🎵",
-    "moonbeam" to "Moonbeam 🌕",
-    "moonriver" to "Moonriver 🌊",
-    "kava" to "Kava ☕",
-    "metis" to "Metis 🏛️",
-    "boba" to "Boba 🧋",
-    "fuse" to "Fuse 🔥",
-    "evmos" to "Evmos 🚀",
-    "milkomeda" to "Milkomeda 🥛",
-    "syscoin" to "Syscoin 🪙",
-    "oasis" to "Oasis 🏝️",
-    "telos" to "Telos 📞",
-    "wanchain" to "Wanchain 🔗",
-    "iotex" to "IoTeX 📡",
-    "theta" to "Theta 🎥",
-    "klaytn" to "Klaytn 🇰🇷",
-    "velas" to "Velas ⚡",
-    "elastos" to "Elastos 🐉",
-    "heco" to "HECO 🔥",
-    "okexchain" to "OKExChain 🔷",
-    "smartbch" to "SmartBCH 🐂",
-    "rsk" to "RSK 🔴",
-    "xdai" to "xDai 🦴",
-    "poa" to "POA 📜",
-    "callisto" to "Callisto 🌑",
-    "dogechain" to "Dogechain 🐕",
-    "godwoken" to "Godwoken 🐉",
-    "rei" to "REI ⚔️",
-    "astar" to "Astar ⭐",
-    "shiden" to "Shiden 🌑",
-    "shibuya" to "Shibuya 🌃",
-    "clover" to "Clover 🍀",
-    "karura" to "Karura 🌸",
-    "acala" to "Acala 🏛️",
-    "bifrost" to "Bifrost 🌉",
-    "interlay" to "Interlay 🔗",
-    "khala" to "Khala 👻",
-    "kintsugi" to "Kintsugi 🏺",
-    "robonomics" to "Robonomics 🤖",
-    "sakura" to "Sakura 🌸",
-    "crust" to "Crust 🦀",
-    "equilibrium" to "Equilibrium ⚖️",
-    "genshiro" to "Genshiro 🎯",
-    "calamari" to "Calamari 🦑",
-    "manta" to "Manta 🦈"
+private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?)
+
+private val CHAINS = listOf(
+    ChainCfg("solana", "Solana 🟣", "solana", null),
+    ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/"),
+    ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/"),
+    ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/"),
+    ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/"),
+    ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/"),
+    ChainCfg("gnosis", "Gnosis 🦉", "gnosis", "https://gnosis.blockscout.com/")
 )
 
-private data class ChartCandle(val o: Double, val h: Double, val l: Double, val c: Double, val marker: Int)
-private data class FlowRow(val label: String, val buy: Double, val sell: Double)
-
-private data class AnalysisData(
-    val candles: List<ChartCandle>,
-    val zone: Double?,
-    val flows: List<FlowRow>,
-    val changePct: Double,
-    val poolName: String?
+private data class WalletHolding(val symbol: String, val name: String, val amount: Double, val price: Double, val value: Double)
+private data class WalletTx(val dateText: String, val dateDay: String, val symbol: String, val amount: Double, val incoming: Boolean, var priceUsd: Double?)
+private data class SusWallet(
+    val addr: String, val boughtUsd: Double, val avgEntry: Double,
+    val firstBuyText: String, val txCount: Int, val soldUsd: Double,
+    val statusText: String, val multiplier: Double
 )
-
-private data class WhalePick(
-    val symbol: String,
-    val name: String,
-    val chain: String,
-    val chainName: String,
-    val price: Double,
-    val volH1: Double,
-    val buysH1: Double,
-    val sellsH1: Double,
-    val buysH6: Double,
-    val sellsH6: Double,
-    val buysH24: Double,
-    val sellsH24: Double,
-    val volH6: Double,
-    val volH24: Double,
-    val liquidity: Double,
-    val changeH1: Double,
-    val ageHours: Double,
-    val fdv: Double,
-    val credScore: Int,
-    val rank: Int?,
-    val marketCap: Double?,
-    val poolUrl: String
+private data class HunterReport(
+    val poolName: String, val bottomPrice: Double, val peakPrice: Double,
+    val currentPrice: Double, val pumpStartText: String, val risePct: Double,
+    val wallets: List<SusWallet>
 )
+private data class InsiderSus(
+    val addr: String, val eventsCount: Int, val totalPreBuyUsd: Double,
+    val avgLeadMin: Long, val avgEntry: Double, val multiplier: Double,
+    val score: Int, val lastSeenText: String
+)
+private data class InsiderReport(val poolName: String, val eventsCount: Int, val suspects: List<InsiderSus>)
+private data class SavedTrader(val addr: String, val symbol: String, val score: Int, val note: String)
 
-private fun compact(v: Double): String = when {
-    v >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", v / 1_000_000_000)
-    v >= 1_000_000 -> String.format(Locale.US, "$%.1fM", v / 1_000_000)
-    v >= 1_000 -> String.format(Locale.US, "$%.0fK", v / 1_000)
-    else -> String.format(Locale.US, "$%.0f", v)
+private fun num(v: Any?): Double? = when (v) {
+    is Number -> v.toDouble()
+    is String -> v.toDoubleOrNull()
+    else -> null
 }
 
-private fun chainEmoji(chain: String): String = ALL_CHAINS.firstOrNull { it.first == chain }?.second?.take(2) ?: "⛓️"
+private fun shortAddr(a: String): String = if (a.length > 12) "${a.take(6)}...${a.takeLast(4)}" else a
 
-private fun ageText(h: Double): String = when {
-    h >= 9999 -> "—"
-    h < 1 -> "زیر ۱ ساعت"
-    h < 48 -> "${h.toInt()} ساعت"
-    else -> "${(h / 24).toInt()} روز"
-}
+private fun loadTraders(ctx: Context): MutableList<SavedTrader> = try {
+    val json = ctx.getSharedPreferences("pumpwatch_prefs", 0).getString("top_traders", "") ?: ""
+    if (json.isEmpty()) mutableListOf()
+    else WGSON.fromJson(json, object : TypeToken<MutableList<SavedTrader>>() {}.type) ?: mutableListOf()
+} catch (_: Exception) { mutableListOf() }
 
-private fun ageHours(createdAt: String?): Double {
-    if (createdAt == null) return 9999.0
-    return try {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
-        val t = sdf.parse(createdAt) ?: return 9999.0
-        (System.currentTimeMillis() - t.time) / 3_600_000.0
-    } catch (_: Exception) {
-        9999.0
-    }
-}
-
-private fun ratio(b: Double, s: Double): Double {
-    val t = b + s
-    return if (t > 0) b / t else 0.5
-}
-
-private fun verdictText(r1: Double): String = when {
-    r1 >= 0.6 -> "🐳 نهنگ‌ها در حال جمع‌کردن این ارز هستن 🚀"
-    r1 <= 0.4 -> "🩸 فشار فروش نهنگی — احتیاط"
-    else -> "⚖️ خرید معمولی"
-}
-
-private fun verdictColor(r1: Double): Color = when {
-    r1 >= 0.6 -> WGreen
-    r1 <= 0.4 -> WRed
-    else -> WGray
-}
-
-private fun marketPosText(rank: Int?, cap: Double?): String {
-    return if (rank != null) {
-        val capText = if (cap != null) " • کپ ${compact(cap)}" else ""
-        "🏦 جایگاه در بازار: رتبه #${rank}$capText"
-    } else {
-        "🏦 جایگاه در بازار: بدون رتبه — فقط در DEX"
-    }
-}
-
-private fun tfNameOf(k: String): String = when (k) {
-    "1h" -> "۱ ساعته"
-    "6h" -> "۶ ساعته"
-    "24h" -> "روزانه"
-    "4h" -> "۴ ساعته"
-    "12h" -> "۱۲ ساعته"
-    "3d" -> "۳ روزه"
-    else -> "هفتگی"
-}
-
-private fun trustChecks(l: WhalePick): List<Pair<String, Boolean>> {
-    val r1 = ratio(l.buysH1, l.sellsH1)
-    return listOf(
-        "نقدینگی ≥ ۱۰K" to (l.liquidity >= 100_000),
-        "حجم واقعی ۱س ≥ ۵K" to (l.volH1 >= 50_000),
-        "معامله دوطرفه (ضد هانی‌پات)" to (l.buysH1 > 0 && l.sellsH1 > 0),
-        "فشار خرید مثبت ≥ ۵۵٪" to (r1 >= 0.55),
-        "سن استخر ≥ ۲۴ ساعت" to (l.ageHours >= 24),
-        "FDV سالم (۱۰۰K تا ۲۰M)" to (l.fdv in 100_000.0..20_000_000.0),
-        "لیست‌شده در CoinGecko" to (l.rank != null)
-    )
+private fun saveTraders(ctx: Context, list: List<SavedTrader>) {
+    ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
+        .putString("top_traders", WGSON.toJson(list)).apply()
 }
 
 @Composable
-private fun TrustRows(checks: List<Pair<String, Boolean>>) {
-    checks.forEach { (label, ok) ->
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (ok) "✅" else "⚠️", fontSize = 10.sp)
-            Spacer(Modifier.width(6.dp))
-            Text(label, fontSize = 10.sp, color = if (ok) WGreen else WGold)
-        }
-    }
-}
-
-private fun poolStats(p: GeckoPool): WhalePick? {
-    val a = p.attributes ?: return null
-    val price = a.priceUsd?.toDoubleOrNull() ?: return null
-    if (price <= 0) return null
-    val name = a.name ?: "?"
-    val symbol = name.split("/").firstOrNull()?.trim() ?: "?"
-
-    val liq = a.reserveUsd?.toDoubleOrNull() ?: 0.0
-    val b1 = a.transactions?.h1?.buys ?: 0.0
-    val s1 = a.transactions?.h1?.sells ?: 0.0
-    val b6 = a.transactions?.h6?.buys ?: 0.0
-    val s6 = a.transactions?.h6?.sells ?: 0.0
-    val b24 = a.transactions?.h24?.buys ?: 0.0
-    val s24 = a.transactions?.h24?.sells ?: 0.0
-    val fdv = a.fdvUsd ?: 0.0
-    val age = ageHours(a.createdAt)
-
-    var score = 0
-    if (liq >= 100_000) score += 25 else if (liq >= 50_000) score += 10
-    if (b1 > 0 && s1 > 0) score += 15
-    val r1 = ratio(b1, s1)
-    if (r1 >= 0.6) score += 25 else if (r1 >= 0.5) score += 10
-    if (age >= 24) score += 15 else if (age >= 6) score += 10 else score += 5
-    if (fdv in 100_000.0..10_000_000.0) score += 20
-
-    val network = p.relationships?.network?.data?.id ?: "solana"
-    val addr = p.id?.substringAfter('_') ?: ""
-    val chainName = ALL_CHAINS.firstOrNull { it.first == network }?.second ?: network
-
-    return WhalePick(
-        symbol = symbol, name = name, chain = network, chainName = chainName, price = price,
-        volH1 = a.volume?.h1 ?: 0.0,
-        buysH1 = b1, sellsH1 = s1, buysH6 = b6, sellsH6 = s6,
-        buysH24 = b24, sellsH24 = s24,
-        volH6 = a.volume?.h6 ?: 0.0, volH24 = a.volume?.h24 ?: 0.0,
-        liquidity = liq, changeH1 = a.priceChange?.h1 ?: 0.0,
-        ageHours = age, fdv = fdv, credScore = score.coerceAtMost(100),
-        rank = null, marketCap = null,
-        poolUrl = "https://www.geckoterminal.com/$network/pools/$addr"
-    )
-}
-
-@Composable
-private fun WhaleFlowChart(candles: List<ChartCandle>, zone: Double?) {
-    Canvas(modifier = Modifier.fillMaxWidth().height(190.dp)) {
-        if (candles.size < 2) return@Canvas
-        val vals = candles.flatMap { listOf(it.h, it.l) }
-        val minValue = vals.min()
-        val maxValue = vals.max()
-        val range = if (maxValue > minValue) maxValue - minValue else 1.0
-        val w = size.width
-        val h = size.height
-        val n = candles.size
-        val cw = w / n
-        val bodyW = cw * 0.55f
-
-        fun y(v: Double) = (h - ((v - minValue) / range * h * 0.86 + h * 0.07)).toFloat()
-
-        candles.forEachIndexed { i, c ->
-            val x = i * cw + cw / 2
-            val col = if (c.c >= c.o) WGreen else WRed
-            drawLine(col, Offset(x, y(c.h)), Offset(x, y(c.l)), strokeWidth = 2f)
-            val yO = y(c.o)
-            val yC = y(c.c)
-            val top = min(yO, yC)
-            val bh = max(3f, abs(yO - yC))
-            drawRect(col, topLeft = Offset(x - bodyW / 2, top), size = Size(bodyW, bh))
-            if (c.marker == 1) drawCircle(WGreen, radius = 7f, center = Offset(x, y(c.l) + 18f))
-            else if (c.marker == -1) drawCircle(WRed, radius = 6f, center = Offset(x, y(c.h) - 18f))
-        }
-
-        if (zone != null && zone in minValue..maxValue) {
-            drawLine(
-                WGold, Offset(0f, y(zone)), Offset(w, y(zone)),
-                strokeWidth = 2f,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
-            )
-        }
-
-        val paint = android.graphics.Paint().apply {
-            textSize = 26f
-            color = android.graphics.Color.GRAY
-        }
-        drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%,.4f", maxValue), 4f, 32f, paint)
-        drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%,.4f", minValue), 4f, h - 6f, paint)
-    }
-}
-
-@Composable
-private fun FlowLine(label: String, b: Double, s: Double, vol: Double) {
-    val r = ratio(b, s)
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = 10.sp, color = WGray, modifier = Modifier.width(56.dp))
-        Text("🟢 ${compact(vol * r)}", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.weight(1f))
-        Text("🔴 ${compact(vol * (1 - r))}", fontSize = 10.sp, color = WRed)
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "${String.format(Locale.US, "%.0f", r * 100)}٪",
-            fontSize = 10.sp, fontWeight = FontWeight.Black,
-            color = if (r >= 0.5) WGreen else WRed
-        )
-    }
-}
-
-@Composable
-private fun MethodCard() {
-    Surface(color = CardB, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("🛡️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
-            Text(
-                "تحلیل دلخواه: فقط ۱۰۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰۰ + DEX • شکار میم‌کوین‌ها: تمام شبکه‌های DEX • نتایج تا اسکن دستی بعدی حفظ می‌شن",
-                fontSize = 10.sp, color = WGray, lineHeight = 16.sp
-            )
-            Text(
-                "⚠️ شفافیت: داده‌ها لحظه‌ای از GeckoTerminal و CoinGecko هستن. این اپ مشاوره مالی نیست.",
-                fontSize = 10.sp, color = WGold, lineHeight = 16.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<String, Pair<Double, Double>>) {
-    val context = LocalContext.current
-    var expanded by remember { mutableStateOf(false) }
-    val r1 = ratio(l.buysH1, l.sellsH1)
-    val checks = trustChecks(l)
-    val passed = checks.count { it.second }
-
-    val (buyV, sellV, tfName) = when (leaderTf) {
-        "1h" -> Triple(l.volH1 * r1, l.volH1 * (1 - r1), tfNameOf("1h"))
-        "6h" -> {
-            val r6 = ratio(l.buysH6, l.sellsH6)
-            Triple(l.volH6 * r6, l.volH6 * (1 - r6), tfNameOf("6h"))
-        }
-        "24h" -> {
-            val r24 = ratio(l.buysH24, l.sellsH24)
-            Triple(l.volH24 * r24, l.volH24 * (1 - r24), tfNameOf("24h"))
-        }
-        else -> {
-            val f = bFlows[l.symbol]
-            if (f != null) Triple(f.first, f.second, tfNameOf(leaderTf))
-            else Triple(l.volH1 * r1, l.volH1 * (1 - r1), tfNameOf("1h"))
-        }
-    }
-    val rSel = ratio(buyV, sellV)
-    val poolUrl = l.poolUrl
-
-    Surface(
-        color = if (index % 2 == 0) CardA else CardB,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth().clickable {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(poolUrl))
-            context.startActivity(intent)
-        }
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(chainEmoji(l.chain), fontSize = 18.sp)
-                Spacer(Modifier.width(6.dp))
-                Text(l.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                Text("(${l.chainName})", fontSize = 10.sp, color = WGray)
-                Spacer(Modifier.weight(1f))
-                Text(String.format(Locale.US, "$%.6f", l.price), fontSize = 10.sp, color = WGray)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    String.format(Locale.US, "%+.1f%%", l.changeH1),
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                    color = if (l.changeH1 >= 0) WGreen else WRed
-                )
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "🐳 $tfName: خرید ${compact(buyV)} / فروش ${compact(sellV)}",
-                    fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = { expanded = !expanded }) {
-                    Text(if (expanded) "▲ بستن" else "▼ جزئیات", fontSize = 10.sp)
-                }
-            }
-
-            Text(verdictText(rSel), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = verdictColor(rSel))
-            Text("🛡️ بررسی اعتماد: $passed از ${checks.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue)
-            Text(marketPosText(l.rank, l.marketCap), fontSize = 10.sp, color = WGray)
-
-            if (expanded) {
-                FlowLine("۱ ساعته", l.buysH1, l.sellsH1, l.volH1)
-                FlowLine("۶ ساعته", l.buysH6, l.sellsH6, l.volH6)
-                FlowLine("روزانه", l.buysH24, l.sellsH24, l.volH24)
-                if (leaderTf !in listOf("1h", "6h", "24h") && bFlows[l.symbol] != null) {
-                    val f = bFlows[l.symbol]!!
-                    FlowLine(tfNameOf(leaderTf), f.first, f.second, f.first + f.second)
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("💧 موجودی: ${compact(l.liquidity)}", fontSize = 10.sp, color = WBlue)
-                    Text("FDV: ${compact(l.fdv)}", fontSize = 10.sp, color = WGray)
-                    Text("سن: ${ageText(l.ageHours)}", fontSize = 10.sp, color = WGray)
-                }
-                TrustRows(checks)
-            }
-        }
-    }
-}
-
-@Composable
-private fun FreshCard(f: WhalePick, index: Int) {
-    val context = LocalContext.current
-    val r1 = ratio(f.buysH1, f.sellsH1)
-    val checks = trustChecks(f)
-    val passed = checks.count { it.second }
-    val poolUrl = f.poolUrl
-
-    Surface(
-        color = if (index % 2 == 0) CardB else CardA,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth().clickable {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(poolUrl))
-            context.startActivity(intent)
-        }
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(chainEmoji(f.chain), fontSize = 18.sp)
-                Spacer(Modifier.width(6.dp))
-                Text(f.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                Text("(${f.chainName})", fontSize = 10.sp, color = WGray)
-                Spacer(Modifier.weight(1f))
-                Text("🛡️ $passed/${checks.size}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (passed >= 6) WGreen else WGold)
-            }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("قیمت: ${String.format(Locale.US, "$%.8f", f.price)}", fontSize = 10.sp, color = WGray)
-                Text("💧 ${compact(f.liquidity)}", fontSize = 10.sp, color = WBlue)
-                Text(String.format(Locale.US, "%+.1f%%", f.changeH1), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (f.changeH1 >= 0) WGreen else WRed)
-            }
-            Text("🐳 فشار خرید: ${String.format(Locale.US, "%.0f", r1 * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
-            Text(verdictText(r1), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = verdictColor(r1))
-            Text(marketPosText(f.rank, f.marketCap), fontSize = 10.sp, color = WGray)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (f.liquidity >= 100_000) Text("✅ نقدینگی قوی", fontSize = 9.sp, color = WGreen)
-                if (f.buysH1 > 0 && f.sellsH1 > 0) Text("✅ دوطرفه", fontSize = 9.sp, color = WGreen)
-            }
-        }
-    }
-}
-
-@Composable
-fun WhaleRadarScreen() {
+fun WalletScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var searchInput by remember { mutableStateOf("") }
-    var analysisSymbol by remember { mutableStateOf("BTC") }
-    var window by remember { mutableStateOf("1d") }
-    var analysis by remember { mutableStateOf<AnalysisData?>(null) }
-    var analyzing by remember { mutableStateOf(false) }
-    var analysisError by remember { mutableStateOf<String?>(null) }
+    var chain by remember { mutableStateOf(CHAINS[0]) }
 
-    var leaders by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
-    var fresh by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
-    var memeTrends by remember { mutableStateOf<List<WhalePick>>(emptyList()) }
-    var threshold by remember { mutableStateOf(100_000.0) }
-    var leaderTf by remember { mutableStateOf("1h") }
-    var bFlows by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
-    var loadingList by remember { mutableStateOf(true) }
-    var lastUpdate by remember { mutableStateOf("") }
+    // موتور ۱
+    var address by remember { mutableStateOf("") }
+    var holdings by remember { mutableStateOf<List<WalletHolding>>(emptyList()) }
+    var txs by remember { mutableStateOf<List<WalletTx>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var total by remember { mutableStateOf(0.0) }
+    var info by remember { mutableStateOf("") }
 
-    fun analyze(symbol: String, tf: String) {
+    // موتور ۲
+    var hunterSymbol by remember { mutableStateOf("") }
+    var hunterLoading by remember { mutableStateOf(false) }
+    var hunterError by remember { mutableStateOf<String?>(null) }
+    var report by remember { mutableStateOf<HunterReport?>(null) }
+
+    // موتور ۳
+    var insiderSymbol by remember { mutableStateOf("") }
+    var insiderLoading by remember { mutableStateOf(false) }
+    var insiderError by remember { mutableStateOf<String?>(null) }
+    var iReport by remember { mutableStateOf<InsiderReport?>(null) }
+
+    // لیست ستاره‌ها
+    var topTraders by remember { mutableStateOf(loadTraders(context)) }
+    var manualAddr by remember { mutableStateOf("") }
+
+    fun saveStar(addr: String, symbol: String, score: Int, note: String) {
+        if (topTraders.any { it.addr == addr }) { info = "⭐ قبلاً ذخیره شده"; return }
+        topTraders.add(SavedTrader(addr, symbol, score, note))
+        topTraders = ArrayList(topTraders)
+        saveTraders(context, topTraders)
+        info = "⭐ به لیست بهترین تریدرها اضافه شد"
+    }
+
+    fun check() {
+        val addr = address.trim()
+        if (addr.isEmpty()) { error = "❌ آدرس کیف پول رو وارد کن"; return }
+        val cfg = chain
         scope.launch {
-            analyzing = true
-            analysisError = null
+            loading = true; error = null; holdings = emptyList(); txs = emptyList()
+            info = "🔍 در حال اسکن کیف پول..."
             try {
-                val coins = ApiClient.getTop1000Coins()
-                val coin = coins.firstOrNull {
-                    it.symbol.equals(symbol, true) && it.market_cap_rank != null && it.market_cap_rank <= 100
-                } ?: throw Exception("not in top 100")
-
-                val days: Int; val chunk: Int; val take: Int; val th: Double
-                when (tf) {
-                    "1h" -> { days = 1; chunk = 1; take = 70; th = 0.0015 }
-                    "4h" -> { days = 1; chunk = 3; take = 70; th = 0.003 }
-                    "12h" -> { days = 1; chunk = 6; take = 70; th = 0.005 }
-                    "1d" -> { days = 2; chunk = 2; take = 24; th = 0.008 }
-                    "3d" -> { days = 6; chunk = 8; take = 18; th = 0.015 }
-                    else -> { days = 89; chunk = 24; take = 7; th = 0.03 }
-                }
-
-                val chart = ApiClient.getCoinChart(coin.id, days = days)
-                val prices = chart.prices.map { it[1] }
-                val chunked = prices.chunked(chunk).filter { it.size == chunk }
-                val candles = mutableListOf<ChartCandle>()
-                val buyZones = mutableListOf<Double>()
-                for (c in chunked) {
-                    val o = c.first()
-                    val cl = c.last()
-                    val hh = c.max()
-                    val ll = c.min()
-                    val body = if (o > 0) (cl - o) / o else 0.0
-                    val marker = if (body > th) 1 else if (body < -th) -1 else 0
-                    if (marker == 1) buyZones.add(cl)
-                    candles.add(ChartCandle(o, hh, ll, cl, marker))
-                }
-                val shown = candles.takeLast(take)
-                val zone = if (buyZones.isNotEmpty()) buyZones.average() else null
-                val first = prices.first()
-                val last = prices.last()
-                val chg = if (first > 0) (last - first) / first * 100 else 0.0
-
-                var poolName: String? = null
-                val flows = mutableListOf<FlowRow>()
-                try {
-                    val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
-                    if (pool != null) {
-                        poolName = pool.attributes?.name
-                        val a = pool.attributes!!
-                        fun split(vol: Double?, b: Double?, s: Double?): Pair<Double, Double> {
-                            val v = vol ?: 0.0; val bb = b ?: 0.0; val ss = s ?: 0.0; val t = bb + ss
-                            if (t <= 0) return Pair(v / 2, v / 2)
-                            return Pair(v * bb / t, v * ss / t)
-                        }
-                        val f1 = split(a.volume?.h1, a.transactions?.h1?.buys, a.transactions?.h1?.sells)
-                        flows.add(FlowRow("۱ ساعته", f1.first, f1.second))
-                        val f6 = split(a.volume?.h6, a.transactions?.h6?.buys, a.transactions?.h6?.sells)
-                        flows.add(FlowRow("۶ ساعته", f6.first, f6.second))
-                        val f24 = split(a.volume?.h24, a.transactions?.h24?.buys, a.transactions?.h24?.sells)
-                        flows.add(FlowRow("۲۴ ساعته", f24.first, f24.second))
-                    }
-                } catch (_: Exception) { }
-
-                analysisSymbol = coin.symbol.uppercase(Locale.US)
-                analysis = AnalysisData(shown, zone, flows, chg, poolName)
-            } catch (e: Exception) {
-                analysis = null
-                analysisError = "ارز در ۱۰۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰ تای برتر مجاز است)"
-            }
-            analyzing = false
-        }
-    }
-
-    LaunchedEffect(leaderTf, leaders) {
-        if (leaderTf in listOf("1h", "6h", "24h")) return@LaunchedEffect
-        val (interval, limit) = when (leaderTf) {
-            "4h" -> "5m" to 48
-            "12h" -> "15m" to 48
-            "3d" -> "1h" to 72
-            else -> "4h" to 42
-        }
-        val map = mutableMapOf<String, Pair<Double, Double>>()
-        try {
-            coroutineScope {
-                leaders.take(12).map { l ->
-                    async(Dispatchers.IO) {
-                        try {
-                            val kl = BinanceClient.api.klines(l.symbol + "USDT", interval, limit)
-                            var bq = 0.0; var sq = 0.0
-                            for (k in kl) {
-                                val qv = k[7].asDouble; val tb = k[10].asDouble
-                                bq += tb; sq += (qv - tb)
-                            }
-                            l.symbol to (bq to sq)
-                        } catch (_: Exception) { null }
-                    }
-                }.awaitAll().filterNotNull().forEach { (s, p) -> map[s] = p }
-            }
-        } catch (_: Exception) { }
-        bFlows = map
-    }
-
-    fun fetchLists() {
-        scope.launch {
-            loadingList = true
-            try {
-                val allChains = ALL_CHAINS.map { it.first }
-
-                val trendDeferred = async(Dispatchers.IO) {
-                    allChains.map { chain ->
-                        try { GeckoTerminal.api.trendingPools(chain).data ?: emptyList() }
-                        catch (_: Exception) { emptyList<GeckoPool>() }
-                    }.flatten()
-                }
-
-                val newsDeferred = async(Dispatchers.IO) {
-                    allChains.map { chain ->
-                        try { GeckoTerminal.api.newPools(chain).data ?: emptyList() }
-                        catch (_: Exception) { emptyList<GeckoPool>() }
-                    }.flatten()
-                }
-
-                val marketsDeferred = async(Dispatchers.IO) {
-                    try { ApiClient.getTop1000Coins() }
-                    catch (_: Exception) { emptyList<CoinMarket>() }
-                }
-
-                val allTrendingDeferred = async(Dispatchers.IO) {
-                    allChains.map { chain ->
-                        try { GeckoTerminal.api.trendingPools(chain).data ?: emptyList() }
-                        catch (_: Exception) { emptyList<GeckoPool>() }
-                    }.flatten()
-                }
-
-                val trend = trendDeferred.await()
-                val news = newsDeferred.await()
-                val markets = marketsDeferred.await()
-                val allTrending = allTrendingDeferred.await()
-
-                fun marketOf(sym: String): CoinMarket? = markets.firstOrNull { it.symbol.equals(sym, true) }
-
-                leaders = trend
-                    .mapNotNull { poolStats(it) }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
-                    }
-                    .filter {
-                        (it.rank == null || it.rank <= 1000) &&
-                        it.volH1 >= threshold && it.buysH1 > it.sellsH1 && it.sellsH1 > 0
-                    }
-                    .distinctBy { it.symbol + it.chain }
-                    .sortedByDescending { it.volH1 }
-                    .take(15)
-
-                memeTrends = allTrending
-                    .mapNotNull { poolStats(it) }
-                    .filter { p ->
-                        p.liquidity >= 50_000 &&
-                        p.fdv in 100_000.0..50_000_000.0 &&
-                        p.ageHours >= 1 &&
-                        p.sellsH1 > 0 &&
-                        p.buysH1 > p.sellsH1 &&
-                        ratio(p.buysH1, p.sellsH1) >= 0.55 &&
-                        p.credScore >= 45
-                    }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
-                    }
-                    .distinctBy { it.symbol + it.chain }
-                    .sortedByDescending { it.volH1 * ratio(it.buysH1, it.sellsH1) }
-                    .take(20)
-
-                // ---------- تازه‌واردها: فیلتر شل‌تر + حالت پشتیبان ----------
-                val freshStrict = news
-                    .mapNotNull { poolStats(it) }
-                    .filter { p ->
-                        p.liquidity >= 25_000 &&
-                        p.fdv in 50_000.0..50_000_000.0 &&
-                        p.ageHours >= 1 &&
-                        p.buysH1 > 0 &&
-                        p.buysH1 >= p.sellsH1 &&
-                        p.credScore >= 40
-                    }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
-                    }
-                    .distinctBy { it.symbol + it.chain }
-                    .sortedByDescending { it.credScore * 1_000_000 + it.volH1 }
-                    .take(10)
-
-                fresh = if (freshStrict.isNotEmpty()) freshStrict
-                else news
-                    .mapNotNull { poolStats(it) }
-                    .filter { it.liquidity >= 10_000 && it.volH1 >= 10_000 && it.buysH1 > 0 }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
-                    }
-                    .distinctBy { it.symbol + it.chain }
-                    .sortedByDescending { it.volH1 }
-                    .take(5)
-
-                lastUpdate = "بروزرسانی: " + SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
-            } catch (_: Exception) { }
-            loadingList = false
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        analyze("BTC", "1d")
-        fetchLists()
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("🐳 رادار نهنگ‌ها (تمام شبکه‌ها)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { fetchLists() }, enabled = !loadingList) {
-                Text(if (loadingList) "در حال اسکن ${ALL_CHAINS.size} شبکه..." else "اسکن 🔄")
-            }
-        }
-
-        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { MethodCard() }
-
-            // ================= ۱) تحلیل ارز دلخواه =================
-            item {
-                Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🔍 تحلیل نهنگی ارز دلخواه (فقط ۱۰ ارز برتر CoinGecko)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextField(
-                                value = searchInput,
-                                onValueChange = { searchInput = it },
-                                modifier = Modifier.weight(1f),
-                                placeholder = { Text("نماد ارز... مثلاً SOL", fontSize = 12.sp, color = WGray) },
-                                shape = RoundedCornerShape(12.dp)
+                withContext(Dispatchers.IO) {
+                    if (cfg.bs == null) {
+                        val body = mapOf(
+                            "jsonrpc" to "2.0", "id" to 1,
+                            "method" to "getTokenAccountsByOwner",
+                            "params" to listOf(
+                                addr,
+                                mapOf("programId" to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+                                mapOf("encoding" to "jsonParsed")
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Button(
-                                onClick = { val s = searchInput.trim(); if (s.isNotEmpty()) analyze(s, window) },
-                                colors = ButtonDefaults.buttonColors(containerColor = WGreen),
-                                shape = RoundedCornerShape(12.dp)
-                            ) { Text("تحلیل", fontSize = 12.sp) }
-                        }
+                        )
+                        val res = SolanaRpc.api.rpc(body)
+                        val raw = res.result?.value?.mapNotNull { a ->
+                            val inf = a.account?.data?.parsed?.info ?: return@mapNotNull null
+                            val mint = inf.mint ?: return@mapNotNull null
+                            val amt = inf.tokenAmount?.uiAmountString?.toDoubleOrNull() ?: 0.0
+                            if (amt <= 0.0) null else mint to amt
+                        } ?: emptyList()
 
-                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("BTC", "ETH", "SOL", "XRP", "DOGE", "PEPE", "SHIB", "TON").forEach { s ->
-                                FilterChip(selected = analysisSymbol == s, onClick = { analyze(s, window) }, label = { Text(s, fontSize = 10.sp) })
+                        val list = mutableListOf<WalletHolding>()
+                        for ((mint, amt) in raw.take(15)) {
+                            try {
+                                val t = GeckoPrice.api.tokenInfo(cfg.gt, mint).data?.attributes
+                                val px = t?.price_usd?.toDoubleOrNull() ?: 0.0
+                                list.add(WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * px))
+                            } catch (_: Exception) { }
+                        }
+                        holdings = list.sortedByDescending { it.value }
+                        total = list.sumOf { it.value }
+                        txs = emptyList()
+                        info = "✅ Solana: ${list.size} توکن پیدا شد"
+                    } else {
+                        val bs = Blockscout.api(cfg.bs)
+                        val tokens = try { bs.tokenList("account", "tokenlist", addr).result } catch (_: Exception) { null }
+                        val list = mutableListOf<WalletHolding>()
+                        tokens?.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }?.take(15)?.forEach { t ->
+                            try {
+                                val dec = t.decimals?.toDoubleOrNull() ?: 18.0
+                                val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
+                                val contract = t.contractAddress ?: return@forEach
+                                val px = try {
+                                    GeckoPrice.api.tokenInfo(cfg.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0
+                                } catch (_: Exception) { 0.0 }
+                                list.add(WalletHolding(t.symbol ?: "?", t.name ?: "", amt, px, amt * px))
+                            } catch (_: Exception) { }
+                        }
+                        holdings = list.sortedByDescending { it.value }
+                        total = list.sumOf { it.value }
+
+                        val all = try { bs.tokenTx("account", "tokentx", addr, "desc").result } catch (_: Exception) { null }
+                        val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                        val sdfShow = SimpleDateFormat("MM/dd", Locale.US)
+                        val rawTxs = all?.take(20)?.mapNotNull { t ->
+                            val ts = (t.timeStamp?.toLongOrNull() ?: return@mapNotNull null) * 1000
+                            val dec = t.tokenDecimal?.toDoubleOrNull() ?: 18.0
+                            val amt = (t.value?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
+                            WalletTx(sdfShow.format(Date(ts)), sdfDay.format(Date(ts)), t.tokenSymbol ?: "?", amt, (t.to ?: "").equals(addr, true), null)
+                        } ?: emptyList()
+
+                        try {
+                            val coins = ApiClient.getTop1000Coins()
+                            for (sym in rawTxs.map { it.symbol }.distinct().take(3)) {
+                                val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
+                                try {
+                                    val chart = ApiClient.getCoinChart(coin.id, days = 365)
+                                    val byDay = chart.prices.associate { p -> sdfDay.format(Date(p[0].toLong())) to p[1] }
+                                    rawTxs.forEach { b -> if (b.symbol.equals(sym, true)) b.priceUsd = byDay[b.dateDay] }
+                                } catch (_: Exception) { }
                             }
-                        }
-
-                        Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("1h" to "۱ ساعته", "4h" to "۴ ساعته", "12h" to "۱۲ ساعته", "1d" to "روزانه", "3d" to "۳ روزه", "1w" to "هفتگی").forEach { (k, label) ->
-                                FilterChip(
-                                    selected = window == k,
-                                    onClick = { window = k; analyze(analysisSymbol, k) },
-                                    label = { Text(label, fontSize = 10.sp) }
-                                )
-                            }
-                        }
-
-                        when {
-                            analyzing -> Text("⏳ در حال تحلیل...", color = WGray, fontSize = 12.sp)
-                            analysisError != null -> Text(analysisError ?: "", color = WRed, fontSize = 12.sp)
-                            analysis != null -> {
-                                val an = analysis!!
-                                Text("📈 نمودار کندلی $analysisSymbol", fontSize = 10.sp, color = WGray)
-                                WhaleFlowChart(an.candles, an.zone)
-                                if (an.zone != null) {
-                                    Text("🐳 نهنگ‌ها حوالی ${String.format(Locale.US, "$%,.6f", an.zone)} شروع به خرید کردن", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WGold)
-                                }
-                                Text("تغییر بازه: ${String.format(Locale.US, "%+.2f%%", an.changePct)}", fontSize = 11.sp, color = if (an.changePct >= 0) WGreen else WRed)
-
-                                if (an.flows.isNotEmpty()) {
-                                    Text("💰 جریان پول در استخر ${an.poolName ?: ""}:", fontSize = 11.sp, color = WGray)
-                                    an.flows.forEach { f ->
-                                        val tot = f.buy + f.sell
-                                        val r = if (tot > 0) f.buy / tot else 0.5
-                                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                            Text(f.label, fontSize = 11.sp, color = WGray, modifier = Modifier.width(64.dp))
-                                            Text("🟢 ${compact(f.buy)}", fontSize = 11.sp, color = WGreen, fontWeight = FontWeight.Bold)
-                                            Spacer(Modifier.weight(1f))
-                                            Text("🔴 ${compact(f.sell)}", fontSize = 11.sp, color = WRed, fontWeight = FontWeight.Bold)
-                                            Spacer(Modifier.width(8.dp))
-                                            Text("${String.format(Locale.US, "%.0f", r * 100)}٪", fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (r >= 0.5) WGreen else WRed)
-                                        }
-                                    }
-                                    val f24 = an.flows.last()
-                                    Text(
-                                        when {
-                                            f24.buy > f24.sell * 1.5 -> "💡 نهنگ‌ها دارن این ارز رو جمع می‌کنن — پتانسیل پامپ 🚀"
-                                            f24.sell > f24.buy * 1.5 -> "💡 نهنگ‌ها دارن خالی می‌کنن — احتیاط 🩸"
-                                            else -> "💡 تعادل خرید/فروش — منتظر شکست بمون ⚖️"
-                                        },
-                                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                        color = if (f24.buy > f24.sell * 1.5) WGreen else if (f24.sell > f24.buy * 1.5) WRed else WGold
-                                    )
-                                }
-                            }
-                        }
+                        } catch (_: Exception) { }
+                        txs = rawTxs
+                        info = "✅ ${cfg.label}: ${list.size} توکن + ${rawTxs.size} تراکنش"
                     }
                 }
+            } catch (t: Throwable) {
+                error = "⚠️ خطا: ${t.message}"
             }
+            loading = false
+        }
+    }
 
-            // ================= ۲) مهمترین نهنگ‌ها =================
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("👑 مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰۰ CoinGecko + DEX‌ها) — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    fun hunt() {
+        val sym = hunterSymbol.trim()
+        if (sym.isEmpty()) { hunterError = "❌ نماد ارز رو وارد کن"; return }
+        val cfg = chain
+        scope.launch {
+            hunterLoading = true; hunterError = null; report = null
+            try {
+                val rep = withContext(Dispatchers.IO) {
+                    val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
+                    val sameChain = pools.filter { it.relationships?.network?.data?.id == cfg.gt }
+                    val pool = (if (sameChain.isNotEmpty()) sameChain else pools)
+                        .maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
+                    val net = pool.relationships?.network?.data?.id ?: cfg.gt
+                    val poolAddr = pool.id?.substringAfter('_') ?: ""
 
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 }, label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 }, label = { Text("۱ میلیون", fontSize = 10.sp) })
+                    val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
+                    var bottomPrice = 0.0; var peakPrice = 0.0; var pumpTs = 0L
+                    if (rows.size >= 10) {
+                        val cut = rows.size * 2 / 3
+                        val bottomRow = rows.subList(0, cut).minByOrNull { it[4] }
+                        bottomPrice = bottomRow?.get(4) ?: 0.0
+                        pumpTs = (bottomRow?.get(0)?.toLong() ?: 0L) * 1000
+                        peakPrice = rows.maxOf { it[2] }
+                    }
+                    val currentPrice = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
+                    val risePct = if (bottomPrice > 0) (peakPrice - bottomPrice) / bottomPrice * 100 else 0.0
+
+                    val trades = try { GeckoPrice.api.poolTrades(net, poolAddr).data ?: emptyList() } catch (_: Exception) { emptyList() }
+                    val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
+
+                    val buyMap = mutableMapOf<String, MutableList<Triple<Double, Double, Long>>>()
+                    val sellMap = mutableMapOf<String, Double>()
+                    for (t in trades) {
+                        val a = t.attributes ?: continue
+                        val vol = num(a.volume_in_usd) ?: continue
+                        val px = num(a.price_in_usd) ?: num(a.price) ?: continue
+                        val ts = (num(a.block_timestamp) ?: 0.0).toLong() * 1000
+                        val wallet = a.tx_from_address ?: continue
+                        if ((a.type ?: "").equals("buy", true)) {
+                            if (bottomPrice <= 0 || px <= bottomPrice * 1.3) buyMap.getOrPut(wallet) { mutableListOf() }.add(Triple(vol, px, ts))
+                        } else sellMap[wallet] = (sellMap[wallet] ?: 0.0) + vol
                     }
 
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("1h" to "۱ ساعته", "4h" to "۴ ساعته", "6h" to "۶ ساعته", "12h" to "۱۲ ساعته", "24h" to "روزانه", "3d" to "۳ روزه", "1w" to "هفتگی").forEach { (k, label) ->
-                            FilterChip(selected = leaderTf == k, onClick = { leaderTf = k }, label = { Text("⏱ $label", fontSize = 10.sp) })
+                    val suspects = buyMap.map { (wallet, list) ->
+                        val bought = list.sumOf { it.first }
+                        val avg = list.map { it.second }.average()
+                        val first = list.minOf { it.third }
+                        val sold = sellMap[wallet] ?: 0.0
+                        SusWallet(wallet, bought, avg, if (first > 0) sdf.format(Date(first)) else "—", list.size, sold,
+                            when { sold >= bought * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
+                            if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
+                    }.sortedByDescending { it.boughtUsd }.take(10)
+
+                    HunterReport(pool.attributes?.name ?: sym, bottomPrice, peakPrice, currentPrice,
+                        if (pumpTs > 0) sdf.format(Date(pumpTs)) else "—", risePct, suspects)
+                }
+                report = rep
+                if (rep.wallets.isEmpty()) hunterError = "😴 کیف مشکوکی پیدا نشد"
+            } catch (t: Throwable) { hunterError = "⚠️ خطا: ${t.message}" }
+            hunterLoading = false
+        }
+    }
+
+    fun huntInsider() {
+        val sym = insiderSymbol.trim()
+        if (sym.isEmpty()) { insiderError = "❌ نماد ارز رو وارد کن"; return }
+        val cfg = chain
+        scope.launch {
+            insiderLoading = true; insiderError = null; iReport = null
+            try {
+                val rep = withContext(Dispatchers.IO) {
+                    val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
+                    val sameChain = pools.filter { it.relationships?.network?.data?.id == cfg.gt }
+                    val pool = (if (sameChain.isNotEmpty()) sameChain else pools)
+                        .maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
+                    val net = pool.relationships?.network?.data?.id ?: cfg.gt
+                    val poolAddr = pool.id?.substringAfter('_') ?: ""
+
+                    val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
+
+                    val events = mutableListOf<Pair<Long, Double>>()
+                    for (i in 1 until rows.size) {
+                        val prev = rows[i - 1][4]
+                        val cur = rows[i][4]
+                        if (prev > 0) {
+                            val rise = (cur - prev) / prev * 100
+                            if (rise >= 8.0) events.add((rows[i][0].toLong()) * 1000 to rise)
                         }
                     }
-                    Text("ضربه روی کارت = نمودار کامل در GeckoTerminal 📊 • $lastUpdate", fontSize = 9.sp, color = WGray)
-                }
-            }
 
-            if (loadingList && leaders.isEmpty()) {
-                item { Text("⏳ در حال دریافت...", fontSize = 11.sp, color = WGray) }
-            } else if (leaders.isEmpty()) {
-                item { Text("😴 فعلاً خرید نهنگی سنگینی در ۱۰۰۰ ارز برتر + DEX‌ها ثبت نشده", fontSize = 11.sp, color = WGray) }
-            } else {
-                itemsIndexed(leaders) { i, l -> LeaderCard(l, i, leaderTf, bFlows) }
-            }
+                    val trades = try { GeckoPrice.api.poolTrades(net, poolAddr).data ?: emptyList() } catch (_: Exception) { emptyList() }
+                    val currentPrice = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
+                    val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
 
-            // ================= ۳) شکار میم‌کوین‌های ترند DEX =================
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("🚀 شکار میم‌کوین‌های ترند DEX (تمام شبکه‌ها — بدون محدودیت رتبه)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("Solana • BSC • Base • Ethereum • TON + ${ALL_CHAINS.size - 5} شبکه دیگر", fontSize = 9.sp, color = WBlue)
-                    Text("فیلترهای امنیتی: نقدینگی ≥ ۵۰K • فشار خرید ≥ ۵۵٪ • سن ≥ ۱ ساعت • FDV سالم", fontSize = 9.sp, color = WGray)
-                }
-            }
+                    class Acc { var events = mutableSetOf<Long>(); var vol = 0.0; var leads = mutableListOf<Long>(); var entries = mutableListOf<Double>(); var last = 0L }
+                    val per = mutableMapOf<String, Acc>()
 
-            if (loadingList && memeTrends.isEmpty()) {
-                item { Text("⏳ در حال اسکن تمام شبکه‌ها...", fontSize = 11.sp, color = WGray) }
-            } else if (memeTrends.isEmpty()) {
-                item { Text("😴 فعلاً میم‌کوین ترند مورد تأییدی پیدا نشد — بعداً سر بزن", fontSize = 11.sp, color = WGray) }
-            } else {
-                itemsIndexed(memeTrends) { i, m ->
-                    val poolUrl = m.poolUrl
-                    Surface(
-                        color = if (i % 2 == 0) CardA else CardB,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(poolUrl))
-                            context.startActivity(intent)
-                        }
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(chainEmoji(m.chain), fontSize = 18.sp)
-                                Spacer(Modifier.width(6.dp))
-                                Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                                Text("(${m.chainName})", fontSize = 10.sp, color = WGray)
-                                Spacer(Modifier.weight(1f))
-                                Text("🔥 ترند #${i + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = WGold)
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("قیمت: ${String.format(Locale.US, "$%.8f", m.price)}", fontSize = 10.sp, color = WGray)
-                                Text("💧 ${compact(m.liquidity)}", fontSize = 10.sp, color = WBlue)
-                                Text(String.format(Locale.US, "%+.1f%%", m.changeH1), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (m.changeH1 >= 0) WGreen else WRed)
-                            }
-                            Text("🐳 حجم ۱س: ${compact(m.volH1)} • فشار خرید: ${String.format(Locale.US, "%.0f", ratio(m.buysH1, m.sellsH1) * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
-                            Text(verdictText(ratio(m.buysH1, m.sellsH1)), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = verdictColor(ratio(m.buysH1, m.sellsH1)))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("سن: ${ageText(m.ageHours)}", fontSize = 9.sp, color = WGray)
-                                Text("FDV: ${compact(m.fdv)}", fontSize = 9.sp, color = WGray)
-                                Text("امتیاز: ${m.credScore}/100", fontSize = 9.sp, color = WBlue)
-                            }
+                    for ((evTs, _) in events) {
+                        for (t in trades) {
+                            val a = t.attributes ?: continue
+                            if (!(a.type ?: "").equals("buy", true)) continue
+                            val ts = (num(a.block_timestamp) ?: 0.0).toLong() * 1000
+                            if (ts < evTs - 3 * 3600 * 1000 || ts >= evTs) continue
+                            val wallet = a.tx_from_address ?: continue
+                            val vol = num(a.volume_in_usd) ?: continue
+                            val px = num(a.price_in_usd) ?: num(a.price) ?: continue
+                            val acc = per.getOrPut(wallet) { Acc() }
+                            acc.events.add(evTs); acc.vol += vol; acc.leads.add(evTs - ts); acc.entries.add(px); acc.last = maxOf(acc.last, ts)
                         }
                     }
+
+                    val suspects = per.map { (wallet, acc) ->
+                        val avgLead = acc.leads.average().toLong() / 60000
+                        val avgEntry = acc.entries.average()
+                        val leadBonus = if (avgLead in 30..180) 20 else if (avgLead < 30) 10 else 5
+                        val score = (acc.events.size * 30 + minOf(30, (acc.vol / 1000).toInt()) + leadBonus).coerceIn(0, 100)
+                        InsiderSus(wallet, acc.events.size, acc.vol, avgLead, avgEntry,
+                            if (avgEntry > 0 && currentPrice > 0) currentPrice / avgEntry else 0.0, score,
+                            if (acc.last > 0) sdf.format(Date(acc.last)) else "—")
+                    }.sortedByDescending { it.score }.take(10)
+
+                    InsiderReport(pool.attributes?.name ?: sym, events.size, suspects)
                 }
-                item {
-                    Text("⚠️ میم‌کوین‌ها = ریسک بسیار بالا! فقط با پولی که توان از دست دادنش رو داری وارد شو.", fontSize = 10.sp, color = WGold)
+                iReport = rep
+                if (rep.suspects.isEmpty()) insiderError = "😴 هیچ کیفی قبل از جهش‌ها خرید سنگین نکرده"
+            } catch (t: Throwable) { insiderError = "⚠️ خطا: ${t.message}" }
+            insiderLoading = false
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
+
+        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CHAINS.forEach { c ->
+                FilterChip(selected = chain.key == c.key, onClick = { chain = c }, label = { Text(c.label, fontSize = 10.sp) })
+            }
+        }
+
+        // ================= موتور ۱ =================
+        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("🔍 موتور : بررسی کیف پول مشکوک", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue)
+                TextField(value = address, onValueChange = { address = it },
+                    placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                Button(onClick = { check() }, enabled = !loading,
+                    colors = ButtonDefaults.buttonColors(containerColor = VBlue),
+                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (loading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                    Text(" بررسی کیف پول", fontSize = 12.sp)
+                }
+                if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = VGreen)
+            }
+        }
+
+        if (error != null) Text(error ?: "", fontSize = 10.sp, color = VRed)
+
+        if (holdings.isNotEmpty()) {
+            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("💰 ارزش کل", fontSize = 10.sp, color = VGray)
+                    Text(String.format(Locale.US, "$%,.2f", total), fontSize = 20.sp, fontWeight = FontWeight.Black, color = VGreen)
                 }
             }
-
-            // ================= ۴) تازه‌واردها =================
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("🌱 تازه‌واردهای تأییدشده (فیلترهای سبک‌تر + پشتیبان پرحجم‌ها)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("اولویت با ارزهای دارای حداقل ۴ از ۷ بررسی اعتماد 🛡️ — وگرنه پرحجم‌ترین تازه‌واردها", fontSize = 9.sp, color = WGray)
-                }
-            }
-
-            if (loadingList && fresh.isEmpty()) {
-                item { Text("⏳ در حال دریافت...", fontSize = 11.sp, color = WGray) }
-            } else if (fresh.isEmpty()) {
-                item { Text("😴 فعلاً تازه‌وارد مورد تأییدی پیدا نشد — بعداً سر بزن", fontSize = 11.sp, color = WGray) }
-            } else {
-                itemsIndexed(fresh) { i, f -> FreshCard(f, i) }
-                item {
-                    Text("⚠️ امتیاز اعتماد فقط معیارهای آن‌چین رو می‌سنجه — میم‌کوین = ریسک بالا!", fontSize = 10.sp, color = WGold)
+            holdings.forEach { h ->
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
+                        }
+                        Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
+                    }
                 }
             }
         }
+
+        if (txs.isNotEmpty()) {
+            Text("📜 تاریخچه معاملات:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            txs.forEach { t ->
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${if (t.incoming) "خرید/ورود" else "فروش/خروج"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            if (t.priceUsd != null) Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
+                            Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * (t.priceUsd ?: 0.0))}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ================= موتور ۲ =================
+        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("🕵️ موتور ۲: کی کف خرید قبل از پامپ؟", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VPurple)
+                TextField(value = hunterSymbol, onValueChange = { hunterSymbol = it },
+                    placeholder = { Text("نماد ارز پامپ‌شده...", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                Button(onClick = { hunt() }, enabled = !hunterLoading,
+                    colors = ButtonDefaults.buttonColors(containerColor = VPurple),
+                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (hunterLoading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                    Text(" 🕵️ پیدا کن کیف‌های کف‌خر", fontSize = 12.sp)
+                }
+                if (hunterError != null) Text(hunterError ?: "", fontSize = 10.sp, color = VGold)
+            }
+        }
+
+        report?.let { r ->
+            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("🎯 ${r.poolName}", fontWeight = FontWeight.Black, fontSize = 14.sp, color = VBlue)
+                    Text("کف: ${String.format(Locale.US, "$%.8f", r.bottomPrice)} • اوج: ${String.format(Locale.US, "$%.8f", r.peakPrice)} • الان: ${String.format(Locale.US, "$%.8f", r.currentPrice)}", fontSize = 10.sp, color = VGray)
+                    Text("🚀 رشد از کف: ${String.format(Locale.US, "%.0f%%", r.risePct)} • شروع: ${r.pumpStartText}", fontSize = 10.sp, color = VGreen, fontWeight = FontWeight.Bold)
+                }
+            }
+            r.wallets.forEach { w ->
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🐋 ${shortAddr(w.addr)}", fontWeight = FontWeight.Black, fontSize = 13.sp, color = VGold)
+                            Spacer(Modifier.weight(1f))
+                            Text("${String.format(Locale.US, "%.1f", w.multiplier)}x", fontSize = 15.sp, fontWeight = FontWeight.Black, color = if (w.multiplier >= 2) VGreen else VGray)
+                        }
+                        Text("💵 خرید کف: ${String.format(Locale.US, "$%,.0f", w.boughtUsd)} • ورود: ${String.format(Locale.US, "$%.8f", w.avgEntry)}", fontSize = 10.sp, color = VGray)
+                        Text("🕐 اولین خرید: ${w.firstBuyText} • ${w.txCount} تراکنش", fontSize = 9.sp, color = VGray)
+                        Text(w.statusText, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            color = if (w.statusText.contains("هودل")) VGreen else if (w.statusText.contains("✅")) VGold else VRed)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(onClick = {
+                                try {
+                                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", w.addr))
+                                    info = "📋 آدرس کپی شد"
+                                } catch (_: Exception) { }
+                            }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("📋 کپی", fontSize = 9.sp) }
+                            Button(onClick = { address = w.addr; check() },
+                                colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
+                            Button(onClick = { saveStar(w.addr, r.poolName, (w.multiplier * 10).toInt(), "کف‌خر") },
+                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("⭐", fontSize = 9.sp) }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ================= موتور ۳ =================
+        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("📰 موتور ۳: شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
+                Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
+                TextField(value = insiderSymbol, onValueChange = { insiderSymbol = it },
+                    placeholder = { Text("نماد ارز خبرساز... (TRUMP, MAGA...)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                Button(onClick = { huntInsider() }, enabled = !insiderLoading,
+                    colors = ButtonDefaults.buttonColors(containerColor = VOrange),
+                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (insiderLoading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                    Text(" 📰 پیدا کن اینسایدرها رو", fontSize = 12.sp)
+                }
+                if (insiderError != null) Text(insiderError ?: "", fontSize = 10.sp, color = VGold)
+            }
+        }
+
+        iReport?.let { r ->
+            Text("⚡ ${r.eventsCount} جهش خبری پیدا شد — مظنون‌ها:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = VOrange)
+            r.suspects.forEach { w ->
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🕵️ ${shortAddr(w.addr)}", fontWeight = FontWeight.Black, fontSize = 13.sp, color = VOrange)
+                            Spacer(Modifier.weight(1f))
+                            Text("شک: ${w.score}/100", fontSize = 12.sp, fontWeight = FontWeight.Black, color = if (w.score >= 70) VRed else VGold)
+                        }
+                        Text("📰 قبل از ${w.eventsCount} جهش خبری خرید کرده!", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VRed)
+                        Text("💵 مجموع خرید قبل خبر: ${String.format(Locale.US, "$%,.0f", w.totalPreBuyUsd)} • میانگین فاصله: ${w.avgLeadMin} دقیقه قبل از جهش", fontSize = 9.sp, color = VGray)
+                        Text("ورود: ${String.format(Locale.US, "$%.8f", w.avgEntry)} • سود فعلی: ${String.format(Locale.US, "%.1f", w.multiplier)}x • آخرین: ${w.lastSeenText}", fontSize = 9.sp, color = VGray)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(onClick = {
+                                try {
+                                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", w.addr))
+                                    info = "📋 آدرس کپی شد"
+                                } catch (_: Exception) { }
+                            }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("📋 کپی", fontSize = 9.sp) }
+                            Button(onClick = { address = w.addr; check() },
+                                colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
+                            Button(onClick = { saveStar(w.addr, r.poolName, w.score, "اینسایدر خبری") },
+                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("⭐", fontSize = 9.sp) }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ================= ⭐ بهترین تریدرها =================
+        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("⭐ لیست بهترین تریدرها (${topTraders.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGold)
+                if (topTraders.isEmpty()) Text("هنوز کیفی ستاره نزده‌ای — از نتایج موتور ۲ و ۳ ⭐ بزن یا دستی اضافه کن", fontSize = 10.sp, color = VGray)
+                topTraders.forEach { t ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("⭐ ${shortAddr(t.addr)}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = VGold)
+                            Text("${t.symbol} • ${t.note} • امتیاز ${t.score}", fontSize = 9.sp, color = VGray)
+                        }
+                        Button(onClick = { address = t.addr; check() },
+                            colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍", fontSize = 9.sp) }
+                        Button(onClick = {
+                            topTraders.remove(t); topTraders = ArrayList(topTraders); saveTraders(context, topTraders)
+                        }, colors = ButtonDefaults.buttonColors(containerColor = VRed), shape = RoundedCornerShape(6.dp)) { Text("🗑", fontSize = 9.sp) }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextField(value = manualAddr, onValueChange = { manualAddr = it },
+                        placeholder = { Text("افزودن دستی آدرس تریدر...", fontSize = 10.sp) },
+                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
+                    Spacer(Modifier.width(6.dp))
+                    Button(onClick = {
+                        val a = manualAddr.trim()
+                        if (a.isNotEmpty()) { saveStar(a, "دستی", 0, "تریدر معروف"); manualAddr = "" }
+                    }, colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(8.dp)) { Text("➕", fontSize = 10.sp) }
+                }
+            }
+        }
+
+        Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = VGold)
     }
 }
