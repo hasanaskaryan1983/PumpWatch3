@@ -1,5 +1,6 @@
 package com.pumpwatch.app.data
 
+import com.google.gson.JsonElement
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -100,6 +101,9 @@ object Blockscout {
 interface SolanaRpcApi {
     @POST(".")
     suspend fun rpc(@Body body: Map<String, Any?>): SolanaRpcResponse
+
+    @POST(".")
+    suspend fun rpcRaw(@Body body: Map<String, Any?>): SolanaRawResponse
 }
 
 data class SolanaRpcResponse(val result: SolanaRpcResult?)
@@ -110,6 +114,8 @@ data class SolAccountData(val parsed: SolParsed?)
 data class SolParsed(val info: SolInfo?)
 data class SolInfo(val mint: String?, val tokenAmount: SolAmount?)
 data class SolAmount(val uiAmountString: String?)
+
+data class SolanaRawResponse(val result: JsonElement?)
 
 object SolanaRpc {
     val api: SolanaRpcApi by lazy {
