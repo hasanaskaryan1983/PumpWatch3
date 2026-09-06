@@ -57,6 +57,7 @@ private val TBlue = Color(0xFF40C4FF)
 private val TGold = Color(0xFFFFC107)
 private val TGray = Color(0xFF8B949E)
 private val TCard = Color(0xFF1A2230)
+private val TPurple = Color(0xFFCE93D8)
 
 private val GSON = Gson()
 
@@ -83,6 +84,12 @@ data class PaperState(
     var trades: MutableList<PaperTrade> = mutableListOf()
 )
 
+private data class ConsensusPick(
+    val symbol: String, val rank: Int?, val price: Double, val chain: String?,
+    val trend: Int, val whaleRatio: Double, val whaleVol: Double, val ch24: Double,
+    val total: Int, val isDex: Boolean, val atr: Double
+)
+
 private val TIERS = listOf(
     "1-10" to (1..10),
     "11-50" to (11..50),
@@ -94,6 +101,15 @@ private val TIERS = listOf(
 
 private const val START_CAPITAL = 1000.0
 private const val MAX_PER_TIER = 4
+
+private fun tierOfRank(rank: Int?): String = when (rank) {
+    null -> "DEX"
+    in 1..10 -> "1-10"
+    in 11..50 -> "11-50"
+    in 51..100 -> "51-100"
+    in 101..200 -> "101-200"
+    else -> "201-1000"
+}
 
 private fun loadState(ctx: Context): PaperState = try {
     val p = ctx.getSharedPreferences("pumpwatch_prefs", 0)
@@ -137,10 +153,10 @@ fun TradesScreen() {
     var botOn by remember { mutableStateOf(prefs.getBoolean("paper_bot", true)) }
     var status by remember { mutableStateOf("⏳ منتظر اولین اسکن...") }
     var confirmReset by remember { mutableStateOf(false) }
+    var consensus by remember { mutableStateOf<List<ConsensusPick>>(emptyList()) }
 
     var mSymbol by remember { mutableStateOf("") }
     var mPrice by remember { mutableStateOf<Double?>(null) }
-    var mSource by remember { mutableStateOf("") }
     var mAmount by remember { mutableStateOf("100") }
     var mStop by remember { mutableStateOf("10") }
     var mTarget by remember { mutableStateOf("20") }
@@ -201,33 +217,21 @@ fun TradesScreen() {
                 val res = withContext(Dispatchers.IO) {
                     val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
                     coins.firstOrNull { it.symbol.equals(q, true) }?.let {
-                        return@withContext Triple(it.current_price, "CEX رتبه #${it.market_cap_rank ?: "-"}", it.symbol.uppercase(Locale.US))
+                        return@withContext Triple(it.current_price, "CEX #${it.market_cap_rank ?: "-"}", it.symbol.uppercase(Locale.US))
                     }
                     try {
                         val kl = BinanceClient.api.klines("${q.uppercase(Locale.US)}USDT", "1h", 5)
-                        if (kl.isNotEmpty()) {
-                            return@withContext Triple(kl.last()[4].asDouble, "Binance", q.uppercase(Locale.US))
-                        }
+                        if (kl.isNotEmpty()) return@withContext Triple(kl.last()[4].asDouble, "Binance", q.uppercase(Locale.US))
                     } catch (_: Exception) { }
-                    val pool = try {
-                        GeckoTerminal.api.searchPools(q).data?.firstOrNull { it.attributes != null }
-                    } catch (_: Exception) { null }
-                    pool?.attributes?.priceUsd?.toDoubleOrNull()?.let {
-                        return@withContext Triple(it, "DEX", q.uppercase(Locale.US))
-                    }
+                    val pool = try { GeckoTerminal.api.searchPools(q).data?.firstOrNull { it.attributes != null } } catch (_: Exception) { null }
+                    pool?.attributes?.priceUsd?.toDoubleOrNull()?.let { return@withContext Triple(it, "DEX", q.uppercase(Locale.US)) }
                     null
                 }
                 if (res != null) {
-                    mPrice = res.first
-                    mSource = res.second
-                    mSymbol = res.third
+                    mPrice = res.first; mSymbol = res.third
                     mStatus = "✅ قیمت: ${usd(res.first)} (${res.second})"
-                } else {
-                    mStatus = "❌ ارز پیدا نشد"
-                }
-            } catch (t: Throwable) {
-                mStatus = "⚠️ خطا: ${t.message}"
-            }
+                } else mStatus = "❌ ارز پیدا نشد"
+            } catch (t: Throwable) { mStatus = "⚠️ خطا: ${t.message}" }
             mLoading = false
         }
     }
@@ -235,7 +239,7 @@ fun TradesScreen() {
     fun cycle() {
         scope.launch {
             try {
-                status = "🔄 اسکن بازار و مدیریت پوزیشن‌ها..."
+                status = "🔄 اسکن بازار + اجماع تمام تب‌ها..."
                 val eq = equity()
 
                 val coins = withContext(Dispatchers.IO) {
@@ -247,13 +251,19 @@ fun TradesScreen() {
                     }
                 }
                 val dexInfo = mutableMapOf<String, Pair<Double, Double>>()
+                val whaleMap = mutableMapOf<String, Triple<Double, Double, String>>()
                 dexPools.forEach { p ->
                     val a = p.attributes ?: return@forEach
                     val sym = a.name?.split("/")?.firstOrNull()?.trim() ?: return@forEach
                     val px = a.priceUsd?.toDoubleOrNull() ?: return@forEach
                     val b = a.transactions?.h1?.buys ?: 0.0
                     val s = a.transactions?.h1?.sells ?: 0.0
-                    dexInfo[sym] = px to (if (b + s > 0) b / (b + s) else 0.5)
+                    val v = a.volume?.h1 ?: 0.0
+                    val r = if (b + s > 0) b / (b + s) else 0.0
+                    val chain = p.relationships?.network?.data?.id ?: ""
+                    dexInfo[sym] = px to r
+                    val prev = whaleMap[sym]
+                    if (prev == null || v > prev.second) whaleMap[sym] = Triple(r, v, chain)
                 }
 
                 var closedNow = 0
@@ -265,6 +275,44 @@ fun TradesScreen() {
                     if (px != null && px > 0) if (updateTrail(t, px)) closedNow++
                 }
 
+                // ---------- ساخت لیست اجماع (ترکیب همه تب‌ها) ----------
+                val picks = mutableListOf<ConsensusPick>()
+                val seen = mutableSetOf<String>()
+
+                val cexCands = coins.filter { c ->
+                    val sym = c.symbol.uppercase(Locale.US)
+                    (c.price_change_percentage_24h ?: 0.0) >= 5.0 ||
+                            whaleMap.containsKey(sym) ||
+                            (c.total_volume ?: 0.0) > 300_000_000.0
+                }.take(25)
+
+                for (c in cexCands) {
+                    val sym = c.symbol.uppercase(Locale.US)
+                    if (seen.contains(sym)) continue
+                    seen.add(sym)
+                    val (trend, atr) = evalCoin(sym)
+                    val w = whaleMap[sym]
+                    val ch24 = c.price_change_percentage_24h ?: 0.0
+                    var total = trend
+                    if (w != null) total += when { w.first >= 0.7 -> 20; w.first >= 0.6 -> 15; w.first >= 0.55 -> 8; else -> 0 }
+                    total += when { ch24 >= 15 -> 15; ch24 >= 8 -> 10; ch24 >= 4 -> 5; else -> 0 }
+                    picks.add(ConsensusPick(sym, c.market_cap_rank, c.current_price, w?.third,
+                        trend, w?.first ?: 0.0, w?.second ?: 0.0, ch24, total.coerceIn(0, 100), false, atr))
+                }
+
+                for ((sym, w) in whaleMap) {
+                    if (seen.contains(sym)) continue
+                    if (coins.any { it.symbol.equals(sym, true) }) continue
+                    seen.add(sym)
+                    val px = dexInfo[sym]?.first ?: continue
+                    var total = 50
+                    total += when { w.first >= 0.7 -> 25; w.first >= 0.6 -> 18; else -> 8 }
+                    picks.add(ConsensusPick(sym, null, px, w.third, 50, w.first, w.second, 0.0, total.coerceIn(0, 100), true, 12.0))
+                }
+
+                consensus = picks.sortedByDescending { it.total }.take(10)
+
+                // ---------- معامله خودکار per tier ----------
                 var openedNow = 0
                 for ((tierName, range) in TIERS) {
                     val pct = alloc[tierName] ?: 0
@@ -291,8 +339,7 @@ fun TradesScreen() {
                             sym to px
                         }.sortedByDescending { dexInfo[it.first]?.second ?: 0.0 }.take(2)
                         for (cand in cands) {
-                            if (openTrades().count { it.tier == "DEX" } >= MAX_PER_TIER) break
-                            if (state.cash < 10) break
+                            if (openTrades().count { it.tier == "DEX" } >= MAX_PER_TIER || state.cash < 10) break
                             openTrade(cand.first, "DEX", cand.second, 75, 12.0, min(size, state.cash))
                             openedNow++
                         }
@@ -319,20 +366,38 @@ fun TradesScreen() {
                     }
                 }
 
+                // ---------- معامله خودکار از اجماع (ANSEM‌ها اینجا شکار می‌شن) ----------
+                var consensusOpened = 0
+                for (pk in consensus) {
+                    if (consensusOpened >= 2 || state.cash < 10) break
+                    if (pk.total < 80 || pk.trend < 50) continue
+                    if (openTrades().any { it.symbol == pk.symbol }) continue
+                    val tierName = tierOfRank(pk.rank)
+                    val pct = alloc[tierName] ?: 0
+                    if (pct <= 0) continue
+                    if (openTrades().count { it.tier == tierName } >= MAX_PER_TIER) continue
+                    val size = min(eq * pct / 100.0 / MAX_PER_TIER, state.cash)
+                    if (size < 10) continue
+                    openTrade(pk.symbol, tierName, pk.price, pk.total, pk.atr, size)
+                    openedNow++
+                    consensusOpened++
+                }
+
                 save()
                 val e = equity()
-                status = "✅ اسکن کامل | دارایی: ${usd(e)} | باز: ${openTrades().size} | بسته شد: $closedNow | باز شد: $openedNow"
+                status = "✅ اسکن کامل | دارایی: ${usd(e)} | باز: ${openTrades().size} | بسته: $closedNow | باز شد: $openedNow | اجماع ≥۸۰: ${consensus.count { it.total >= 80 }}"
             } catch (t: Throwable) {
                 status = "⚠️ خطا: ${t.message}"
             }
         }
     }
 
+    LaunchedEffect(Unit) { cycle() }
     LaunchedEffect(botOn) {
         if (botOn) {
             while (true) {
-                cycle()
                 delay(5 * 60 * 1000)
+                cycle()
             }
         }
     }
@@ -397,6 +462,7 @@ fun TradesScreen() {
                     if (!confirmReset) { confirmReset = true }
                     else {
                         state = PaperState()
+                        consensus = emptyList()
                         save()
                         confirmReset = false
                         status = "♻️ ریست شد — ۱۰۰$ تازه"
@@ -410,11 +476,46 @@ fun TradesScreen() {
         }
         if (confirmReset) Text("⚠️ دکمه ریست رو دوباره بزن تا همه چی صفر بشه", fontSize = 9.sp, color = TRed)
 
+        // ---------- اجماع تمام تب‌ها ----------
+        Text("🧠 اجماع همه تب‌ها (نهنگ🐳 + روند📈 + مومنتوم⚡ + ترند🐸) — بررسی کن و انتخاب کن:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TPurple)
+        if (consensus.isEmpty()) {
+            Text("⏳ در حال محاسبه اجماع...", fontSize = 11.sp, color = TGray)
+        }
+        consensus.forEach { pk ->
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(pk.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                        Text(if (pk.isDex) " (${pk.chain ?: "DEX"})" else " #${pk.rank}", fontSize = 10.sp, color = TGray)
+                        Spacer(Modifier.weight(1f))
+                        Text("${pk.total}/100", fontSize = 16.sp, fontWeight = FontWeight.Black,
+                            color = if (pk.total >= 80) TGreen else if (pk.total >= 65) TGold else TGray)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
+                        Text("🐳 نهنگ: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
+                        Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                    }
+                    if (pk.total >= 80) Text("🎯 سیگنال اجماع — تأیید چند منبع", fontSize = 9.sp, color = TGreen, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = {
+                            if (state.cash >= 10 && openTrades().none { it.symbol == pk.symbol }) {
+                                openTrade(pk.symbol, tierOfRank(pk.rank), pk.price, pk.total, pk.atr, min(50.0, state.cash))
+                                save()
+                                status = "✅ ${pk.symbol} با اجماع ${pk.total}/100 باز شد"
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = if (pk.total >= 80) TGreen else TCard),
+                        shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()
+                    ) { Text("🟢 معامله با این سیگنال (۵۰$)", fontSize = 10.sp) }
+                }
+            }
+        }
+
         // ---------- معامله دستی ----------
         Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("➕ معامله دستی (خودت انتخاب کن)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TGold)
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextField(
                         value = mSymbol, onValueChange = { mSymbol = it },
@@ -428,37 +529,30 @@ fun TradesScreen() {
                         Text("💲 قیمت", fontSize = 11.sp)
                     }
                 }
-
                 if (mStatus.isNotEmpty()) {
                     Text(mStatus, fontSize = 10.sp,
                         color = if (mStatus.contains("✅")) TGreen else if (mStatus.contains("❌") || mStatus.contains("⚠️")) TRed else TGray)
                 }
-
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text("مبلغ ($)", fontSize = 9.sp, color = TGray)
-                        TextField(value = mAmount, onValueChange = { mAmount = it }, singleLine = true,
-                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        TextField(value = mAmount, onValueChange = { mAmount = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
                     }
                     Column(Modifier.weight(1f)) {
                         Text("استاپ ٪", fontSize = 9.sp, color = TRed)
-                        TextField(value = mStop, onValueChange = { mStop = it }, singleLine = true,
-                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        TextField(value = mStop, onValueChange = { mStop = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
                     }
                     Column(Modifier.weight(1f)) {
                         Text("هدف ٪", fontSize = 9.sp, color = TGreen)
-                        TextField(value = mTarget, onValueChange = { mTarget = it }, singleLine = true,
-                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        TextField(value = mTarget, onValueChange = { mTarget = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
                     }
                 }
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("استاپ شناور (تریلینگ):", fontSize = 11.sp, color = TGray)
                     Spacer(Modifier.weight(1f))
                     Switch(checked = mTrailing, onCheckedChange = { mTrailing = it })
                     Text(if (mTrailing) "🔄 شناور" else "📌 ثابت", fontSize = 11.sp, color = if (mTrailing) TGreen else TGold)
                 }
-
                 Button(
                     onClick = {
                         val px = mPrice
@@ -502,14 +596,14 @@ fun TradesScreen() {
                         Text("≤${MAX_PER_TIER} پوزیشن", fontSize = 9.sp, color = TGray)
                     }
                 }
-                if (allocSum != 100) Text("💡 مجموع رو روی ۱۰٪ تنظیم کن (الان $allocSum٪)", fontSize = 9.sp, color = TGold)
+                if (allocSum != 100) Text("💡 مجموع رو روی ۱۰۰٪ تنظیم کن (الان $allocSum٪)", fontSize = 9.sp, color = TGold)
             }
         }
 
         // ---------- پوزیشن‌های باز ----------
         Text("📂 پوزیشن‌های باز (${openTrades().size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
         if (openTrades().isEmpty()) {
-            Text("هنوز پوزیشنی باز نشده — ربات دنبال سیگنال ≥۷۰ می‌گرده یا دستی باز کن 🤖", fontSize = 11.sp, color = TGray)
+            Text("هنوز پوزیشنی باز نشده 🤖", fontSize = 11.sp, color = TGray)
         }
         openTrades().forEach { t ->
             val pnl = if (t.entry > 0) (t.price - t.entry) / t.entry * 100 else 0.0
@@ -518,6 +612,7 @@ fun TradesScreen() {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${t.symbol} • ${t.tier}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Text(if (t.trailing != false) " 🔄" else " 📌", fontSize = 12.sp)
+                        Text(" (${t.score})", fontSize = 9.sp, color = TGray)
                         Spacer(Modifier.weight(1f))
                         Text(String.format(Locale.US, "%+.2f%%", pnl), fontWeight = FontWeight.Black, fontSize = 14.sp,
                             color = if (pnl >= 0) TGreen else TRed)
@@ -528,7 +623,6 @@ fun TradesScreen() {
                         Text("استاپ: ${usd(t.stop)}", fontSize = 9.sp, color = TRed)
                         Text("هدف: ${usd(t.target)}", fontSize = 9.sp, color = TGreen)
                     }
-                    Text("حجم: ${usd(t.qty * t.price)}", fontSize = 9.sp, color = TBlue)
                     Button(
                         onClick = { closeTrade(t, t.price); save(); status = "✋ ${t.symbol} دستی بسته شد" },
                         colors = ButtonDefaults.buttonColors(containerColor = TRed.copy(alpha = 0.25f)),
@@ -540,9 +634,7 @@ fun TradesScreen() {
 
         // ---------- تاریخچه ----------
         Text("📜 آخرین معامله‌های بسته:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        if (closed.isEmpty()) {
-            Text("هنوز معامله‌ای بسته نشده", fontSize = 11.sp, color = TGray)
-        }
+        if (closed.isEmpty()) Text("هنوز معامله‌ای بسته نشده", fontSize = 11.sp, color = TGray)
         closed.sortedByDescending { it.closeTime }.take(15).forEach { t ->
             Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("${if (t.pnl > 0) "✅" else "❌"} ${t.symbol} • ${t.tier}", fontSize = 11.sp)
