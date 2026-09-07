@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.Blockscout
 import com.pumpwatch.app.data.GeckoPrice
+import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.SolanaRpc
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -82,6 +83,7 @@ private fun kindOf(a: String): String = when {
 fun WalletHistorySection() {
     val scope = rememberCoroutineScope()
     var addrIn by remember { mutableStateOf("") }
+    var filterSym by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var list by remember { mutableStateOf<List<HistTx>>(emptyList()) }
@@ -98,6 +100,7 @@ fun WalletHistorySection() {
                     val res = mutableListOf<HistTx>()
                     val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US)
                     val mintByShort = mutableMapOf<String, String>()
+                    val fs = filterSym.trim()
 
                     when (kindOf(addr)) {
                         "ton" -> summary = "⚠️ تاریخچه TON به‌زودی اضافه می‌شه"
@@ -106,22 +109,34 @@ fun WalletHistorySection() {
                             for (h in EVM_HOSTS) {
                                 try {
                                     val txs = Blockscout.api(h.host).tokenTx("account", "tokentx", addr, "desc").result ?: continue
-                                    txs.take(8).forEach { t ->
+                                    txs.take(20).forEach { t ->
+                                        val sym = t.tokenSymbol ?: "?"
+                                        if (fs.isNotEmpty() && !sym.equals(fs, true)) return@forEach
                                         val ts = (t.timeStamp?.toLongOrNull() ?: return@forEach) * 1000
                                         val dec = t.tokenDecimal?.toDoubleOrNull() ?: 18.0
                                         val amt = (t.value?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                                         val inc = (t.to ?: "").equals(addr, true)
-                                        res.add(HistTx(ts, sdf.format(Date(ts)), h.label, t.tokenSymbol ?: "?", amt, inc, if (inc) t.from ?: "" else t.to ?: ""))
+                                        res.add(HistTx(ts, sdf.format(Date(ts)), h.label, sym, amt, inc, if (inc) t.from ?: "" else t.to ?: ""))
                                     }
                                 } catch (_: Exception) { }
                             }
-                            if (res.isEmpty()) summary = "😴 هیچ تراکنش توکنی روی ۷ شبکه EVM پیدا نشد"
                         }
                         else -> {
+                            var filterMint: String? = null
+                            if (fs.isNotEmpty()) {
+                                try {
+                                    val fp = GeckoTerminal.api.searchPools(fs).data
+                                        ?.filter { it.attributes != null && it.relationships?.network?.data?.id == "solana" }
+                                        ?.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 }
+                                    filterMint = fp?.relationships?.base_token?.data?.id?.substringAfter('_')
+                                } catch (_: Exception) { }
+                                if (filterMint == null) { summary = "❌ استخر Solana برای «$fs» پیدا نشد"; return@withContext res }
+                            }
+
                             val sigs = SolanaRpc.api.rpcRaw(mapOf(
                                 "jsonrpc" to "2.0", "id" to 1,
                                 "method" to "getSignaturesForAddress",
-                                "params" to listOf(addr, mapOf("limit" to 10))
+                                "params" to listOf(addr, mapOf("limit" to if (filterMint != null) 50 else 25))
                             ))
                             val sigArr = sigs.result?.asJsonArray
                             if (sigArr == null || sigArr.size() == 0) summary = "😴 این کیف هیچ تراکنشی نداره"
@@ -138,54 +153,75 @@ fun WalletHistorySection() {
                                     val r = txr.result?.asJsonObject ?: continue
                                     val meta = r.getAsJsonObject("meta") ?: continue
 
-                                    val preMap = mutableMapOf<String, Double>()
-                                    val postMap = mutableMapOf<String, Double>()
+                                    val preMap = mutableMapOf<String, MutableMap<String, Double>>()
+                                    val postMap = mutableMapOf<String, MutableMap<String, Double>>()
                                     val pre = meta.getAsJsonArray("preTokenBalances")
                                     val post = meta.getAsJsonArray("postTokenBalances")
                                     if (pre != null) for (p in pre) {
                                         val o = p.asJsonObject
-                                        if (o.get("owner")?.asString == addr) {
-                                            val m = o.get("mint")?.asString ?: continue
-                                            preMap[m] = o.getAsJsonObject("uiTokenAmount")?.get("uiAmountString")?.asString?.toDoubleOrNull() ?: 0.0
-                                        }
+                                        val ow = o.get("owner")?.asString ?: continue
+                                        val m = o.get("mint")?.asString ?: continue
+                                        preMap.getOrPut(ow) { mutableMapOf() }[m] = o.getAsJsonObject("uiTokenAmount")?.get("uiAmountString")?.asString?.toDoubleOrNull() ?: 0.0
                                     }
                                     if (post != null) for (p in post) {
                                         val o = p.asJsonObject
-                                        if (o.get("owner")?.asString == addr) {
-                                            val m = o.get("mint")?.asString ?: continue
-                                            postMap[m] = o.getAsJsonObject("uiTokenAmount")?.get("uiAmountString")?.asString?.toDoubleOrNull() ?: 0.0
-                                        }
+                                        val ow = o.get("owner")?.asString ?: continue
+                                        val m = o.get("mint")?.asString ?: continue
+                                        postMap.getOrPut(ow) { mutableMapOf() }[m] = o.getAsJsonObject("uiTokenAmount")?.get("uiAmountString")?.asString?.toDoubleOrNull() ?: 0.0
                                     }
-                                    for (m in (preMap.keys + postMap.keys).distinct()) {
-                                        val d = (postMap[m] ?: 0.0) - (preMap[m] ?: 0.0)
-                                        if (abs(d) > 1e-9) {
-                                            val short = m.take(8)
-                                            mintByShort[short] = m
-                                            res.add(HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana 🟣", short, d, d > 0, ""))
+
+                                    val deltas = mutableListOf<Triple<String, String, Double>>()
+                                    for (ow in (preMap.keys + postMap.keys).distinct()) {
+                                        for (m in ((preMap[ow]?.keys ?: emptySet()) + (postMap[ow]?.keys ?: emptySet())).distinct()) {
+                                            val d = (postMap[ow]?.get(m) ?: 0.0) - (preMap[ow]?.get(m) ?: 0.0)
+                                            if (abs(d) > 1e-9) deltas.add(Triple(ow, m, d))
                                         }
                                     }
 
-                                    val keys = r.getAsJsonObject("transaction")?.getAsJsonObject("message")?.getAsJsonArray("accountKeys")
-                                    var idx = -1
-                                    if (keys != null) for ((i, k) in keys.withIndex()) {
-                                        val pk = if (k.isJsonObject) k.asJsonObject.get("pubkey")?.asString else k.asString
-                                        if (pk == addr) { idx = i; break }
+                                    for (d in deltas) {
+                                        if (d.first != addr) continue
+                                        if (filterMint != null && d.second != filterMint) continue
+                                        val cp = deltas.filter { it.second == d.second && it.first != addr && it.third * d.third < 0 }
+                                            .maxByOrNull { abs(it.third) }
+                                        val short = d.second.take(8)
+                                        if (filterMint == null) mintByShort[short] = d.second
+                                        res.add(HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana 🟣",
+                                            if (filterMint != null) fs.uppercase(Locale.US) else short,
+                                            d.third, d.third > 0, cp?.first ?: ""))
                                     }
-                                    if (idx >= 0) {
+
+                                    if (filterMint == null) {
+                                        val keysArr = r.getAsJsonObject("transaction")?.getAsJsonObject("message")?.getAsJsonArray("accountKeys")
                                         val preB = meta.getAsJsonArray("preBalances")
                                         val postB = meta.getAsJsonArray("postBalances")
-                                        if (preB != null && postB != null && idx < preB.size() && idx < postB.size()) {
-                                            val d = (postB.get(idx).asLong - preB.get(idx).asLong) / 1e9
-                                            if (abs(d) > 1e-9) res.add(HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana 🟣", "SOL", d, d > 0, ""))
+                                        if (keysArr != null && preB != null && postB != null) {
+                                            val sols = mutableListOf<Triple<String, Int, Double>>()
+                                            for ((i, k) in keysArr.withIndex()) {
+                                                if (i >= preB.size() || i >= postB.size()) break
+                                                val pk = if (k.isJsonObject) k.asJsonObject.get("pubkey")?.asString else k.asString
+                                                sols.add(Triple(pk ?: "", i, (postB.get(i).asLong - preB.get(i).asLong) / 1e9))
+                                            }
+                                            val mine = sols.firstOrNull { it.first == addr }
+                                            if (mine != null && abs(mine.third) > 1e-9) {
+                                                val cp = sols.filter { it.first != addr && it.third * mine.third < 0 }.maxByOrNull { abs(it.third) }
+                                                res.add(HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana 🟣", "SOL", mine.third, mine.third > 0, cp?.first ?: ""))
+                                            }
                                         }
                                     }
                                 } catch (_: Exception) { }
                             }
 
-                            for ((short, mint) in mintByShort.entries.take(4)) {
+                            for ((short, mint) in mintByShort.entries.take(6)) {
                                 try {
-                                    val s2 = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes?.symbol
-                                    if (!s2.isNullOrEmpty()) res.forEach { if (it.chain == "Solana 🟣" && it.symbol == short) it.symbol = s2 }
+                                    val at = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
+                                    val s2 = at?.symbol
+                                    val px = at?.price_usd?.toDoubleOrNull() ?: 0.0
+                                    res.forEach {
+                                        if (it.chain == "Solana 🟣" && it.symbol == short) {
+                                            if (!s2.isNullOrEmpty()) it.symbol = s2
+                                            if (it.priceUsd == null && px > 0) it.priceUsd = px
+                                        }
+                                    }
                                 } catch (_: Exception) { }
                             }
                         }
@@ -194,7 +230,7 @@ fun WalletHistorySection() {
                     try {
                         val coins = ApiClient.getTop1000Coins()
                         val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                        for (sym in res.map { it.symbol }.distinct().take(3)) {
+                        for (sym in res.map { it.symbol }.distinct().take(6)) {
                             val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
                             try {
                                 val chart = ApiClient.getCoinChart(coin.id, days = 365)
@@ -204,10 +240,14 @@ fun WalletHistorySection() {
                                 }
                             } catch (_: Exception) { }
                         }
+                        val solPx = coins.firstOrNull { it.symbol.equals("SOL", true) }?.current_price ?: 0.0
+                        if (solPx > 0) res.forEach { if (it.symbol == "SOL" && it.priceUsd == null) it.priceUsd = solPx }
                     } catch (_: Exception) { }
 
-                    if (res.isNotEmpty()) summary = "✅ ${res.size} تراکنش پیدا شد"
-                    res.sortedByDescending { it.ts }.take(25)
+                    val totalRead = res.size
+                    val filtered = res.filter { abs(it.amount) * (it.priceUsd ?: 0.0) >= 10.0 }
+                    summary = "✅ ${filtered.size} تراکنش بالای ۱۰$ (از $totalRead تراکنش خونده‌شده)"
+                    filtered.sortedByDescending { it.ts }.take(30)
                 }
                 list = out
             } catch (t: Throwable) {
@@ -221,9 +261,12 @@ fun WalletHistorySection() {
         Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("📜 موتور ۵: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
-                Text("Solana + هفت شبکه EVM — حتی کیف‌های تخلیه‌شده! (تغییر موجودی هر تراکنش)", fontSize = 9.sp, color = XGray)
+                Text("فقط تراکنش‌های بالای ۱۰ دلار • ۲۵ تراکنش آخر (۵۰ تا با فیلتر توکن) • طرف مقابل هر تراکنش", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
                     placeholder = { Text("آدرس کیف... (Solana یا 0x)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                TextField(value = filterSym, onValueChange = { filterSym = it },
+                    placeholder = { Text("فیلتر توکن (اختیاری)... مثلاً USELESS", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
                 Button(onClick = { load() }, enabled = !loading,
                     colors = ButtonDefaults.buttonColors(containerColor = XBlue),
@@ -244,7 +287,7 @@ fun WalletHistorySection() {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("${if (t.incoming) "دریافت" else "ارسال"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         Text("${t.dateText} • ${t.chain}", fontSize = 9.sp, color = XGray)
-                        if (t.other.isNotEmpty()) Text("طرف: ${if (t.other.length > 12) t.other.take(6) + "..." + t.other.takeLast(4) else t.other}", fontSize = 8.sp, color = XGray)
+                        if (t.other.isNotEmpty()) Text("طرف مقابل: ${if (t.other.length > 12) t.other.take(6) + "..." + t.other.takeLast(4) else t.other}", fontSize = 8.sp, color = XGold)
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(String.format(Locale.US, "%s%.4f", if (t.incoming) "+" else "-", t.amount), fontSize = 12.sp, fontWeight = FontWeight.Black,
