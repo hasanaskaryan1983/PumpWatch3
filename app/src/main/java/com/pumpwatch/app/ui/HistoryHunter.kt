@@ -79,9 +79,10 @@ fun HistoryHunterSection() {
             try {
                 val r = withContext(Dispatchers.IO) {
                     val pools = GeckoTerminal.api.searchPools(s).data?.filter { it.attributes != null } ?: emptyList()
-                    val pool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
-                    val net = pool.relationships?.network?.data?.id ?: ""
-                    if (net != "solana") throw Exception("حالت تاریخی فعلاً فقط Solana 🟣")
+                    val solPools = pools.filter { it.relationships?.network?.data?.id == "solana" }
+                    val pool = solPools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 }
+                        ?: throw Exception("استخر Solana برای این ارز پیدا نشد — حالت تاریخی فقط Solana 🟣")
+                    val net = "solana"
                     val mint = pool.relationships?.base_token?.data?.id?.substringAfter('_') ?: throw Exception("آدرس توکن پیدا نشد")
                     val current = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
                     val poolAddr = pool.id?.substringAfter('_') ?: ""
