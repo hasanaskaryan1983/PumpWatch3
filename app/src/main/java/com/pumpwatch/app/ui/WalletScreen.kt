@@ -25,6 +25,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,8 +38,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.Blockscout
 import com.pumpwatch.app.data.GeckoOhlcv
@@ -56,7 +55,6 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.pow
 
-private val WGSON = Gson()
 private val VGreen = Color(0xFF00E676)
 private val VRed = Color(0xFFFF5252)
 private val VBlue = Color(0xFF40C4FF)
@@ -107,7 +105,6 @@ private data class InsiderSus(
     val score: Int, val lastSeenText: String
 )
 private data class InsiderReport(val poolName: String, val chainName: String, val eventsCount: Int, val suspects: List<InsiderSus>)
-private data class SavedTrader(val addr: String, val symbol: String, val score: Int, val note: String)
 
 private fun num(v: Any?): Double? = when (v) {
     is Number -> v.toDouble()
@@ -124,22 +121,19 @@ private fun detectKind(a: String): String = when {
     else -> "solana"
 }
 
-private fun loadTraders(ctx: Context): MutableList<SavedTrader> = try {
-    val json = ctx.getSharedPreferences("pumpwatch_prefs", 0).getString("top_traders", "") ?: ""
-    if (json.isEmpty()) mutableListOf()
-    else WGSON.fromJson(json, object : TypeToken<MutableList<SavedTrader>>() {}.type) ?: mutableListOf()
-} catch (_: Exception) { mutableListOf() }
-
-private fun saveTraders(ctx: Context, list: List<SavedTrader>) {
-    ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
-        .putString("top_traders", WGSON.toJson(list)).apply()
-}
-
 @Composable
 fun WalletScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sdfBuy = SimpleDateFormat("yyyy/MM/dd", Locale.US)
+
+    var subTab by remember { mutableStateOf(0) }
+    var infoText by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        FavStore.load(context)
+        scope.launch { scanStarred(context) }
+    }
 
     var chain by remember { mutableStateOf(CHAINS[0]) }
 
@@ -164,15 +158,10 @@ fun WalletScreen() {
     var insiderError by remember { mutableStateOf<String?>(null) }
     var iReport by remember { mutableStateOf<InsiderReport?>(null) }
 
-    var topTraders by remember { mutableStateOf(loadTraders(context)) }
-    var manualAddr by remember { mutableStateOf("") }
-
     fun saveStar(addr: String, symbol: String, score: Int, note: String) {
-        if (topTraders.any { it.addr == addr }) { info = "⭐ قبلاً ذخیره شده"; return }
-        topTraders.add(SavedTrader(addr, symbol, score, note))
-        topTraders = ArrayList(topTraders)
-        saveTraders(context, topTraders)
-        info = "⭐ به لیست بهترین تریدرها اضافه شد"
+        FavStore.load(context)
+        FavStore.addFav(context, addr, "$symbol • $note")
+        info = "❤️ به کیف‌های مورد پسند اضافه شد (تب ❤️)"
     }
 
     fun check() {
@@ -487,12 +476,33 @@ fun WalletScreen() {
         }
     }
 
-    Column(
+    // ================= هدر + ۴ تب =================
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
+        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("⚙️ موتورها", fontSize = 11.sp) })
+            FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
+            FilterChip(selected = subTab == 2, onClick = { subTab = 2 }, label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
+            FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
+        }
+        if (infoText.isNotEmpty()) {
+            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(infoText, fontSize = 10.sp, color = VGreen, modifier = Modifier.weight(1f))
+                    Button(onClick = { infoText = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("✖", fontSize = 10.sp) }
+                }
+            }
+        }
+    }
+
+    if (subTab == 1) FavoritesPage()
+    if (subTab == 2) AlertsPage()
+    if (subTab == 3) TrashPage()
+
+    if (subTab == 0) Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
-
         Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CHAINS.forEach { c ->
                 FilterChip(selected = chain.key == c.key, onClick = { chain = c }, label = { Text(c.label, fontSize = 10.sp) })
@@ -502,7 +512,10 @@ fun WalletScreen() {
         // ================= موتور ۱ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                    Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین خرید. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
+                }
                 TextField(value = address, onValueChange = { address = it },
                     placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -582,7 +595,10 @@ fun WalletScreen() {
         // ================= موتور ۲ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("🕵️ موتور ۲: کی کف خرید قبل از پامپ؟ (شبکه خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VPurple)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🕵️ موتور ۲: کی کف خرید قبل از پامپ؟ (شبکه خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VPurple, modifier = Modifier.weight(1f))
+                    Button(onClick = { infoText = "موتور ۲: نماد ارز + بازه تاریخ (پیش‌فرض ۷ روز) → کیف‌هایی که حوالی کف خرید سنگین کردن + سود/هودل. سوال: کی قبل از پامپ می‌دونست؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
+                }
                 TextField(value = hunterSymbol, onValueChange = { hunterSymbol = it },
                     placeholder = { Text("نماد ارز پامپ‌شده...", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -636,7 +652,7 @@ fun WalletScreen() {
                             Button(onClick = { address = w.addr; check() },
                                 colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
                             Button(onClick = { saveStar(w.addr, r.poolName, (w.multiplier * 10).toInt(), "کف‌خر") },
-                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("⭐", fontSize = 9.sp) }
+                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("❤️", fontSize = 9.sp) }
                         }
                     }
                 }
@@ -646,7 +662,10 @@ fun WalletScreen() {
         // ================= موتور ۳ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange, modifier = Modifier.weight(1f))
+                    Button(onClick = { infoText = "موتور ۳: نماد ارز خبری → جهش‌های ≥۸٪ = لحظه خبر؛ کیف‌هایی که ۳۰دقیقه-۳ساعت قبلش خریدن = اینسایدر با امتیاز شک. سوال: کی با خبر معامله می‌کنه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
+                }
                 Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
                 TextField(value = insiderSymbol, onValueChange = { insiderSymbol = it },
                     placeholder = { Text("نماد ارز خبرساز... (TRUMP, MAGA...)", fontSize = 11.sp) },
@@ -684,7 +703,7 @@ fun WalletScreen() {
                             Button(onClick = { address = w.addr; check() },
                                 colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
                             Button(onClick = { saveStar(w.addr, r.poolName, w.score, "اینسایدر خبری") },
-                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("⭐", fontSize = 9.sp) }
+                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("❤️", fontSize = 9.sp) }
                         }
                     }
                 }
@@ -696,37 +715,6 @@ fun WalletScreen() {
 
         // ================= موتور ۵: تاریخچه کیف =================
         WalletHistorySection()
-
-        // ================= ⭐ بهترین تریدرها =================
-        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("⭐ لیست بهترین تریدرها (${topTraders.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGold)
-                if (topTraders.isEmpty()) Text("هنوز کیفی ستاره نزده‌ای — از نتایج موتور ۲ و ۳ ⭐ بزن یا دستی اضافه کن", fontSize = 10.sp, color = VGray)
-                topTraders.forEach { t ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("⭐ ${shortAddr(t.addr)}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = VGold)
-                            Text("${t.symbol} • ${t.note} • امتیاز ${t.score}", fontSize = 9.sp, color = VGray)
-                        }
-                        Button(onClick = { address = t.addr; check() },
-                            colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍", fontSize = 9.sp) }
-                        Button(onClick = {
-                            topTraders.remove(t); topTraders = ArrayList(topTraders); saveTraders(context, topTraders)
-                        }, colors = ButtonDefaults.buttonColors(containerColor = VRed), shape = RoundedCornerShape(6.dp)) { Text("🗑", fontSize = 9.sp) }
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextField(value = manualAddr, onValueChange = { manualAddr = it },
-                        placeholder = { Text("افزودن دستی آدرس تریدر...", fontSize = 10.sp) },
-                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
-                    Spacer(Modifier.width(6.dp))
-                    Button(onClick = {
-                        val a = manualAddr.trim()
-                        if (a.isNotEmpty()) { saveStar(a, "دستی", 0, "تریدر معروف"); manualAddr = "" }
-                    }, colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(8.dp)) { Text("➕", fontSize = 10.sp) }
-                }
-            }
-        }
 
         Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = VGold)
     }
