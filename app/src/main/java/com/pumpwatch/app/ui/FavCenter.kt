@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -221,7 +223,7 @@ fun FavoritesPage() {
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("❤️ کیف پول‌های مورد پسند", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FRed)
-        Text("⭐ زرد = بررسی خودکار هر ۶ ساعت + هشدار در ⚡️ • 🗑 = انتقال به سطل ♻️", fontSize = 9.sp, color = FGray)
+        Text("⭐ زرد = بررسی خودکار هر ۶ ساعت + هشدار در ⚡️ •  = انتقال به سطل ♻️", fontSize = 9.sp, color = FGray)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             TextField(value = newAddr, onValueChange = { newAddr = it },
                 placeholder = { Text("آدرس کیف مهم...", fontSize = 11.sp) },
