@@ -108,7 +108,7 @@ interface SolanaRpcApi {
 
 data class SolanaRpcResponse(val result: SolanaRpcResult?)
 data class SolanaRpcResult(val value: List<SolTokenAccount>?)
-data class SolTokenAccount(val account: SolAccount?)
+data class SolTokenAccount(val pubkey: String?, val account: SolAccount?)
 data class SolAccount(val data: SolAccountData?)
 data class SolAccountData(val parsed: SolParsed?)
 data class SolParsed(val info: SolInfo?)
