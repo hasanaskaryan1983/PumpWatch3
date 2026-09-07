@@ -97,7 +97,7 @@ object Blockscout {
     }
 }
 
-// ---------- Solana RPC عمومی ----------
+// ---------- Solana RPC عمومی (دو سرور + فال‌بک خودکار) ----------
 interface SolanaRpcApi {
     @POST(".")
     suspend fun rpc(@Body body: Map<String, @JvmSuppressWildcards Any?>): SolanaRpcResponse
@@ -115,7 +115,8 @@ data class SolParsed(val info: SolInfo?)
 data class SolInfo(val mint: String?, val tokenAmount: SolAmount?)
 data class SolAmount(val uiAmountString: String?)
 
-data class SolanaRawResponse(val result: JsonElement?)
+data class SolanaRawResponse(val result: JsonElement?, val error: SolRpcError? = null)
+data class SolRpcError(val code: Int?, val message: String?)
 
 object SolanaRpc {
     val api: SolanaRpcApi by lazy {
@@ -124,4 +125,27 @@ object SolanaRpc {
             .addConverterFactory(GsonConverterFactory.create())
             .build().create(SolanaRpcApi::class.java)
     }
+}
+
+object SolanaRpc2 {
+    val api: SolanaRpcApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://solana-rpc.publicnode.com/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build().create(SolanaRpcApi::class.java)
+    }
+}
+
+suspend fun solanaRaw(body: Map<String, @JvmSuppressWildcards Any?>): SolanaRawResponse? {
+    val r1 = try { SolanaRpc.api.rpcRaw(body) } catch (_: Exception) { null }
+    if (r1 != null && r1.result != null) return r1
+    val r2 = try { SolanaRpc2.api.rpcRaw(body) } catch (_: Exception) { null }
+    if (r2 != null && r2.result != null) return r2
+    return r2 ?: r1
+}
+
+suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>): SolanaRpcResponse? {
+    val r1 = try { SolanaRpc.api.rpc(body) } catch (_: Exception) { null }
+    if (r1 != null && r1.result != null) return r1
+    return try { SolanaRpc2.api.rpc(body) } catch (_: Exception) { null }
 }
