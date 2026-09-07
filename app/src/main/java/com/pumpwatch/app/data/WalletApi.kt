@@ -136,10 +136,12 @@ object SolanaRpc2 {
     }
 }
 
-suspend fun solanaRaw(body: Map<String, @JvmSuppressWildcards Any?>): SolanaRawResponse? {
-    val r1 = try { SolanaRpc.api.rpcRaw(body) } catch (_: Exception) { null }
+suspend fun solanaRaw(body: Map<String, @JvmSuppressWildcards Any?>, preferAlt: Boolean = false): SolanaRawResponse? {
+    val first = if (preferAlt) SolanaRpc2.api else SolanaRpc.api
+    val second = if (preferAlt) SolanaRpc.api else SolanaRpc2.api
+    val r1 = try { first.rpcRaw(body) } catch (_: Exception) { null }
     if (r1 != null && r1.result != null) return r1
-    val r2 = try { SolanaRpc2.api.rpcRaw(body) } catch (_: Exception) { null }
+    val r2 = try { second.rpcRaw(body) } catch (_: Exception) { null }
     if (r2 != null && r2.result != null) return r2
     return r2 ?: r1
 }
