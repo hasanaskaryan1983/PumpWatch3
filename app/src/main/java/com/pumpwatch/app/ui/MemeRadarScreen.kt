@@ -1,5 +1,8 @@
 package com.pumpwatch.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
@@ -15,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -57,7 +62,7 @@ private val MEME_CHAINS = listOf(
     "solana" to "Solana 🟣",
     "bsc" to "BSC 🟡",
     "base" to "Base 🔵",
-    "ethereum" to "Ethereum ⚪",
+    "eth" to "Ethereum ⚪",
     "ton" to "TON 🔵"
 )
 
@@ -77,7 +82,8 @@ private data class MemePick(
     val fdv: Double,
     val ageHours: Double,
     val credScore: Int,
-    val poolUrl: String
+    val poolUrl: String,
+    val contract: String? = null
 )
 
 private fun compact(v: Double): String = when {
@@ -119,6 +125,31 @@ private fun memeVerdict(ch1: Double, r1: Double): Pair<String, Color> = when {
     else -> "😴 فعلاً حرکت خاصی نداره" to MGray
 }
 
+@Composable
+private fun ContractRow(ctx: Context, contract: String?) {
+    if (contract.isNullOrEmpty()) return
+    val copied = remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Text("📋 کانترکت: ", fontSize = 9.sp, color = MGray)
+        Text(
+            if (contract.length > 22) "${contract.take(10)}...${contract.takeLast(8)}" else contract,
+            fontSize = 9.sp, color = MBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+        )
+        Button(
+            onClick = {
+                try {
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("contract", contract))
+                    copied.value = true
+                } catch (_: Exception) { }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) MGreen else MGold),
+            shape = RoundedCornerShape(6.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
+    }
+}
+
 private fun toMemePick(p: GeckoPool): MemePick? {
     val a = p.attributes ?: return null
     val price = a.priceUsd?.toDoubleOrNull() ?: return null
@@ -146,13 +177,15 @@ private fun toMemePick(p: GeckoPool): MemePick? {
     val network = p.relationships?.network?.data?.id ?: "solana"
     val addr = p.id?.substringAfter('_') ?: ""
     val chainName = MEME_CHAINS.firstOrNull { it.first == network }?.second ?: network
+    val contract = p.relationships?.base_token?.data?.id?.substringAfter('_')
 
     return MemePick(
         symbol = symbol, name = name, chain = network, chainName = chainName,
         price = price, changeH1 = ch1, changeH24 = ch24,
         volH1 = v1, volH24 = v24, buysH1 = b1, sellsH1 = s1,
         liquidity = liq, fdv = fdv, ageHours = age, credScore = score,
-        poolUrl = "https://www.geckoterminal.com/$network/pools/$addr"
+        poolUrl = "https://www.geckoterminal.com/$network/pools/$addr",
+        contract = contract
     )
 }
 
@@ -284,6 +317,8 @@ fun MemeRadarScreen() {
                                 "تغییر ۲۴س: ${String.format(Locale.US, "%+.1f%%", m.changeH24)} • حجم ۲۴س: ${compact(m.volH24)}",
                                 fontSize = 9.sp, color = MGray
                             )
+
+                            ContractRow(context, m.contract)
                         }
                     }
                 }
