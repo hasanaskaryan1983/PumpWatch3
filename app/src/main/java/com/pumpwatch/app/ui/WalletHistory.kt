@@ -92,14 +92,14 @@ fun WalletHistorySection() {
     val scope = rememberCoroutineScope()
     var addrIn by remember { mutableStateOf("") }
     var filterSym by remember { mutableStateOf("") }
-    var depth by remember { mutableStateOf(75) }
+    var depth by remember { mutableStateOf(150) }
     var loading by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var list by remember { mutableStateOf<List<HistTx>>(emptyList()) }
     var summary by remember { mutableStateOf("") }
 
     fun load() {
-        val addr = addrIn.trim()
+        val addr = addrIn.trim().replace(Regex("[^A-Za-z0-9]"), "")
         if (addr.isEmpty()) { err = "❌ آدرس رو وارد کن"; return }
         scope.launch {
             loading = true; err = null; list = emptyList()
@@ -132,7 +132,7 @@ fun WalletHistorySection() {
                         }
                         else -> {
                             if (addr.length !in 32..44) {
-                                summary = "❌ طول آدرس سولانا باید ۳۲ تا ۴۴ کاراکتر باشه — دوباره کامل کپی کن"
+                                summary = "❌ طول آدرس سولانا باید ۳۲ تا ۴ کاراکتر باشه — دوباره کامل کپی کن"
                                 return@withContext res
                             }
                             var filterMint: String? = null
@@ -287,7 +287,7 @@ fun WalletHistorySection() {
                     placeholder = { Text("فیلتر توکن (اختیاری)... مثلاً USELESS", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
                 Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(25, 75, 150).forEach { d ->
+                    listOf(25, 75, 150, 500).forEach { d ->
                         FilterChip(selected = depth == d, onClick = { depth = d }, label = { Text("عمق: $d تراکنش", fontSize = 10.sp) })
                     }
                 }
