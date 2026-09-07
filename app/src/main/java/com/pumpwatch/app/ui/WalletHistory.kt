@@ -1,5 +1,9 @@
 package com.pumpwatch.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +18,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -25,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,9 +87,11 @@ private fun kindOf(a: String): String = when {
 
 @Composable
 fun WalletHistorySection() {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var addrIn by remember { mutableStateOf("") }
     var filterSym by remember { mutableStateOf("") }
+    var depth by remember { mutableStateOf(75) }
     var loading by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var list by remember { mutableStateOf<List<HistTx>>(emptyList()) }
@@ -94,7 +102,7 @@ fun WalletHistorySection() {
         if (addr.isEmpty()) { err = "❌ آدرس رو وارد کن"; return }
         scope.launch {
             loading = true; err = null; list = emptyList()
-            summary = "🔍 در حال خواندن تاریخچه از همه شبکه‌ها..."
+            summary = "🔍 در حال خواندن $depth تراکنش آخر از همه شبکه‌ها..."
             try {
                 val out = withContext(Dispatchers.IO) {
                     val res = mutableListOf<HistTx>()
@@ -140,7 +148,7 @@ fun WalletHistorySection() {
                             val sigs = solanaRaw(mapOf(
                                 "jsonrpc" to "2.0", "id" to 1,
                                 "method" to "getSignaturesForAddress",
-                                "params" to listOf(addr, mapOf("limit" to if (filterMint != null) 50 else 25))
+                                "params" to listOf(addr, mapOf("limit" to depth))
                             ))
                             if (sigs == null) { summary = "⚠️ اتصال به هر دو سرور Solana ناموفق بود — دوباره تلاش کن"; return@withContext res }
                             val sigArr = sigs.result?.asJsonArray
@@ -149,7 +157,7 @@ fun WalletHistorySection() {
                                 return@withContext res
                             }
                             if (sigArr.size() == 0) summary = "😴 این کیف هیچ تراکنشی نداره"
-                            else for (el in sigArr) {
+                            else for ((si, el) in sigArr.withIndex()) {
                                 val obj = el.asJsonObject
                                 val sig = obj.get("signature")?.asString ?: continue
                                 val bt = obj.get("blockTime")?.asLong ?: 0L
@@ -158,7 +166,7 @@ fun WalletHistorySection() {
                                         "jsonrpc" to "2.0", "id" to 1,
                                         "method" to "getTransaction",
                                         "params" to listOf(sig, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
-                                    )) ?: continue
+                                    ), preferAlt = si % 2 == 1) ?: continue
                                     val r = txr.result?.asJsonObject ?: continue
                                     val meta = r.getAsJsonObject("meta") ?: continue
 
@@ -256,7 +264,7 @@ fun WalletHistorySection() {
                     val totalRead = res.size
                     val filtered = res.filter { abs(it.amount) * (it.priceUsd ?: 0.0) >= 10.0 }
                     if (totalRead > 0) summary = "✅ ${filtered.size} تراکنش بالای ۱۰$ (از $totalRead تراکنش خونده‌شده)"
-                    filtered.sortedByDescending { it.ts }.take(30)
+                    filtered.sortedByDescending { it.ts }.take(60)
                 }
                 list = out
             } catch (t: Throwable) {
@@ -270,13 +278,18 @@ fun WalletHistorySection() {
         Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("📜 موتور ۵: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
-                Text("فقط تراکنش‌های بالای ۱۰ دلار • ۲۵ تراکنش آخر (۵۰ تا با فیلتر) • دو سرور RPC با فال‌بک خودکار", fontSize = 9.sp, color = XGray)
+                Text("فقط تراکنش‌های بالای ۱۰ دلار • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
                     placeholder = { Text("آدرس کیف... (Solana یا 0x)", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
                 TextField(value = filterSym, onValueChange = { filterSym = it },
                     placeholder = { Text("فیلتر توکن (اختیاری)... مثلاً USELESS", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(25, 75, 150).forEach { d ->
+                        FilterChip(selected = depth == d, onClick = { depth = d }, label = { Text("عمق: $d تراکنش", fontSize = 10.sp) })
+                    }
+                }
                 Button(onClick = { load() }, enabled = !loading,
                     colors = ButtonDefaults.buttonColors(containerColor = XBlue),
                     shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -290,18 +303,32 @@ fun WalletHistorySection() {
 
         list.forEach { t ->
             Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
-                    Spacer(Modifier.width(6.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("${if (t.incoming) "دریافت" else "ارسال"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Text("${t.dateText} • ${t.chain}", fontSize = 9.sp, color = XGray)
-                        if (t.other.isNotEmpty()) Text("طرف مقابل: ${if (t.other.length > 12) t.other.take(6) + "..." + t.other.takeLast(4) else t.other}", fontSize = 8.sp, color = XGold)
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${if (t.incoming) "دریافت" else "ارسال"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("${t.dateText} • ${t.chain}", fontSize = 9.sp, color = XGray)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(String.format(Locale.US, "%s%.4f", if (t.incoming) "+" else "-", t.amount), fontSize = 12.sp, fontWeight = FontWeight.Black,
+                                color = if (t.incoming) XGreen else XRed)
+                            if (t.priceUsd != null) Text("ارزش اون روز: ${String.format(Locale.US, "$%,.2f", t.amount * (t.priceUsd ?: 0.0))}", fontSize = 9.sp, color = XGold)
+                        }
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(String.format(Locale.US, "%s%.4f", if (t.incoming) "+" else "-", t.amount), fontSize = 12.sp, fontWeight = FontWeight.Black,
-                            color = if (t.incoming) XGreen else XRed)
-                        if (t.priceUsd != null) Text("ارزش اون روز: ${String.format(Locale.US, "$%,.2f", t.amount * (t.priceUsd ?: 0.0))}", fontSize = 9.sp, color = XGold)
+                    if (t.other.isNotEmpty()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("طرف مقابل: ${t.other}", fontSize = 8.sp, color = XGold, modifier = Modifier.weight(1f))
+                            Button(onClick = {
+                                try {
+                                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", t.other))
+                                    summary = "📋 آدرس طرف مقابل کپی شد"
+                                } catch (_: Exception) { }
+                            }, colors = ButtonDefaults.buttonColors(containerColor = XCard), shape = RoundedCornerShape(6.dp)) {
+                                Text("📋 کپی", fontSize = 9.sp)
+                            }
+                        }
                     }
                 }
             }
