@@ -78,10 +78,10 @@ private val ALL_CHAINS = listOf(
     "solana" to "Solana 🟣",
     "bsc" to "BSC 🟡",
     "base" to "Base 🔵",
-    "ethereum" to "Ethereum ⚪",
+    "eth" to "Ethereum ⚪",
     "arbitrum" to "Arbitrum 🔷",
     "optimism" to "Optimism 🔴",
-    "polygon" to "Polygon 🟣",
+    "polygon_pos" to "Polygon 🟣",
     "avalanche" to "Avalanche 🔺",
     "ton" to "TON 🔵",
     "cronos" to "Cronos 🔷",
@@ -872,7 +872,7 @@ fun WhaleRadarScreen() {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 }, label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
+                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 }, label = { Text("۱ میلیون", fontSize = 10.sp) })
                     }
 
