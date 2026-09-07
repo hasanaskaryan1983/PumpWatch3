@@ -532,7 +532,7 @@ fun WalletScreen() {
         // ================= موتور ۳ =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📰 موتور ۳: شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
+                Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange)
                 Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
                 TextField(value = insiderSymbol, onValueChange = { insiderSymbol = it },
                     placeholder = { Text("نماد ارز خبرساز... (TRUMP, MAGA...)", fontSize = 11.sp) },
@@ -579,6 +579,9 @@ fun WalletScreen() {
 
         // ================= موتور ۴: شکارچی تاریخی =================
         HistoryHunterSection()
+
+        // ================= موتور ۵: تاریخچه کیف =================
+        WalletHistorySection()
 
         // ================= ⭐ بهترین تریدرها =================
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
