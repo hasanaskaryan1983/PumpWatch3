@@ -1,5 +1,8 @@
 package com.pumpwatch.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.Canvas
@@ -166,7 +169,8 @@ private data class WhalePick(
     val credScore: Int,
     val rank: Int?,
     val marketCap: Double?,
-    val poolUrl: String
+    val poolUrl: String,
+    val contract: String? = null
 )
 
 private fun compact(v: Double): String = when {
@@ -257,6 +261,31 @@ private fun TrustRows(checks: List<Pair<String, Boolean>>) {
     }
 }
 
+@Composable
+private fun ContractRow(ctx: Context, contract: String?) {
+    if (contract.isNullOrEmpty()) return
+    val copied = remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Text("📋 کانترکت: ", fontSize = 9.sp, color = WGray)
+        Text(
+            if (contract.length > 22) "${contract.take(10)}...${contract.takeLast(8)}" else contract,
+            fontSize = 9.sp, color = WBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+        )
+        Button(
+            onClick = {
+                try {
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("contract", contract))
+                    copied.value = true
+                } catch (_: Exception) { }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) WGreen else WGold),
+            shape = RoundedCornerShape(6.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
+    }
+}
+
 private fun poolStats(p: GeckoPool): WhalePick? {
     val a = p.attributes ?: return null
     val price = a.priceUsd?.toDoubleOrNull() ?: return null
@@ -285,6 +314,7 @@ private fun poolStats(p: GeckoPool): WhalePick? {
     val network = p.relationships?.network?.data?.id ?: "solana"
     val addr = p.id?.substringAfter('_') ?: ""
     val chainName = ALL_CHAINS.firstOrNull { it.first == network }?.second ?: network
+    val contract = p.relationships?.base_token?.data?.id?.substringAfter('_')
 
     return WhalePick(
         symbol = symbol, name = name, chain = network, chainName = chainName, price = price,
@@ -295,7 +325,8 @@ private fun poolStats(p: GeckoPool): WhalePick? {
         liquidity = liq, changeH1 = a.priceChange?.h1 ?: 0.0,
         ageHours = age, fdv = fdv, credScore = score.coerceAtMost(100),
         rank = null, marketCap = null,
-        poolUrl = "https://www.geckoterminal.com/$network/pools/$addr"
+        poolUrl = "https://www.geckoterminal.com/$network/pools/$addr",
+        contract = contract
     )
 }
 
@@ -444,6 +475,8 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
             Text("🛡️ بررسی اعتماد: $passed از ${checks.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue)
             Text(marketPosText(l.rank, l.marketCap), fontSize = 10.sp, color = WGray)
 
+            ContractRow(context, l.contract)
+
             if (expanded) {
                 FlowLine("۱ ساعته", l.buysH1, l.sellsH1, l.volH1)
                 FlowLine("۶ ساعته", l.buysH6, l.sellsH6, l.volH6)
@@ -500,6 +533,7 @@ private fun FreshCard(f: WhalePick, index: Int) {
                 if (f.liquidity >= 100_000) Text("✅ نقدینگی قوی", fontSize = 9.sp, color = WGreen)
                 if (f.buysH1 > 0 && f.sellsH1 > 0) Text("✅ دوطرفه", fontSize = 9.sp, color = WGreen)
             }
+            ContractRow(context, f.contract)
         }
     }
 }
@@ -903,6 +937,7 @@ fun WhaleRadarScreen() {
                                 Text("FDV: ${compact(m.fdv)}", fontSize = 9.sp, color = WGray)
                                 Text("امتیاز: ${m.credScore}/100", fontSize = 9.sp, color = WBlue)
                             }
+                            ContractRow(context, m.contract)
                         }
                     }
                 }
