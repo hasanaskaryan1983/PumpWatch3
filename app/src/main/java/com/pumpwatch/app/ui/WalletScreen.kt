@@ -44,6 +44,7 @@ import com.pumpwatch.app.data.Blockscout
 import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.GtTrade
 import com.pumpwatch.app.data.SolanaRpc
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.solanaTyped
@@ -151,6 +152,9 @@ fun WalletScreen() {
     var info by remember { mutableStateOf("") }
 
     var hunterSymbol by remember { mutableStateOf("") }
+    var huntFrom by remember { mutableStateOf("") }
+    var huntTo by remember { mutableStateOf("") }
+    var huntRange by remember { mutableStateOf("") }
     var hunterLoading by remember { mutableStateOf(false) }
     var hunterError by remember { mutableStateOf<String?>(null) }
     var report by remember { mutableStateOf<HunterReport?>(null) }
@@ -172,7 +176,7 @@ fun WalletScreen() {
     }
 
     fun check() {
-        val addr = address.trim()
+        val addr = address.trim().replace(Regex("[^A-Za-z0-9]"), "")
         if (addr.isEmpty()) { error = "❌ آدرس کیف پول رو وارد کن"; return }
         val cfg = chain
         scope.launch {
@@ -341,13 +345,25 @@ fun WalletScreen() {
             hunterLoading = true; hunterError = null; report = null
             try {
                 val rep = withContext(Dispatchers.IO) {
+                    val sdfIn = SimpleDateFormat("yyyy/MM/dd", Locale.US)
+                    val now = System.currentTimeMillis()
+                    var fromTs = now - 7L * 86400000L
+                    var toTs = now
+                    var custom = false
+                    try { if (huntFrom.trim().isNotEmpty()) { fromTs = sdfIn.parse(huntFrom.trim())?.time ?: fromTs; custom = true } } catch (_: Exception) { }
+                    try { if (huntTo.trim().isNotEmpty()) { toTs = (sdfIn.parse(huntTo.trim())?.time ?: toTs) + 86400000L; custom = true } } catch (_: Exception) { }
+                    huntRange = if (custom) "📅 بازه دلخواه: ${sdfIn.format(Date(fromTs))} تا ${sdfIn.format(Date(minOf(toTs, now)))}"
+                                else "📅 بازه پیش‌فرض: ۷ روز اخیر"
+
                     val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
                     val pool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
                     val net = pool.relationships?.network?.data?.id ?: "solana"
                     val chainName = CHAINS.firstOrNull { it.gt == net }?.label ?: net
                     val poolAddr = pool.id?.substringAfter('_') ?: ""
 
-                    val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
+                    val rowsAll = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
+                    val rowsIn = rowsAll.filter { (it[0].toLong()) * 1000 in fromTs..toTs }
+                    val rows = if (rowsIn.size >= 10) rowsIn else rowsAll
                     var bottomPrice = 0.0; var peakPrice = 0.0; var pumpTs = 0L
                     if (rows.size >= 10) {
                         val cut = rows.size * 2 / 3
@@ -359,16 +375,27 @@ fun WalletScreen() {
                     val currentPrice = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
                     val risePct = if (bottomPrice > 0) (peakPrice - bottomPrice) / bottomPrice * 100 else 0.0
 
-                    val trades = try { GeckoPrice.api.poolTrades(net, poolAddr).data ?: emptyList() } catch (_: Exception) { emptyList() }
+                    val allTrades = mutableListOf<GtTrade>()
+                    var cursor: Long? = null
+                    for (page in 0 until 6) {
+                        val pg = try { GeckoPrice.api.poolTrades(net, poolAddr, cursor) } catch (_: Exception) { null }?.data ?: break
+                        if (pg.isEmpty()) break
+                        allTrades.addAll(pg)
+                        val minTs = pg.mapNotNull { a -> (num(a.attributes?.block_timestamp) ?: 0.0).toLong() }.minOrNull() ?: break
+                        if (minTs * 1000 <= fromTs) break
+                        cursor = minTs - 1
+                    }
+
                     val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
 
                     val buyMap = mutableMapOf<String, MutableList<Triple<Double, Double, Long>>>()
                     val sellMap = mutableMapOf<String, Double>()
-                    for (t in trades) {
+                    for (t in allTrades) {
                         val a = t.attributes ?: continue
                         val vol = num(a.volume_in_usd) ?: continue
                         val px = num(a.price_in_usd) ?: num(a.price) ?: continue
                         val ts = (num(a.block_timestamp) ?: 0.0).toLong() * 1000
+                        if (ts < fromTs || ts > toTs) continue
                         val wallet = a.tx_from_address ?: continue
                         if ((a.type ?: "").equals("buy", true)) {
                             if (bottomPrice <= 0 || px <= bottomPrice * 1.3) buyMap.getOrPut(wallet) { mutableListOf() }.add(Triple(vol, px, ts))
@@ -389,7 +416,7 @@ fun WalletScreen() {
                         if (pumpTs > 0) sdf.format(Date(pumpTs)) else "—", risePct, suspects)
                 }
                 report = rep
-                if (rep.wallets.isEmpty()) hunterError = "😴 کیف مشکوکی پیدا نشد (تریدها فقط اخیرن — موتور ۴ رو امتحان کن)"
+                if (rep.wallets.isEmpty()) hunterError = "😴 در این بازه کیف مشکوکی پیدا نشد"
             } catch (t: Throwable) { hunterError = "⚠️ خطا: ${t.message}" }
             hunterLoading = false
         }
@@ -559,6 +586,16 @@ fun WalletScreen() {
                 TextField(value = hunterSymbol, onValueChange = { hunterSymbol = it },
                     placeholder = { Text("نماد ارز پامپ‌شده...", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextField(value = huntFrom, onValueChange = { huntFrom = it },
+                        placeholder = { Text("از تاریخ: 2025/08/01", fontSize = 10.sp) },
+                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
+                    TextField(value = huntTo, onValueChange = { huntTo = it },
+                        placeholder = { Text("تا تاریخ: 2025/08/20", fontSize = 10.sp) },
+                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
+                }
+                Text("بازه بررسی تریدها • خالی = ۷ روز اخیر • فرمت: yyyy/MM/dd • صفحات ترید خودکار به عقب ورق می‌خورن", fontSize = 8.sp, color = VGray)
+                if (huntRange.isNotEmpty()) Text(huntRange, fontSize = 9.sp, color = VGreen)
                 Button(onClick = { hunt() }, enabled = !hunterLoading,
                     colors = ButtonDefaults.buttonColors(containerColor = VPurple),
                     shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
