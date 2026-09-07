@@ -20,7 +20,8 @@ interface GeckoPriceApi {
     @GET("networks/{network}/pools/{address}/trades")
     suspend fun poolTrades(
         @Path("network") network: String,
-        @Path("address") address: String
+        @Path("address") address: String,
+        @Query("before") before: Long? = null
     ): GtTrades
 }
 
