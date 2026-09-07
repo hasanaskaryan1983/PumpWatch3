@@ -32,7 +32,7 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.Blockscout
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
-import com.pumpwatch.app.data.SolanaRpc
+import com.pumpwatch.app.data.solanaRaw
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -122,6 +122,10 @@ fun WalletHistorySection() {
                             }
                         }
                         else -> {
+                            if (addr.length !in 32..44) {
+                                summary = "❌ طول آدرس سولانا باید ۳۲ تا ۴۴ کاراکتر باشه — دوباره کامل کپی کن"
+                                return@withContext res
+                            }
                             var filterMint: String? = null
                             if (fs.isNotEmpty()) {
                                 try {
@@ -133,23 +137,28 @@ fun WalletHistorySection() {
                                 if (filterMint == null) { summary = "❌ استخر Solana برای «$fs» پیدا نشد"; return@withContext res }
                             }
 
-                            val sigs = SolanaRpc.api.rpcRaw(mapOf(
+                            val sigs = solanaRaw(mapOf(
                                 "jsonrpc" to "2.0", "id" to 1,
                                 "method" to "getSignaturesForAddress",
                                 "params" to listOf(addr, mapOf("limit" to if (filterMint != null) 50 else 25))
                             ))
+                            if (sigs == null) { summary = "⚠️ اتصال به هر دو سرور Solana ناموفق بود — دوباره تلاش کن"; return@withContext res }
                             val sigArr = sigs.result?.asJsonArray
-                            if (sigArr == null || sigArr.size() == 0) summary = "😴 این کیف هیچ تراکنشی نداره"
+                            if (sigArr == null) {
+                                summary = "⚠️ سرور Solana خطا داد: ${sigs.error?.message ?: "نامشخص"} — آدرس رو چک کن"
+                                return@withContext res
+                            }
+                            if (sigArr.size() == 0) summary = "😴 این کیف هیچ تراکنشی نداره"
                             else for (el in sigArr) {
                                 val obj = el.asJsonObject
                                 val sig = obj.get("signature")?.asString ?: continue
                                 val bt = obj.get("blockTime")?.asLong ?: 0L
                                 try {
-                                    val txr = SolanaRpc.api.rpcRaw(mapOf(
+                                    val txr = solanaRaw(mapOf(
                                         "jsonrpc" to "2.0", "id" to 1,
                                         "method" to "getTransaction",
                                         "params" to listOf(sig, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
-                                    ))
+                                    )) ?: continue
                                     val r = txr.result?.asJsonObject ?: continue
                                     val meta = r.getAsJsonObject("meta") ?: continue
 
@@ -246,7 +255,7 @@ fun WalletHistorySection() {
 
                     val totalRead = res.size
                     val filtered = res.filter { abs(it.amount) * (it.priceUsd ?: 0.0) >= 10.0 }
-                    summary = "✅ ${filtered.size} تراکنش بالای ۱۰$ (از $totalRead تراکنش خونده‌شده)"
+                    if (totalRead > 0) summary = "✅ ${filtered.size} تراکنش بالای ۱۰$ (از $totalRead تراکنش خونده‌شده)"
                     filtered.sortedByDescending { it.ts }.take(30)
                 }
                 list = out
@@ -261,7 +270,7 @@ fun WalletHistorySection() {
         Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("📜 موتور ۵: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
-                Text("فقط تراکنش‌های بالای ۱۰ دلار • ۲۵ تراکنش آخر (۵۰ تا با فیلتر توکن) • طرف مقابل هر تراکنش", fontSize = 9.sp, color = XGray)
+                Text("فقط تراکنش‌های بالای ۱۰ دلار • ۲۵ تراکنش آخر (۵۰ تا با فیلتر) • دو سرور RPC با فال‌بک خودکار", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
                     placeholder = { Text("آدرس کیف... (Solana یا 0x)", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
