@@ -100,10 +100,10 @@ object Blockscout {
 // ---------- Solana RPC عمومی ----------
 interface SolanaRpcApi {
     @POST(".")
-    suspend fun rpc(@Body body: Map<String, Any?>): SolanaRpcResponse
+    suspend fun rpc(@Body body: Map<String, @JvmSuppressWildcards Any?>): SolanaRpcResponse
 
     @POST(".")
-    suspend fun rpcRaw(@Body body: Map<String, Any?>): SolanaRawResponse
+    suspend fun rpcRaw(@Body body: Map<String, @JvmSuppressWildcards Any?>): SolanaRawResponse
 }
 
 data class SolanaRpcResponse(val result: SolanaRpcResult?)
