@@ -45,6 +45,8 @@ import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.SolanaRpc
+import com.pumpwatch.app.data.solanaRaw
+import com.pumpwatch.app.data.solanaTyped
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -82,7 +84,11 @@ private val CHAINS = listOf(
     ChainCfg("robinhood", "Robinhood 🪽", "robinhood", "https://robinhoodchain.blockscout.com/", "evm")
 )
 
-private data class WalletHolding(val symbol: String, val name: String, val amount: Double, val price: Double, val value: Double)
+private data class WalletHolding(
+    val symbol: String, val name: String, val amount: Double, val price: Double, val value: Double,
+    val contract: String? = null, val host: String? = null,
+    var firstBuyTs: Long? = null, var buyPrice: Double? = null
+)
 private data class WalletTx(val dateText: String, val dateDay: String, val symbol: String, val amount: Double, val incoming: Boolean, var priceUsd: Double?)
 private data class SusWallet(
     val addr: String, val boughtUsd: Double, val avgEntry: Double,
@@ -132,6 +138,7 @@ private fun saveTraders(ctx: Context, list: List<SavedTrader>) {
 fun WalletScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val sdfBuy = SimpleDateFormat("yyyy/MM/dd", Locale.US)
 
     var chain by remember { mutableStateOf(CHAINS[0]) }
 
@@ -187,22 +194,49 @@ fun WalletScreen() {
                                     mapOf("encoding" to "jsonParsed")
                                 )
                             )
-                            val res = SolanaRpc.api.rpc(body)
-                            val raw = res.result?.value?.mapNotNull { a ->
+                            val res = solanaTyped(body)
+                            val raw = res?.result?.value?.mapNotNull { a ->
                                 val inf = a.account?.data?.parsed?.info ?: return@mapNotNull null
                                 val mint = inf.mint ?: return@mapNotNull null
                                 val amt = inf.tokenAmount?.uiAmountString?.toDoubleOrNull() ?: 0.0
-                                if (amt <= 0.0) null else mint to amt
+                                if (amt <= 0.0) null else Triple(mint, amt, a.pubkey ?: "")
                             } ?: emptyList()
 
                             val list = mutableListOf<WalletHolding>()
-                            for ((mint, amt) in raw.take(15)) {
+                            for ((mint, amt, acc) in raw.take(15)) {
                                 try {
                                     val t = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
                                     val px = t?.price_usd?.toDoubleOrNull() ?: 0.0
-                                    list.add(WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * px))
+                                    val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * px, contract = mint)
+                                    try {
+                                        if (acc.isNotEmpty()) {
+                                            val sg = solanaRaw(mapOf(
+                                                "jsonrpc" to "2.0", "id" to 1,
+                                                "method" to "getSignaturesForAddress",
+                                                "params" to listOf(acc, mapOf("limit" to 1000))
+                                            ))
+                                            val oldest = sg?.result?.asJsonArray?.lastOrNull()?.asJsonObject
+                                            val fts = (oldest?.get("blockTime")?.asLong ?: 0L) * 1000
+                                            if (fts > 0) h.firstBuyTs = fts
+                                        }
+                                    } catch (_: Exception) { }
+                                    list.add(h)
                                 } catch (_: Exception) { }
                             }
+
+                            try {
+                                val coinsH = ApiClient.getTop1000Coins()
+                                val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                                for (h in list.take(6)) {
+                                    val coin = coinsH.firstOrNull { it.symbol.equals(h.symbol, true) } ?: continue
+                                    try {
+                                        val chart = ApiClient.getCoinChart(coin.id, days = 365)
+                                        val byDay = chart.prices.associate { p -> sdfD.format(Date(p[0].toLong())) to p[1] }
+                                        h.buyPrice = h.firstBuyTs?.let { byDay[sdfD.format(Date(it))] }
+                                    } catch (_: Exception) { }
+                                }
+                            } catch (_: Exception) { }
+
                             holdings = list.sortedByDescending { it.value }
                             total = list.sumOf { it.value }
                             txs = emptyList()
@@ -230,14 +264,36 @@ fun WalletScreen() {
                                             GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0
                                         } catch (_: Exception) { 0.0 }
                                         if (px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price ?: 0.0
-                                        list.add(WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * px))
+                                        list.add(WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * px, contract = contract, host = h.bs))
                                     }
                                     if (list.isNotEmpty()) {
+                                        for (hd in list.take(6)) {
+                                            try {
+                                                val c = hd.contract ?: continue
+                                                val asc = Blockscout.api(hd.host!!).tokenTx("account", "tokentx", addr, "asc").result
+                                                val first = asc?.firstOrNull { (it.contractAddress ?: "").equals(c, true) }
+                                                val fts = (first?.timeStamp?.toLongOrNull() ?: 0L) * 1000
+                                                if (fts > 0) hd.firstBuyTs = fts
+                                            } catch (_: Exception) { }
+                                        }
                                         allHold.addAll(list)
                                         if (txHost == null) txHost = h
                                     }
                                 } catch (_: Exception) { }
                             }
+
+                            try {
+                                val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                                for (hd in allHold.take(6)) {
+                                    val sym = hd.symbol.substringBefore('·')
+                                    val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
+                                    try {
+                                        val chart = ApiClient.getCoinChart(coin.id, days = 365)
+                                        val byDay = chart.prices.associate { p -> sdfD.format(Date(p[0].toLong())) to p[1] }
+                                        hd.buyPrice = hd.firstBuyTs?.let { byDay[sdfD.format(Date(it))] }
+                                    } catch (_: Exception) { }
+                                }
+                            } catch (_: Exception) { }
 
                             holdings = allHold.sortedByDescending { it.value }
                             total = allHold.sumOf { it.value }
@@ -444,12 +500,33 @@ fun WalletScreen() {
             }
             holdings.forEach { h ->
                 Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
+                            }
+                            Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
                         }
-                        Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
+                        if (h.firstBuyTs != null) {
+                            Text(
+                                "🕐 اولین خرید: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت خرید: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
+                                fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (h.contract != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("کانترکت: ${h.contract}", fontSize = 8.sp, color = VGray, modifier = Modifier.weight(1f))
+                                Button(onClick = {
+                                    try {
+                                        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("contract", h.contract))
+                                        info = "📋 کانترکت کپی شد — توی CoinGecko پیست کن تا اشتباهی نخری"
+                                    } catch (_: Exception) { }
+                                }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) {
+                                    Text("📋 کپی", fontSize = 9.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
