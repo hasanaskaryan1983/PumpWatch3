@@ -16,7 +16,7 @@ data class LoggedSignal(
     val entry: Double,
     val stop: Double,
     val target: Double,
-    val status: String, // "OPEN", "WIN", "LOSS", "EXP"
+    val status: String = "OPEN", // ✅ پیش‌فرض اضافه شد
     val exitPrice: Double? = null,
     val mode: String = "SPOT", // "SPOT" or "FUT"
     val score: Int = 0,
@@ -73,6 +73,11 @@ object SignalLogger {
         val list = load(ctx).toMutableList()
         list.add(0, s)
         save(ctx, list.take(200))
+    }
+
+    // ✅ تابع log که QuickScanner و CoinDetailScreen صداش می‌زنن
+    fun log(ctx: Context, s: LoggedSignal) {
+        add(ctx, s)
     }
 
     // قیمت لحظه‌ای: اول Binance → بعد CoinGecko → بعد DEX
