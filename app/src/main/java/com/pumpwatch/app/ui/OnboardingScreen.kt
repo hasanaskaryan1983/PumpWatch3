@@ -59,6 +59,8 @@ private val OBGray = Color(0xFF8B949E)
 private val OBRed = Color(0xFFFF5252)
 private val OBPurple = Color(0xFFB388FF)
 
+private const val TWO_PI_F = 6.2831853f
+
 private data class OBPage(val title: String, val desc: String, val img: Int)
 
 // ================= صفحه اصلی Onboarding =================
@@ -131,7 +133,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         .graphicsLayer {
                             scaleX = 1.06f + 0.03f * pulse
                             scaleY = 1.06f + 0.03f * pulse
-                            translationY = (-6f + 12f * mid)
+                            translationY = -6f + 12f * mid
                         }
                 )
 
@@ -232,7 +234,9 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     onClick = {
                         if (page < pages.size - 1) page++ else onDone()
                     },
-                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OBGreen),
                     shape = RoundedCornerShape(18.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp, pressedElevation = 2.dp)
@@ -321,7 +325,8 @@ private fun Scanline(progress: Float, modifier: Modifier = Modifier) {
         drawRect(
             Brush.verticalGradient(
                 listOf(Color.Transparent, OBTeal.copy(alpha = 0.22f), Color.Transparent),
-                startY = y - 40f, endY = y + 40f
+                startY = y - 40f,
+                endY = y + 40f
             ),
             topLeft = Offset(0f, y - 40f),
             size = Size(size.width, 80f)
@@ -333,14 +338,16 @@ private fun Scanline(progress: Float, modifier: Modifier = Modifier) {
 @Composable
 private fun BellGlow(pulse: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
+        val c = Offset(size.width * 0.80f, size.height * 0.24f)
+        val r = size.width * 0.22f
         drawCircle(
             brush = Brush.radialGradient(
                 listOf(OBGold.copy(alpha = 0.10f + 0.22f * pulse), Color.Transparent),
-                center = Offset(size.width * 0.80f, size.height * 0.24f),
-                radius = size.width * 0.22f
+                center = c,
+                radius = r
             ),
-            center = Offset(size.width * 0.80f, size.height * 0.24f),
-            radius = size.width * 0.22f
+            center = c,
+            radius = r
         )
     }
 }
@@ -361,7 +368,8 @@ private fun SwingLight(swingDeg: Float, modifier: Modifier = Modifier) {
                 path,
                 Brush.linearGradient(
                     listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
-                    startY = 0f, endY = size.height * 0.72f
+                    startY = 0f,
+                    endY = size.height * 0.72f
                 )
             )
         }
@@ -377,7 +385,7 @@ private fun Smoke(progress: Float, modifier: Modifier = Modifier) {
         for (i in 0 until 10) {
             val t = (progress + i / 10f) % 1f
             val y = size.height * 0.86f - t * size.height * 0.55f
-            val x = cx + sin((t * 5f + i) * 1.35) * size.width * 0.05f
+            val x = cx + sin((t * 5f + i) * 1.35f) * size.width * 0.05f
             val r = 6f + t * 42f
             val a = (1f - t) * 0.16f
             drawCircle(Color.White.copy(alpha = a), r, Offset(x, y))
@@ -394,19 +402,24 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
         val r = minOf(size.width, size.height) * 0.30f
         val rot = slow * 360f
         for (i in 0 until 28) {
-            val a = (i * (360 / 28) + rot).toDouble() * PI / 180.0
+            val a = (i * 12.857f + rot).toDouble() * PI / 180.0
             val col = if (i % 2 == 0) OBPurple else OBTeal
             drawLine(
                 col.copy(alpha = 0.55f),
-                Offset(cx + cos(a).toFloat() * r, cy + sin(a).toFloat() * r),
-                Offset(cx + cos(a).toFloat() * (r + 14f), cy + sin(a).toFloat() * (r + 14f)),
+                Offset(cx + kotlin.math.cos(a).toFloat() * r, cy + sin(a).toFloat() * r),
+                Offset(cx + kotlin.math.cos(a).toFloat() * (r + 14f), cy + sin(a).toFloat() * (r + 14f)),
                 Stroke(3f)
             )
         }
         drawCircle(OBPurple.copy(alpha = 0.30f), r, Offset(cx, cy), style = Stroke(2f))
         drawCircle(
-            OBTeal.copy(alpha = 0.25f), r * 0.86f, Offset(cx, cy),
-            style = Stroke(width = 2f, pathEffect = androidx.compose.ui.graphics.dashPathEffect(floatArrayOf(14f, 22f), -fast * 36f))
+            OBTeal.copy(alpha = 0.25f),
+            r * 0.86f,
+            Offset(cx, cy),
+            style = Stroke(
+                width = 2f,
+                pathEffect = androidx.compose.ui.graphics.dashPathEffect(floatArrayOf(14f, 22f), -fast * 36f)
+            )
         )
     }
 }
@@ -414,13 +427,18 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
 // فلش نور گوی (صفحه ۵)
 @Composable
 private fun OrbFlash(fast: Float, modifier: Modifier = Modifier) {
-    val flick = (sin(fast * PI * 2 * 3).coerceAtLeast(0f)) * 0.20f
+    val flick = sin(fast * TWO_PI_F * 3f).coerceAtLeast(0f) * 0.20f
     Canvas(modifier) {
         val c = Offset(size.width / 2f, size.height * 0.42f)
+        val r = size.width * 0.26f
         drawCircle(
-            brush = Brush.radialGradient(listOf(Color.White.copy(alpha = flick), Color.Transparent), center = c, radius = size.width * 0.26f),
+            brush = Brush.radialGradient(
+                listOf(Color.White.copy(alpha = flick), Color.Transparent),
+                center = c,
+                radius = r
+            ),
             center = c,
-            radius = size.width * 0.26f
+            radius = r
         )
     }
 }
@@ -430,7 +448,7 @@ private fun OrbFlash(fast: Float, modifier: Modifier = Modifier) {
 private fun Sparkles(fast: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         for (i in 0 until 12) {
-            val a = (sin((fast * 2f + i * 0.83f) * PI).coerceAtLeast(0f)) * 0.7f
+            val a = sin((fast * 2f + i * 0.83f) * TWO_PI_F).coerceAtLeast(0f) * 0.7f
             val x = size.width * ((i * 0.618f) % 1f)
             val y = size.height * ((i * 0.381f) % 1f) * 0.7f
             drawCircle(Color.White.copy(alpha = a), 2.5f, Offset(x, y))
@@ -448,5 +466,3 @@ private fun lerpColor(a: Color, b: Color, t: Float): Color {
         alpha = 1f
     )
 }
-
-private fun cos(a: Double) = kotlin.math.cos(a)
