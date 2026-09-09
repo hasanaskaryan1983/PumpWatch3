@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -285,7 +286,7 @@ private fun FlowingCandles(progress: Float, modifier: Modifier = Modifier) {
             val up = sin(i * 1.7f) * 0.5f + 0.5f
             val ch = h * (0.25f + 0.55f * up)
             val col = if (i % 3 != 1) OBGreen.copy(alpha = 0.75f) else OBRed.copy(alpha = 0.75f)
-            drawLine(col, Offset(x, h - ch - 12f), Offset(x, h - ch), Stroke(3f))
+            drawLine(col, Offset(x, h - ch - 12f), Offset(x, h - ch), 3f)
             drawRoundRect(col, Offset(x - 5f, h - ch), Size(10f, ch), 3f)
         }
     }
@@ -311,7 +312,7 @@ private fun FallingCandles(progress: Float, modifier: Modifier = Modifier) {
                 else -> 1f
             } * 0.8f
             val col = OBRed.copy(alpha = alpha)
-            drawLine(col, Offset(x, y - 10f), Offset(x, y), Stroke(3f))
+            drawLine(col, Offset(x, y - 10f), Offset(x, y), 3f)
             drawRoundRect(col, Offset(x - 5f, y), Size(10f, ch), 3f)
         }
     }
@@ -408,7 +409,7 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
                 col.copy(alpha = 0.55f),
                 Offset(cx + kotlin.math.cos(a).toFloat() * r, cy + sin(a).toFloat() * r),
                 Offset(cx + kotlin.math.cos(a).toFloat() * (r + 14f), cy + sin(a).toFloat() * (r + 14f)),
-                Stroke(3f)
+                3f
             )
         }
         drawCircle(OBPurple.copy(alpha = 0.30f), r, Offset(cx, cy), style = Stroke(2f))
@@ -418,7 +419,7 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
             Offset(cx, cy),
             style = Stroke(
                 width = 2f,
-                pathEffect = androidx.compose.ui.graphics.dashPathEffect(floatArrayOf(14f, 22f), -fast * 36f)
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 22f), -fast * 36f)
             )
         )
     }
