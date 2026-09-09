@@ -335,26 +335,34 @@ private fun BellGlow(pulse: Float, modifier: Modifier = Modifier) {
     }
 }
 
+// مخروط نور چراغ بازجویی — چرخش با محاسبه دستی مختصات (بدون تابع rotate)
 @Composable
 private fun SwingLight(swingDeg: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val px = size.width / 2f
-        rotate(swingDeg, pivot = Offset(px, 0f)) {
-            val path = Path().apply {
-                moveTo(px, 0f)
-                lineTo(px - size.width * 0.30f, size.height * 0.72f)
-                lineTo(px + size.width * 0.30f, size.height * 0.72f)
-                close()
-            }
-            drawPath(
-                path,
-                Brush.linearGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
-                    start = Offset(px, 0f),
-                    end = Offset(px, size.height * 0.72f)
-                )
-            )
+        val bottomY = size.height * 0.72f
+        val halfW = size.width * 0.30f
+        val ang = swingDeg * PI / 180.0
+        val cosA = kotlin.math.cos(ang).toFloat()
+        val sinA = kotlin.math.sin(ang).toFloat()
+        val x2 = px + (-halfW) * cosA - bottomY * sinA
+        val y2 = 0f + (-halfW) * sinA + bottomY * cosA
+        val x3 = px + halfW * cosA - bottomY * sinA
+        val y3 = 0f + halfW * sinA + bottomY * cosA
+        val path = Path().apply {
+            moveTo(px, 0f)
+            lineTo(x2, y2)
+            lineTo(x3, y3)
+            close()
         }
+        drawPath(
+            path,
+            Brush.linearGradient(
+                colors = listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                start = Offset(px, 0f),
+                end = Offset(px, bottomY)
+            )
+        )
         drawCircle(OBGold.copy(alpha = 0.25f), 46f, Offset(px, 8f))
     }
 }
