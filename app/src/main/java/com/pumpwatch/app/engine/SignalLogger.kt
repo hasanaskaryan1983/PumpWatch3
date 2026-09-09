@@ -16,7 +16,7 @@ data class LoggedSignal(
     val entry: Double,
     val stop: Double,
     val target: Double,
-    val status: String = "OPEN", // ✅ پیش‌فرض اضافه شد
+    val status: String = "OPEN",
     val exitPrice: Double? = null,
     val mode: String = "SPOT", // "SPOT" or "FUT"
     val score: Int = 0,
@@ -75,9 +75,17 @@ object SignalLogger {
         save(ctx, list.take(200))
     }
 
-    // ✅ تابع log که QuickScanner و CoinDetailScreen صداش می‌زنن
-    fun log(ctx: Context, s: LoggedSignal) {
-        add(ctx, s)
+    // ✅ ثبت سیگنال — برگشت Boolean (true = ثبت شد، false = تکراری بود)
+    // QuickScanner و CoinDetailScreen این رو داخل if(...) استفاده می‌کنن
+    fun log(ctx: Context, s: LoggedSignal): Boolean {
+        val list = load(ctx).toMutableList()
+        val now = System.currentTimeMillis()
+        val dup = list.any { it.symbol == s.symbol && it.side == s.side && it.status == "OPEN" } ||
+                list.any { it.symbol == s.symbol && it.side == s.side && it.time > 0 && now - it.time < 3_600_000L }
+        if (dup) return false
+        list.add(0, s)
+        save(ctx, list.take(200))
+        return true
     }
 
     // قیمت لحظه‌ای: اول Binance → بعد CoinGecko → بعد DEX
