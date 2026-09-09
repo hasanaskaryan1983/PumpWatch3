@@ -20,6 +20,7 @@ import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.QuickScanner
 import com.pumpwatch.app.engine.SignalLogger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -33,8 +34,9 @@ private val LBlue = Color(0xFF40C4FF)
 
 private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
-    "LOSS" -> "❌"
+    "LOSS" -> ""
     "EXP" -> "⌛"
+    "OPEN" -> "🔓"
     else -> "⏳"
 }
 
@@ -62,7 +64,6 @@ fun SignalLogScreen() {
     fun loadLogs() {
         scope.launch {
             val l = SignalLogger.load(ctx)
-            // ارزیابی دقیق با کندل ساعتی (اولین برخورد به هدف یا استاپ)
             val ev = SignalLogger.evaluate(ctx, l)
             SignalLogger.save(ctx, ev)
             logs = ev
@@ -74,9 +75,27 @@ fun SignalLogScreen() {
         }
     }
 
+    // 🔄 آپدیت خودکار قیمت‌ها هر ۴ ثانیه برای سیگنال‌های باز
     LaunchedEffect(Unit) {
         loadLogs()
         lastScores = prefs.getString("last_scores", "") ?: ""
+        
+        while (true) {
+            delay(45_000L) // ۴۵ ثانیه
+            val currentLogs = SignalLogger.load(ctx)
+            val hasOpen = currentLogs.any { it.status == "OPEN" || it.status == "EXP" }
+            if (hasOpen) {
+                val updated = SignalLogger.updateOpenSignals(ctx, currentLogs)
+                logs = updated
+                SignalLogger.save(ctx, updated)
+                // آپدیت آمار
+                stats = Triple(
+                    updated.count { it.status == "WIN" },
+                    updated.count { it.status == "LOSS" },
+                    updated.count { it.status == "EXP" }
+                )
+            }
+        }
     }
 
     val filteredLogs = when (selectedFilter) {
@@ -115,11 +134,7 @@ fun SignalLogScreen() {
                 colors = ButtonDefaults.buttonColors(containerColor = LBlue)
             ) {
                 if (isScanning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(if (isScanning) "در حال اسکن..." else "🔍 اسکن فوری", fontSize = 12.sp)
@@ -132,137 +147,81 @@ fun SignalLogScreen() {
                 Text("❌ باخت: ${st.second}", color = LR, fontWeight = FontWeight.Bold)
                 Text("⌛ منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
             }
-            Text(
-                "برد = رسید به هدف | باخت = خورد به استاپ | منقضی = بدون نتیجه بعد از ۲۴ ساعت",
-                fontSize = 9.sp,
-                color = LGr
-            )
-            Text(
-                "🎯 استراتژی: خرید افت شدید (RSI2≤۱۵) داخل روند صعودی • استاپ دور ۲.۴×ATR + هدف نزدیک ۰.۹×ATR → احتمال برد بالا",
-                fontSize = 9.sp,
-                color = LBlue
-            )
+            Text("🎯 استراتژی: استاپ دنباله‌رو (Trailing) + هدف شناور. تا وقتی استاپ نخوره، پوزیشن باز می‌مونه!", fontSize = 9.sp, color = LBlue, fontWeight = FontWeight.Bold)
+            
             val t = st.first + st.second
             if (t > 0) {
                 val wr = st.first * 100.0 / t
-                Text(
-                    "وین‌ریت زنده: ${String.format(Locale.US, "%.1f%%", wr)}",
-                    color = if (wr >= 55) LG else LR,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            // میانگین سود/ضرر معاملات تسویه‌شده
-            val closed = logs.filter { (it.status == "WIN" || it.status == "LOSS") && it.exitPrice != null }
-            if (closed.isNotEmpty()) {
-                val avgPnl = closed.map { s ->
-                    if (s.side == "BUY") (s.exitPrice!! - s.entry) / s.entry * 100
-                    else (s.entry - s.exitPrice!!) / s.entry * 100
-                }.average()
-                Text(
-                    "میانگین سود/ضرر هر معامله: ${String.format(Locale.US, "%+.2f%%", avgPnl)}",
-                    fontSize = 11.sp,
-                    color = if (avgPnl >= 0) LG else LR,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("وین‌ریت زنده: ${String.format(Locale.US, "%.1f%%", wr)}", color = if (wr >= 55) LG else LR, fontWeight = FontWeight.Bold)
             }
         }
 
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = selectedFilter == "ALL",
-                onClick = { selectedFilter = "ALL" },
-                label = { Text("همه (${logs.size})", fontSize = 11.sp) }
-            )
-            FilterChip(
-                selected = selectedFilter == "SPOT",
-                onClick = { selectedFilter = "SPOT" },
-                label = { Text("🏦 اسپات (${logs.count { it.mode != "FUT" }})", fontSize = 11.sp) }
-            )
-            FilterChip(
-                selected = selectedFilter == "FUT",
-                onClick = { selectedFilter = "FUT" },
-                label = { Text("⚡ فیوچرز (${logs.count { it.mode == "FUT" }})", fontSize = 11.sp) }
-            )
-        }
-
-        if (lastScores.isNotEmpty()) {
-            TextButton(onClick = { showDetails = !showDetails }) {
-                Text(
-                    if (showDetails) "🔬 جزئیات اسکن (پنهان کن)" else "🔬 جزئیات اسکن (نمایش)",
-                    fontSize = 11.sp
-                )
-            }
-            if (showDetails) {
-                Surface(
-                    color = LC,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 180.dp)
-                ) {
-                    Column(
-                        Modifier
-                            .padding(10.dp)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        Text(lastScores, fontSize = 10.sp, color = LGr)
-                    }
-                }
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = selectedFilter == "ALL", onClick = { selectedFilter = "ALL" }, label = { Text("همه (${logs.size})", fontSize = 11.sp) })
+            FilterChip(selected = selectedFilter == "SPOT", onClick = { selectedFilter = "SPOT" }, label = { Text("🏦 اسپات", fontSize = 11.sp) })
+            FilterChip(selected = selectedFilter == "FUT", onClick = { selectedFilter = "FUT" }, label = { Text("⚡ فیوچرز", fontSize = 11.sp) })
         }
 
         if (filteredLogs.isEmpty()) {
-            Text(
-                if (logs.isEmpty()) "هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن"
-                else "سیگنالی با این فیلتر پیدا نشد — «اسکن فوری» بزن تا در این حالت اسکن بشه",
-                color = LGr,
-                modifier = Modifier.padding(24.dp)
-            )
+            Text("هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن", color = LGr, modifier = Modifier.padding(24.dp))
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filteredLogs) { s ->
+                    val isLong = s.side == "BUY"
+                    val pnl = s.exitPrice?.let { ep -> 
+                        if (isLong) (ep - s.entry) / s.entry * 100 else (s.entry - ep) / s.entry * 100 
+                    }
+                    
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .background(LC, RoundedCornerShape(12.dp))
+                            .background(
+                                if (s.status == "OPEN") Color(0xFF1A2A3A) else LC, 
+                                RoundedCornerShape(12.dp)
+                            )
                             .padding(12.dp)
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                val modeEmoji = if (s.mode == "FUT") "⚡" else "🏦"
-                                val modeText = if (s.mode == "FUT") "فیوچرز" else "اسپات"
-                                Text(
-                                    "$modeEmoji ${s.symbol} • ${if(s.side=="BUY")"🟢 خرید" else "🔴 فروش"} • $modeText",
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    "${statusEmoji(s.status)} ${s.status}",
-                                    color = when(s.status) {
-                                        "WIN" -> LG
-                                        "LOSS" -> LR
-                                        "EXP" -> LY
-                                        else -> LGr
-                                    }
-                                )
+                                val modeEmoji = if (s.mode == "FUT") "⚡" else ""
+                                Text("$modeEmoji ${s.symbol} • ${if(isLong)"🟢 Long" else "🔴 Short"}", fontWeight = FontWeight.Bold)
+                                Text("${statusEmoji(s.status)} ${s.status}", color = when(s.status) {
+                                    "WIN" -> LG; "LOSS" -> LR; "EXP" -> LY; "OPEN" -> LBlue; else -> LGr
+                                })
                             }
-                            Text(
-                                "امتیاز: ${s.score}/100 • ورود: $${fmtPrice(s.entry)}",
-                                fontSize = 11.sp, color = LGr
-                            )
+                            
+                            // نمایش قیمت زنده
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
-                                Text("استاپ: $${fmtPrice(s.stop)}", fontSize = 10.sp, color = LR)
-                                Text("هدف: $${fmtPrice(s.target)}", fontSize = 10.sp, color = LG)
+                                Text("ورود: $${fmtPrice(s.entry)}", fontSize = 11.sp, color = LGr)
+                                if (s.currentPrice != null && s.status == "OPEN") {
+                                    Text("الان: $${fmtPrice(s.currentPrice)}", fontSize = 12.sp, color = LBlue, fontWeight = FontWeight.Bold)
+                                }
                             }
+
+                            // نمایش استاپ و هدف شناور
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                                if (s.status == "OPEN" && s.trailingStop > 0) {
+                                    Text("🛑 استاپ دنباله‌رو: $${fmtPrice(s.trailingStop)}", fontSize = 10.sp, color = LR, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Text("استاپ اولیه: $${fmtPrice(s.stop)}", fontSize = 10.sp, color = LR)
+                                }
+                                
+                                if (s.status == "OPEN" && s.currentTarget > s.target) {
+                                    Text("🎯 هدف شناور: $${fmtPrice(s.currentTarget)}", fontSize = 10.sp, color = LG, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Text("هدف: $${fmtPrice(s.target)}", fontSize = 10.sp, color = LG)
+                                }
+                            }
+
+                            if (s.status == "OPEN" && s.highestPrice > s.entry) {
+                                Text("📈 سقف ثبت‌شده: $${fmtPrice(s.highestPrice)} (سود قفل‌شده تا $${fmtPrice(s.trailingStop)})", fontSize = 9.sp, color = LY)
+                            }
+
                             s.exitPrice?.let { ep ->
-                                val pnl = if (s.side == "BUY") (ep - s.entry) / s.entry * 100
-                                else (s.entry - ep) / s.entry * 100
                                 Text(
-                                    "خروج: $${fmtPrice(ep)} • PnL: ${String.format(Locale.US, "%+.2f%%", pnl)}",
-                                    fontSize = 10.sp,
-                                    color = if (pnl >= 0) LG else LR
+                                    "خروج: $${fmtPrice(ep)} • PnL: ${String.format(Locale.US, "%+.2f%%", pnl ?: 0.0)}",
+                                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                    color = if ((pnl ?: 0.0) >= 0) LG else LR
                                 )
                             }
                         }
