@@ -64,8 +64,6 @@ private const val TWO_PI_F = 6.2831853f
 
 private data class OBPage(val title: String, val desc: String, val img: Int)
 
-// ================= صفحه اصلی Onboarding =================
-
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
     var page by remember { mutableStateOf(0) }
@@ -100,7 +98,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
         )
     }
 
-    // ---------- انیمیشن‌های سراسری ----------
     val infinite = rememberInfiniteTransition(label = "ob")
     val slow by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(9000, easing = LinearEasing), RepeatMode.Restart), label = "slow")
     val mid by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(5200, easing = LinearEasing), RepeatMode.Restart), label = "mid")
@@ -111,7 +108,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF07090D))) {
 
-        // ---------- پس‌زمینه گرادیان متحرک ----------
         val c1 = lerpColor(Color(0xFF07090D), Color(0xFF0A1F2E), slow)
         val c2 = lerpColor(Color(0xFF0E2A1E), Color(0xFF1A0E2A), slow)
         Box(
@@ -120,11 +116,9 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 .background(Brush.verticalGradient(listOf(c1, c2, Color(0xFF07090D))))
         )
 
-        // ---------- محتوای هر صفحه ----------
         Crossfade(targetState = page, animationSpec = tween(550)) { p ->
             Box(modifier = Modifier.fillMaxSize()) {
 
-                // تصویر قهرمان با تنفس آرام (Ken Burns)
                 Image(
                     painter = painterResource(pages[p].img),
                     contentDescription = null,
@@ -138,7 +132,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         }
                 )
 
-                // scrim تاریک پایین برای خوانایی متن
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -150,7 +143,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         )
                 )
 
-                // ---------- افکت‌های اختصاصی هر صفحه ----------
                 when (p) {
                     0 -> {
                         FlowingCandles(mid, Modifier.fillMaxWidth().height(120.dp).align(Alignment.BottomCenter))
@@ -173,7 +165,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
                 Sparkles(fast, Modifier.fillMaxSize())
 
-                // ---------- عنوان و توضیح ----------
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -201,7 +192,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
             }
         }
 
-        // ---------- کنترل‌های پایین ----------
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -209,7 +199,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // نقطه‌های متحرک
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pages.indices.forEach { i ->
                     val active = i == page
@@ -229,7 +218,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
             Spacer(Modifier.height(16.dp))
 
-            // دکمه اصلی با shimmer
             Box(modifier = Modifier.fillMaxWidth()) {
                 Button(
                     onClick = {
@@ -271,9 +259,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
     }
 }
 
-// ================= افکت‌های نقاشی‌شده (Canvas) =================
-
-// نوار کندل‌های روان افقی (صفحه ۱ و ۳)
 @Composable
 private fun FlowingCandles(progress: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -287,12 +272,11 @@ private fun FlowingCandles(progress: Float, modifier: Modifier = Modifier) {
             val ch = h * (0.25f + 0.55f * up)
             val col = if (i % 3 != 1) OBGreen.copy(alpha = 0.75f) else OBRed.copy(alpha = 0.75f)
             drawLine(col, Offset(x, h - ch - 12f), Offset(x, h - ch), 3f)
-            drawRoundRect(col, Offset(x - 5f, h - ch), Size(10f, ch), 3f)
+            drawRect(col, Offset(x - 5f, h - ch), Size(10f, ch))
         }
     }
 }
 
-// کندل‌های قرمز در حال سقوط (صفحه ۲ — نهنگ می‌بلعه‌شون)
 @Composable
 private fun FallingCandles(progress: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -313,12 +297,11 @@ private fun FallingCandles(progress: Float, modifier: Modifier = Modifier) {
             } * 0.8f
             val col = OBRed.copy(alpha = alpha)
             drawLine(col, Offset(x, y - 10f), Offset(x, y), 3f)
-            drawRoundRect(col, Offset(x - 5f, y), Size(10f, ch), 3f)
+            drawRect(col, Offset(x - 5f, y), Size(10f, ch))
         }
     }
 }
 
-// خط اسکن عمودی (صفحه ۳)
 @Composable
 private fun Scanline(progress: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -335,7 +318,6 @@ private fun Scanline(progress: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// هاله پالس‌زن زنگ (صفحه ۱ — گوشه بالا-راست)
 @Composable
 private fun BellGlow(pulse: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -343,7 +325,7 @@ private fun BellGlow(pulse: Float, modifier: Modifier = Modifier) {
         val r = size.width * 0.22f
         drawCircle(
             brush = Brush.radialGradient(
-                listOf(OBGold.copy(alpha = 0.10f + 0.22f * pulse), Color.Transparent),
+                colors = listOf(OBGold.copy(alpha = 0.10f + 0.22f * pulse), Color.Transparent),
                 center = c,
                 radius = r
             ),
@@ -353,7 +335,6 @@ private fun BellGlow(pulse: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// مخروط نور چراغ بازجویی که چپ‌وراست تاب می‌خوره (صفحه ۴)
 @Composable
 private fun SwingLight(swingDeg: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -368,9 +349,9 @@ private fun SwingLight(swingDeg: Float, modifier: Modifier = Modifier) {
             drawPath(
                 path,
                 Brush.linearGradient(
-                    listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
-                    startY = 0f,
-                    endY = size.height * 0.72f
+                    colors = listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                    start = Offset(px, 0f),
+                    end = Offset(px, size.height * 0.72f)
                 )
             )
         }
@@ -378,7 +359,6 @@ private fun SwingLight(swingDeg: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// دود سیگار بالارونده (صفحه ۴ — سمت چپ میز)
 @Composable
 private fun Smoke(progress: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -394,7 +374,6 @@ private fun Smoke(progress: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// حلقه رون‌های چرخان دور گوی (صفحه ۵)
 @Composable
 private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -425,7 +404,6 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// فلش نور گوی (صفحه ۵)
 @Composable
 private fun OrbFlash(fast: Float, modifier: Modifier = Modifier) {
     val flick = sin(fast * TWO_PI_F * 3f).coerceAtLeast(0f) * 0.20f
@@ -434,7 +412,7 @@ private fun OrbFlash(fast: Float, modifier: Modifier = Modifier) {
         val r = size.width * 0.26f
         drawCircle(
             brush = Brush.radialGradient(
-                listOf(Color.White.copy(alpha = flick), Color.Transparent),
+                colors = listOf(Color.White.copy(alpha = flick), Color.Transparent),
                 center = c,
                 radius = r
             ),
@@ -444,7 +422,6 @@ private fun OrbFlash(fast: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// ستاره‌های چشمک‌زن سراسری
 @Composable
 private fun Sparkles(fast: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -457,7 +434,6 @@ private fun Sparkles(fast: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// ترکیب دو رنگ
 private fun lerpColor(a: Color, b: Color, t: Float): Color {
     val tt = t.coerceIn(0f, 1f)
     return Color(
