@@ -46,14 +46,25 @@ object Indicators {
 
     // ---------- EMA ----------
 
+    /**
+     * EMA سری: خروجی هم‌اندازه ورودی.
+     * نقاط قبل از period-1 = 0.0 (نامعتبر)، نقطه period-1 = SMA، بقیه = EMA واقعی.
+     * برای کاربردهای دقیق‌تر از MacdCalc.emaAligned استفاده کنید.
+     */
     fun emaSeries(values: List<Double>, period: Int): List<Double> {
         if (values.size < period) return emptyList()
         val k = 2.0 / (period + 1)
         val out = ArrayList<Double>(values.size)
         var ema = values.take(period).average()
         for (i in values.indices) {
-            ema = if (i < period) ema else values[i] * k + ema * (1 - k)
-            out.add(ema)
+            when {
+                i < period - 1 -> out.add(0.0)
+                i == period - 1 -> out.add(ema)
+                else -> {
+                    ema = values[i] * k + ema * (1 - k)
+                    out.add(ema)
+                }
+            }
         }
         return out
     }
@@ -87,13 +98,24 @@ object Indicators {
 
     fun macd(closes: List<Double>, fast: Int = 12, slow: Int = 26, sig: Int = 9): MacdResult {
         if (closes.size < slow + sig) return MacdResult(0.0, 0.0, 0.0)
-        val ef = emaSeries(closes, fast)
-        val es = emaSeries(closes, slow)
-        if (ef.isEmpty() || es.isEmpty()) return MacdResult(0.0, 0.0, 0.0)
-        val macdLine = ef.mapIndexed { i, v -> v - es[i] }
-        val signalLine = emaSeries(macdLine, sig)
-        val m = macdLine.last()
-        val s = signalLine.lastOrNull() ?: 0.0
+        val ef = MacdCalc.emaAligned(closes, fast)
+        val es = MacdCalc.emaAligned(closes, slow)
+        if (ef.size != closes.size || es.size != closes.size) return MacdResult(0.0, 0.0, 0.0)
+
+        // خط MACD روی timeline مشترک: فقط نقاطی که هر دو EMA معتبر هستند (i >= slow-1)
+        val macdLine = closes.indices.map { i ->
+            val f = ef[i]; val s = es[i]
+            if (f == null || s == null) null else f - s
+        }
+
+        // خط سیگنال: EMA روی بخش معتبر macdLine
+        val firstValid = slow - 1
+        val validMacd = macdLine.drop(firstValid).mapNotNull { it }
+        if (validMacd.size < sig) return MacdResult(0.0, 0.0, 0.0)
+        val sigOnValid = MacdCalc.emaAligned(validMacd, sig)
+
+        val m = macdLine.lastOrNull() ?: 0.0
+        val s = sigOnValid.lastOrNull() ?: 0.0
         return MacdResult(m, s, m - s)
     }
 
