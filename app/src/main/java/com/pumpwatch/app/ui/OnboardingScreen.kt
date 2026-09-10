@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -62,12 +64,7 @@ private val OBPurple = Color(0xFFB388FF)
 
 private const val TWO_PI_F = 6.2831853f
 
-private data class OBPage(
-    val title: String,
-    val desc: String,
-    val img: Int,
-    val topCrop: Boolean = false
-)
+private data class OBPage(val title: String, val desc: String, val img: Int)
 
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
@@ -75,32 +72,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
     val pages = remember {
         listOf(
-            OBPage(
-                "لحظه درست رو شکار کن!",
-                "هشدارهای زودهنگام پامپ و دامپ، قبل از حرکت بزرگ بازار",
-                R.drawable.onb_p1
-            ),
-            OBPage(
-                "شکار نهنگ‌ها",
-                "ردپای خرید و فروش نهنگ‌ها رو قبل از حرکت بزرگ بازار دنبال کن",
-                R.drawable.onb_p2,
-                topCrop = true
-            ),
-            OBPage(
-                "تحلیل مثل حرفه‌ای‌ها",
-                "۵ تایم‌فریم + ۸ اندیکاتور + نقاط دقیق ورود، استاپ و هدف",
-                R.drawable.onb_p3
-            ),
-            OBPage(
-                "رادار میم‌کوین‌ها",
-                "کشف میم‌کوین‌های ترند قبل از پامپ؛ کارآگاه NEXT دنبال سوژه بعدیه",
-                R.drawable.onb_p4
-            ),
-            OBPage(
-                "جلوتر از بازار باش",
-                "سیگنال‌های طلایی با معیارهای ۵۰ تریدر برتر دنیا",
-                R.drawable.onb_p5
-            )
+            OBPage("لحظه درست رو شکار کن!", "هشدارهای زودهنگام پامپ و دامپ، قبل از حرکت بزرگ بازار", R.drawable.onb_p1),
+            OBPage("شکار نهنگ‌ها", "ردپای خرید و فروش نهنگ‌ها رو قبل از حرکت بزرگ بازار دنبال کن", R.drawable.onb_p2),
+            OBPage("تحلیل مثل حرفه‌ای‌ها", "۵ تایم‌فریم + ۸ اندیکاتور + نقاط دقیق ورود، استاپ و هدف", R.drawable.onb_p3),
+            OBPage("رادار میم‌کوین‌ها", "کشف میم‌کوین‌های ترند قبل از پامپ؛ کارآگاه NEXT دنبال سوژه بعدیه", R.drawable.onb_p4),
+            OBPage("جلوتر از بازار باش", "سیگنال‌های طلایی با معیارهای ۵۰ تریدر برتر دنیا", R.drawable.onb_p5)
         )
     }
 
@@ -111,6 +87,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
     val pulse by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(1300), RepeatMode.Reverse), label = "pulse")
     val swing by infinite.animateFloat(-15f, 15f, infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "swing")
     val shimmer by infinite.animateFloat(-1f, 2f, infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart), label = "shim")
+    val story by infinite.animateFloat(0f, 1f, infiniteRepeatable(tween(7000, easing = LinearEasing), RepeatMode.Restart), label = "story")
+
+    val sway = sin(story * TWO_PI_F)
+    val swallow = ((story - 0.70f) / 0.25f).coerceIn(0f, 1f)
+    val dive = sin(swallow * PI.toFloat())
 
     val c1 = lerpColor(Color(0xFF07090D), Color(0xFF0A1F2E), slow)
     val c2 = lerpColor(Color(0xFF0E2A1E), Color(0xFF1A0E2A), slow)
@@ -123,109 +104,111 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
         Sparkles(fast, Modifier.fillMaxSize())
 
-        if (page == 0 || page == 2) {
-            FlowingCandles(mid, Modifier.fillMaxWidth().height(90.dp).align(Alignment.BottomCenter))
-        }
+        Crossfade(targetState = page, animationSpec = tween(550)) { p ->
+            Box(modifier = Modifier.fillMaxSize()) {
 
-        Column(modifier = Modifier.fillMaxSize()) {
+                // ۱) کل صفحه = خود تصویر (شارپِ محو) بدون برش محتوا
+                Image(
+                    painter = painterResource(pages[p].img),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur(22.dp)
+                        .graphicsLayer { alpha = 0.80f }
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x4407090D))
+                )
 
-            // ---------- ناحیه تصویر: کل فضای بالا رو پر می‌کنه ----------
-            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-
-                Crossfade(targetState = page, animationSpec = tween(550)) { p ->
-                    Box(modifier = Modifier.fillMaxSize()) {
-
-                        // پس‌زمینه: همون تصویر بزرگ و محو (بدون نوار سیاه)
-                        Image(
-                            painter = painterResource(pages[p].img),
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer { alpha = 0.22f }
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(0x9907090D))
-                        )
-
-                        // تصویر اصلی: کامل و بدون برش (نهنگ از بالا کراپ می‌شه)
-                        Image(
-                            painter = painterResource(pages[p].img),
-                            contentDescription = null,
-                            contentScale = if (pages[p].topCrop) ContentScale.Crop else ContentScale.Fit,
-                            alignment = if (pages[p].topCrop) Alignment.TopCenter else Alignment.Center,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    val s = 1.01f + 0.02f * pulse
-                                    scaleX = s
-                                    scaleY = s
+                // ۲) نسخه شارپ وسط + حرکت سینمایی + افکت‌ها
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1.78f)
+                        .align(Alignment.Center)
+                ) {
+                    Image(
+                        painter = painterResource(pages[p].img),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val s = 1.01f + 0.02f * pulse
+                                scaleX = s
+                                scaleY = s
+                                when (p) {
+                                    0 -> {
+                                        translationY = sway * 10f
+                                        rotationZ = sway * 1.5f
+                                    }
+                                    1 -> translationY = dive * 46f
+                                    2 -> alpha = 0.94f + 0.06f * sin(story * 50f * PI.toFloat())
+                                    3 -> {
+                                        val b = 1.01f + 0.015f * sin(story * TWO_PI_F)
+                                        scaleX = b
+                                        scaleY = b
+                                    }
+                                    4 -> translationY = -sin(story * TWO_PI_F) * 12f
                                 }
-                        )
+                            }
+                    )
 
-                        when (p) {
-                            0 -> BellGlow(pulse, Modifier.fillMaxSize())
-                            1 -> FallingCandles(mid, Modifier.fillMaxSize())
-                            2 -> Scanline(fast, Modifier.fillMaxSize())
-                            3 -> {
-                                SwingLight(swing, Modifier.fillMaxSize())
-                                Smoke(mid, Modifier.fillMaxSize())
-                            }
-                            4 -> {
-                                RuneRing(slow, fast, Modifier.fillMaxSize())
-                                OrbFlash(fast, Modifier.fillMaxSize())
-                            }
+                    when (p) {
+                        0 -> RocketStory(story, Modifier.fillMaxSize())
+                        1 -> WhaleStory(story, Modifier.fillMaxSize())
+                        2 -> CockpitStory(story, Modifier.fillMaxSize())
+                        3 -> {
+                            SwingLight(swing, Modifier.fillMaxSize())
+                            Smoke(mid, Modifier.fillMaxSize())
+                            DetectiveStory(story, Modifier.fillMaxSize())
+                        }
+                        4 -> {
+                            RuneRing(slow, fast, Modifier.fillMaxSize())
+                            OrbStory(story, Modifier.fillMaxSize())
                         }
                     }
                 }
 
-                // محو شدن لبه پایین تصویر به پس‌زمینه
+                // ۳) scrim پایین
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
                         .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(300.dp)
                         .background(
-                            Brush.verticalGradient(listOf(Color.Transparent, c1))
+                            Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE07090D)))
                         )
                 )
-            }
 
-            // ---------- عنوان و توضیح ----------
-            Crossfade(targetState = page, animationSpec = tween(550)) { p ->
+                // ۴) عنوان و توضیح
                 Column(
                     modifier = Modifier
+                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(horizontal = 28.dp),
+                        .padding(horizontal = 28.dp)
+                        .padding(bottom = 176.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        pages[p].title,
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color.White,
-                        textAlign = TextAlign.Center
-                    )
+                    Text(pages[p].title, fontSize = 26.sp, fontWeight = FontWeight.Black, color = Color.White, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(10.dp))
-                    Text(
-                        pages[p].desc,
-                        fontSize = 14.sp,
-                        color = Color(0xFFC7D2DC),
-                        textAlign = TextAlign.Center,
-                        lineHeight = 22.sp
-                    )
+                    Text(pages[p].desc, fontSize = 14.sp, color = Color(0xFFC7D2DC), textAlign = TextAlign.Center, lineHeight = 22.sp)
                 }
             }
+        }
 
-            Spacer(Modifier.height(20.dp))
-
-            // ---------- نقطه‌ها ----------
-            Row(
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+        // ---------- کنترل‌های پایین ----------
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pages.indices.forEach { i ->
                     val active = i == page
                     val wd by animateDpAsState(if (active) 26.dp else 8.dp, label = "dot$i")
@@ -244,15 +227,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
             Spacer(Modifier.height(14.dp))
 
-            // ---------- دکمه اصلی ----------
-            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+            Box(modifier = Modifier.fillMaxWidth()) {
                 Button(
-                    onClick = {
-                        if (page < pages.size - 1) page++ else onDone()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
+                    onClick = { if (page < pages.size - 1) page++ else onDone() },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = OBGreen),
                     shape = RoundedCornerShape(18.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp, pressedElevation = 2.dp)
@@ -279,62 +257,114 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 )
             }
 
-            TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            TextButton(onClick = onDone) {
                 Text("رد شدن و ورود مستقیم", color = OBGray, fontSize = 12.sp)
             }
-
-            Spacer(Modifier.height(8.dp))
         }
     }
 }
 
+// ---------- صفحه ۱: موشک + زنگ ----------
 @Composable
-private fun FlowingCandles(progress: Float, modifier: Modifier = Modifier) {
+private fun RocketStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val n = 26
         val w = size.width
         val h = size.height
-        for (i in 0 until n) {
-            val base = i.toFloat() / n
-            val x = (((base - progress * 0.9f) % 1f) + 1f) % 1f * w
-            val up = sin(i * 1.7f) * 0.5f + 0.5f
-            val ch = h * (0.25f + 0.55f * up)
-            val col = if (i % 3 != 1) OBGreen.copy(alpha = 0.45f) else OBRed.copy(alpha = 0.45f)
-            drawLine(col, Offset(x, h - ch - 12f), Offset(x, h - ch), 3f)
-            drawRect(col, Offset(x - 5f, h - ch), Size(10f, ch))
+        // جرقه‌های دنباله موشک
+        for (i in 0 until 14) {
+            val t = (story + i / 14f) % 1f
+            val x = w * (0.16f + 0.30f * t)
+            val y = h * (0.78f - 0.34f * t) + sin((t * 6f + i) * 1.4f) * 8f
+            val a = (1f - t) * 0.7f
+            drawCircle(OBGold.copy(alpha = a), 3f + (1f - t) * 4f, Offset(x, y))
+        }
+        // موج‌های زنگ
+        for (k in 0 until 3) {
+            val ph = (story * 1.3f + k / 3f) % 1f
+            drawCircle(
+                color = OBGold.copy(alpha = (1f - ph) * 0.45f),
+                radius = 24f + ph * 70f,
+                center = Offset(w * 0.80f, h * 0.22f),
+                style = Stroke(3f)
+            )
+        }
+        // کندل‌های سبز پامپ
+        for (i in 0 until 7) {
+            val g = (sin((story * 2f + i * 0.4f) * PI.toFloat()) + 1f) / 2f
+            val x = w * (0.08f + i * 0.06f)
+            val base = h * 0.92f
+            val ch = h * (0.10f + 0.22f * g)
+            val col = OBGreen.copy(alpha = 0.65f)
+            drawLine(col, Offset(x, base - ch - 12f), Offset(x, base - ch), 3f)
+            drawRect(col, Offset(x - 5f, base - ch), Size(10f, ch))
+        }
+        // خرده‌های قرمز سقوط
+        for (i in 0 until 8) {
+            val t = (story * 1.1f + i / 8f) % 1f
+            val x = w * (0.55f + (i % 4) * 0.10f)
+            val y = t * h * 0.70f
+            val a = (1f - t) * 0.7f
+            drawRect(OBRed.copy(alpha = a), Offset(x, y), Size(8f, 14f))
         }
     }
 }
 
+// ---------- صفحه ۲: پامپ → دامپ → بلع ----------
 @Composable
-private fun FallingCandles(progress: Float, modifier: Modifier = Modifier) {
+private fun WhaleStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val n = 14
         val w = size.width
         val h = size.height
-        for (i in 0 until n) {
-            val base = i.toFloat() / n
-            val speed = 0.7f + (i % 4) * 0.18f
-            val t = ((base + progress * speed) % 1.2f) - 0.1f
-            val x = w * (0.06f + 0.88f * ((i * 0.37f) % 1f))
-            val y = t * h
-            val ch = h * (0.05f + 0.05f * ((i * 0.53f) % 1f))
-            val alpha = when {
-                t < 0.1f -> t / 0.1f
-                t > 0.85f -> (1.2f - t) / 0.35f
-                else -> 1f
-            } * 0.8f
-            val col = OBRed.copy(alpha = alpha)
-            drawLine(col, Offset(x, y - 10f), Offset(x, y), 3f)
-            drawRect(col, Offset(x - 5f, y), Size(10f, ch))
+        val mouth = Offset(w * 0.72f, h * 0.45f)
+        val swallow = ((story - 0.70f) / 0.25f).coerceIn(0f, 1f)
+
+        for (i in 0 until 8) {
+            val g = ((story - i * 0.02f) / 0.30f).coerceIn(0f, 1f)
+            if (g <= 0f) continue
+            val x = w * (0.10f + i * 0.055f)
+            val base = h * 0.80f
+            val ch = h * 0.10f + h * 0.26f * g
+            val col = OBGreen.copy(alpha = 0.75f)
+            drawLine(col, Offset(x, base - ch - 14f), Offset(x, base - ch), 3f)
+            drawRect(col, Offset(x - 5f, base - ch), Size(10f, ch))
+        }
+
+        for (i in 0 until 8) {
+            val t = ((story - 0.30f - i * 0.025f) / 0.30f).coerceIn(0f, 1f)
+            if (t <= 0f || swallow >= 1f) continue
+            val x = w * (0.50f + i * 0.055f)
+            val landY = h * 0.70f
+            val y = -30f + t * (landY + 30f)
+            val ease = swallow * swallow
+            val px = x + (mouth.x - x) * ease
+            val py = y + (mouth.y - y) * ease
+            val sc = 1f - swallow
+            val ch = h * 0.09f * sc
+            val col = OBRed.copy(alpha = 0.85f * sc)
+            drawLine(col, Offset(px, py - ch - 12f * sc), Offset(px, py - ch), 3f * sc + 0.5f)
+            drawRect(col, Offset(px - 5f * sc, py - ch), Size(10f * sc, ch))
+        }
+
+        if (swallow in 0.75f..1f) {
+            val gq = (swallow - 0.75f) / 0.25f
+            drawCircle(
+                color = Color.White.copy(alpha = (1f - gq) * 0.6f),
+                radius = 20f + gq * 70f,
+                center = mouth,
+                style = Stroke(4f)
+            )
         }
     }
 }
 
+// ---------- صفحه ۳: کوکپیت تحلیل ----------
 @Composable
-private fun Scanline(progress: Float, modifier: Modifier = Modifier) {
+private fun CockpitStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val y = progress * size.height
+        val w = size.width
+        val h = size.height
+        // خط اسکن
+        val y = story * h
         drawRect(
             Brush.verticalGradient(
                 listOf(Color.Transparent, OBTeal.copy(alpha = 0.22f), Color.Transparent),
@@ -342,25 +372,102 @@ private fun Scanline(progress: Float, modifier: Modifier = Modifier) {
                 endY = y + 40f
             ),
             topLeft = Offset(0f, y - 40f),
-            size = Size(size.width, 80f)
+            size = Size(w, 80f)
         )
+        // پالس ENTRY
+        val ph1 = (story * 1.5f) % 1f
+        drawCircle(
+            color = OBGreen.copy(alpha = (1f - ph1) * 0.55f),
+            radius = 12f + ph1 * 46f,
+            center = Offset(w * 0.435f, h * 0.52f),
+            style = Stroke(3f)
+        )
+        // حلقه چرخان TARGET
+        drawCircle(
+            color = OBGold.copy(alpha = 0.6f),
+            radius = 26f,
+            center = Offset(w * 0.62f, h * 0.28f),
+            style = Stroke(3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 14f), story * 120f))
+        )
+        // جریان داده
+        for (i in 0 until 20) {
+            val xx = ((i / 20f + story) % 1f) * w
+            val yy = h * 0.66f + sin((xx / w * 4f + story * 2f) * PI.toFloat()) * h * 0.05f
+            drawLine(OBTeal.copy(alpha = 0.5f), Offset(xx, yy), Offset(xx + 10f, yy), 2f)
+        }
     }
 }
 
+// ---------- صفحه ۴: اتاق کارآگاه ----------
 @Composable
-private fun BellGlow(pulse: Float, modifier: Modifier = Modifier) {
+private fun DetectiveStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val c = Offset(size.width * 0.80f, size.height * 0.24f)
-        val r = size.width * 0.22f
+        val w = size.width
+        val h = size.height
+        // فلیکر نئون NEXT
+        val flick = ((sin(story * 30f * PI.toFloat()) + 1f) / 2f).coerceIn(0f, 1f)
+        val drop = if (sin(story * 7f * PI.toFloat()) > 0.96f) 0.3f else 1f
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(OBGold.copy(alpha = 0.10f + 0.22f * pulse), Color.Transparent),
-                center = c,
-                radius = r
+                listOf(OBTeal.copy(alpha = (0.10f + 0.18f * flick) * drop), Color.Transparent),
+                center = Offset(w * 0.5f, h * 0.07f),
+                radius = w * 0.20f
             ),
-            center = c,
-            radius = r
+            center = Offset(w * 0.5f, h * 0.07f),
+            radius = w * 0.20f
         )
+        // پالس نخ‌های قرمز
+        for (i in 0 until 12) {
+            val ang = (i * 30f).toDouble() * PI / 180.0
+            val ex = w * 0.5f + kotlin.math.cos(ang).toFloat() * w * 0.44f
+            val ey = h * 0.42f + kotlin.math.sin(ang).toFloat() * h * 0.34f
+            val wave = (sin((story * 3f - i / 12f) * TWO_PI_F) + 1f) / 2f
+            drawLine(OBRed.copy(alpha = 0.15f + 0.35f * wave), Offset(w * 0.5f, h * 0.42f), Offset(ex, ey), 2f)
+        }
+        // غبار معلق
+        for (i in 0 until 10) {
+            val t = (story * 0.6f + i / 10f) % 1f
+            val x = w * ((i * 0.37f) % 1f)
+            val yy = h * (1f - t)
+            drawCircle(Color.White.copy(alpha = (1f - t) * 0.12f), 2f, Offset(x, yy))
+        }
+    }
+}
+
+// ---------- صفحه ۵: گوی پیشگو ----------
+@Composable
+private fun OrbStory(story: Float, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val c = Offset(w * 0.5f, h * 0.45f)
+        // فلش نور گوی
+        val flick = sin(story * 6f * PI.toFloat()).coerceAtLeast(0f) * 0.18f
+        drawCircle(
+            brush = Brush.radialGradient(listOf(Color.White.copy(alpha = flick), Color.Transparent), center = c, radius = w * 0.30f),
+            center = c,
+            radius = w * 0.30f
+        )
+        // فلیکر شمع‌های دو طرف
+        for (s in 0 until 2) {
+            val cx = if (s == 0) w * 0.13f else w * 0.87f
+            val fl = (sin(story * 25f * PI.toFloat() + s * 2f) + 1f) / 2f
+            drawCircle(
+                brush = Brush.radialGradient(listOf(OBGold.copy(alpha = 0.15f + 0.20f * fl), Color.Transparent), center = Offset(cx, h * 0.60f), radius = 60f),
+                center = Offset(cx, h * 0.60f),
+                radius = 60f
+            )
+        }
+        // جرقه‌های بالارونده دور گوی
+        for (i in 0 until 16) {
+            val t = (story + i / 16f) % 1f
+            val ang = (i * 22.5f + story * 90f).toDouble() * PI / 180.0
+            val r = w * 0.18f + t * w * 0.14f
+            val x = c.x + kotlin.math.cos(ang).toFloat() * r
+            val yy = c.y + kotlin.math.sin(ang).toFloat() * r * 0.6f - t * 40f
+            val col = if (i % 2 == 0) OBPurple else Color.White
+            drawCircle(col.copy(alpha = (1f - t) * 0.6f), 2.5f, Offset(x, yy))
+        }
     }
 }
 
@@ -436,24 +543,6 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
                 width = 2f,
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 22f), -fast * 36f)
             )
-        )
-    }
-}
-
-@Composable
-private fun OrbFlash(fast: Float, modifier: Modifier = Modifier) {
-    val flick = sin(fast * TWO_PI_F * 3f).coerceAtLeast(0f) * 0.20f
-    Canvas(modifier) {
-        val c = Offset(size.width / 2f, size.height * 0.5f)
-        val r = size.width * 0.30f
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color.White.copy(alpha = flick), Color.Transparent),
-                center = c,
-                radius = r
-            ),
-            center = c,
-            radius = r
         )
     }
 }
