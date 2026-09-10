@@ -19,12 +19,23 @@ class MonitorWorker(
     companion object {
         private const val CHANNEL_ID = "pumpwatch_monitor"
         private const val MIN_SCORE = 70
+        
+        /**
+         * کلید inputData برای snapshot کردن mode در زمان enqueue.
+         * Scheduler باید هنگام زمان‌بندی، mode فعلی کاربر را در inputData بگذارد
+         * تا حتی اگر کاربر بعداً mode را عوض کرد، Worker با mode قبلی اجرا شود.
+         */
+        const val KEY_MODE = "mode"
     }
 
     override suspend fun doWork(): Result {
         return try {
-            val prefs = applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
-            val modeRaw = prefs.getString("mode", "SPOT") ?: "SPOT"
+            // اولویت ۱: snapshot از inputData (زمان enqueue)
+            // اولویت ۲: fallback به prefs (برای backward compatibility)
+            val modeRaw = inputData.getString(KEY_MODE)
+                ?: applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
+                    .getString("mode", "SPOT")
+                ?: "SPOT"
             val mode = if (modeRaw == "FUTURES") "FUT" else "SPOT"
 
             val results = BatchScanner.scan(mode, SignalParams(), limit = 25)
