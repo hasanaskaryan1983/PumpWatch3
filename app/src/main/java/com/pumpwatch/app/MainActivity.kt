@@ -89,7 +89,7 @@ private val TextSecondary = Color(0xFF8B949E)
 private val AccentYellow = Color(0xFFFFC107)
 
 enum class Tab(val title: String, val emoji: String) {
-    MARKET("بازار", "📊"),
+    MARKET("بازار", ""),
     ALERTS("هشدار", "🔔"),
     WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
@@ -224,7 +224,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         )
                         Spacer(Modifier.weight(1f))
                         
-                        // دکمه تغییر حالت اسپات/فیوچرز
                         Surface(
                             modifier = Modifier.clickable {
                                 isFutures = !isFutures
@@ -245,7 +244,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         
                         Spacer(Modifier.width(8.dp))
                         
-                        // دکمه وضعیت Paper Bot (جدید در فاز ۳)
                         Surface(
                             modifier = Modifier.clickable {
                                 isPaperBotActive = !isPaperBotActive
@@ -257,7 +255,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                             color = if (isPaperBotActive) AccentYellow.copy(alpha = 0.15f) else DarkCard
                         ) {
                             Text(
-                                text = if (isPaperBotActive) "🤖 روشن" else "🤖 خاموش",
+                                text = if (isPaperBotActive) "🤖 روشن" else " خاموش",
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                 color = if (isPaperBotActive) AccentYellow else TextSecondary,
                                 fontWeight = FontWeight.Bold,
@@ -353,7 +351,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                     } catch (_: Exception) { }
                 }
             } catch (e: Exception) {
-                // اصلاح فاز ۳: تشخیص هوشمند نوع خطا
                 errorMsg = if (e is RateLimitedException) {
                     "⚠️ محدودیت نرخ درخواست سرور. لطفاً ۱ دقیقه صبر کنید و دوباره تلاش کنید."
                 } else {
@@ -385,7 +382,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp)
             )
         }
@@ -463,20 +460,4 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             }
         }
     }
-}
-
-// توابع کمکی فرمت‌دهی (اگر در فایل دیگری نیستند، اینجا می‌مانند)
-private fun formatMarketCap(value: Double?): String {
-    if (value == null) return "-"
-    return when {
-        value >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", value / 1_000_000_000_000)
-        value >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", value / 1_000_000_000)
-        value >= 1_000_000 -> String.format(Locale.US, "$%.2fM", value / 1_000_000)
-        else -> String.format(Locale.US, "$%.2f", value)
-    }
-}
-
-private fun formatPrice(value: Double?): String {
-    if (value == null) return "-"
-    return if (value >= 1) String.format(Locale.US, "$%,.2f", value) else String.format(Locale.US, "$%.6f", value)
 }
