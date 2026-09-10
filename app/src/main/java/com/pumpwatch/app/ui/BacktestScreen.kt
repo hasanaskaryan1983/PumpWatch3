@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 import com.google.gson.JsonArray
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.engine.MacdCalc
 import com.pumpwatch.app.engine.PumpDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -35,6 +36,8 @@ private val LY = Color(0xFFFFC107)
 private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
+
+private const val FEE_RATE = 0.001 // 0.1% per side
 
 private object KlineCache {
     private val map = mutableMapOf<String, Pair<Long, List<JsonArray>>>()
@@ -133,8 +136,8 @@ fun BacktestScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، خروج روی CLOSE کندل"
-                else "🏦 اسپات: امتیاز ≥۷۰ + هفتگی مثبت + OBV مثبت",
+                if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، خروج روی CLOSE کندل | کارمزد 0.2% کل"
+                else "🏦 اسپات: امتیاز ≥۷۰ + هفتگی مثبت + OBV مثبت | کارمزد 0.2% کل",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
@@ -252,6 +255,8 @@ fun BacktestScreen() {
                                     analyzed++
                                     val closes = klines.map { it[4].asDouble }
                                     val volumes = klines.map { it[5].asDouble }
+                                    val highs = klines.map { it[2].asDouble }
+                                    val lows = klines.map { it[3].asDouble }
                                     val start = max(48, closes.size - tf.evalLast)
                                     val end = closes.size - tf.hold
                                     var prev = 0
@@ -260,25 +265,38 @@ fun BacktestScreen() {
                                         val freshBuy = score >= 60 && prev < 60
                                         val freshSell = score <= -60 && prev > -60
                                         if (freshBuy || freshSell) {
-                                            val entry = closes[i]
+                                            val entryPrice = closes[i]
+                                            val entryReal = if (score > 0) entryPrice * (1 + FEE_RATE) else entryPrice * (1 - FEE_RATE)
                                             val side = if (score > 0) "BUY" else "SELL"
                                             val atr = atrAt(closes, i)
-                                            val risk = if (atr > 0) atr * 2.5 else entry * 0.05
-                                            val stop = if (side == "BUY") entry - risk else entry + risk
-                                            val target = if (side == "BUY") entry + risk * 1.5 else entry - risk * 1.5
+                                            val risk = if (atr > 0) atr * 2.5 else entryPrice * 0.05
+                                            val stop = if (side == "BUY") entryPrice - risk else entryPrice + risk
+                                            val target = if (side == "BUY") entryPrice + risk * 1.5 else entryPrice - risk * 1.5
                                             var result = "EXP"
-                                            var exit = closes[min(i + tf.hold, closes.size - 1)]
+                                            var exitPrice = closes[min(i + tf.hold, closes.size - 1)]
                                             for (j in (i + 1)..min(i + tf.hold, closes.size - 1)) {
-                                                val cj = closes[j]
+                                                val hj = highs[j]
+                                                val lj = lows[j]
                                                 if (side == "BUY") {
-                                                    if (cj <= stop) { result = "LOSS"; exit = stop; break }
-                                                    if (cj >= target) { result = "WIN"; exit = target; break }
+                                                    val hitStop = lj <= stop
+                                                    val hitTarget = hj >= target
+                                                    when {
+                                                        hitStop && hitTarget -> { result = "LOSS"; exitPrice = stop; break }
+                                                        hitStop -> { result = "LOSS"; exitPrice = stop; break }
+                                                        hitTarget -> { result = "WIN"; exitPrice = target; break }
+                                                    }
                                                 } else {
-                                                    if (cj >= stop) { result = "LOSS"; exit = stop; break }
-                                                    if (cj <= target) { result = "WIN"; exit = target; break }
+                                                    val hitStop = hj >= stop
+                                                    val hitTarget = lj <= target
+                                                    when {
+                                                        hitStop && hitTarget -> { result = "LOSS"; exitPrice = stop; break }
+                                                        hitStop -> { result = "LOSS"; exitPrice = stop; break }
+                                                        hitTarget -> { result = "WIN"; exitPrice = target; break }
+                                                    }
                                                 }
                                             }
-                                            val pnl = if (side == "BUY") (exit - entry) / entry * 100 else (entry - exit) / entry * 100
+                                            val exitReal = if (side == "BUY") exitPrice * (1 - FEE_RATE) else exitPrice * (1 + FEE_RATE)
+                                            val pnl = if (side == "BUY") (exitReal - entryReal) / entryReal * 100 else (entryReal - exitReal) / entryReal * 100
                                             allResults.add(BacktestResult(symbol, idx + 1, side, pnl, score, result))
                                         }
                                         prev = score
@@ -295,15 +313,17 @@ fun BacktestScreen() {
                                     val lows = klines.map { it[3].asDouble }
                                     val closes = klines.map { it[4].asDouble }
                                     val volumes = klines.map { it[5].asDouble }
-                                    val weekly = closes.chunked(7).map { it.last() }
                                     val e50s = emaSeries(closes, 50)
                                     var prevSig = false
                                     for (i in 200 until closes.size) {
-                                        var score = spotScore(closes.subList(0, i + 1), volumes.subList(0, i + 1), weekly)
+                                        val closesSlice = closes.subList(0, i + 1)
+                                        val volumesSlice = volumes.subList(0, i + 1)
+                                        val weeklySlice = closesSlice.chunked(7).map { it.last() }
+                                        var score = spotScore(closesSlice, volumesSlice, weeklySlice)
                                         val sixty = PumpDetector.analyzeSixtySecond(
                                             highs.subList(0, i + 1),
                                             lows.subList(0, i + 1),
-                                            closes.subList(0, i + 1)
+                                            closesSlice
                                         )
                                         score += when (sixty.signal) {
                                             "BUY" -> 15
@@ -312,33 +332,42 @@ fun BacktestScreen() {
                                         }
                                         score = score.coerceIn(-100, 100)
 
-                                        // فیلتر کیفیت: امتیاز ۷۰ + هفتگی مثبت + OBV مثبت
-                                        val wScore = weeklyScore(closes.subList(0, i + 1).chunked(7).map { it.last() })
-                                        val oScore = obvScore(closes.subList(0, i + 1), volumes.subList(0, i + 1))
+                                        val wScore = weeklyScore(weeklySlice)
+                                        val oScore = obvScore(closesSlice, volumesSlice)
                                         val sig = score >= 70 && wScore > 0 && oScore > 0
 
                                         if (sig && !prevSig) {
-                                            val entry = closes[i]
+                                            val entryPrice = closes[i]
+                                            val entryReal = entryPrice * (1 + FEE_RATE)
                                             val atr = atrAt(closes, i)
-                                            val atrPct = if (entry > 0) atr / entry * 100 else 10.0
+                                            val atrPct = if (entryPrice > 0) atr / entryPrice * 100 else 10.0
                                             val stopPct = (atrPct * 2.5).coerceIn(7.0, 15.0)
-                                            var trail = entry * (1.0 - stopPct / 100.0)
-                                            val target = entry * (1.0 + stopPct * 2.0 / 100.0)
+                                            var trail = entryPrice * (1.0 - stopPct / 100.0)
+                                            val target = entryPrice * (1.0 + stopPct * 2.0 / 100.0)
 
                                             var result = "EXP"
-                                            var exit = closes[min(i + hold, closes.size - 1)]
+                                            var exitPrice = closes[min(i + hold, closes.size - 1)]
                                             for (j in (i + 1)..min(i + hold, closes.size - 1)) {
-                                                if (lows[j] <= trail) { result = "LOSS"; exit = trail; break }
-                                                if (highs[j] >= target) { result = "WIN"; exit = target; break }
-                                                if (closes[j] < e50s[j]) {
-                                                    exit = closes[j]
-                                                    result = if (exit >= entry) "WIN" else "LOSS"
-                                                    break
+                                                val hj = highs[j]
+                                                val lj = lows[j]
+                                                val hitStop = lj <= trail
+                                                val hitTarget = hj >= target
+                                                val hitE50 = closes[j] < e50s[j]
+                                                when {
+                                                    hitStop && hitTarget -> { result = "LOSS"; exitPrice = trail; break }
+                                                    hitStop -> { result = "LOSS"; exitPrice = trail; break }
+                                                    hitTarget -> { result = "WIN"; exitPrice = target; break }
+                                                    hitE50 -> {
+                                                        exitPrice = closes[j]
+                                                        result = if (exitPrice >= entryPrice) "WIN" else "LOSS"
+                                                        break
+                                                    }
                                                 }
                                                 val nt = closes[j] * (1.0 - stopPct / 100.0)
                                                 if (nt > trail) trail = nt
                                             }
-                                            val pnl = (exit - entry) / entry * 100
+                                            val exitReal = exitPrice * (1 - FEE_RATE)
+                                            val pnl = (exitReal - entryReal) / entryReal * 100
                                             allResults.add(BacktestResult(symbol, idx + 1, "BUY", pnl, score, result))
                                         }
                                         prevSig = sig
@@ -397,6 +426,7 @@ fun BacktestScreen() {
                     Text("وین‌ریت: ${String.format(Locale.US, "%.1f%%", winRate)}", fontWeight = FontWeight.Bold, color = if (winRate >= 55) LG else LR)
                     Text("میانگین PnL: ${String.format(Locale.US, "%+.2f%%", avgPnl)}", fontWeight = FontWeight.Bold, color = if (avgPnl >= 0) LG else LR)
                     Text("مجموع PnL: ${String.format(Locale.US, "%+.2f%%", totalPnl)}", fontWeight = FontWeight.Bold, color = if (totalPnl >= 0) LG else LR)
+                    Text("💰 کارمزد لحاظ شده: 0.1% هر طرف (0.2% کل)", fontSize = 10.sp, color = LGr)
                 }
             }
 
@@ -544,11 +574,7 @@ private fun rsiOf(data: List<Double>, period: Int = 14): Double {
     return 100.0 - 100.0 / (1.0 + ag / al)
 }
 
-private fun macdUp(data: List<Double>): Boolean {
-    if (data.size < 35) return false
-    val prev = data.dropLast(1)
-    return (emaLast(data, 12) - emaLast(data, 26)) > (emaLast(prev, 12) - emaLast(prev, 26))
-}
+private fun macdUp(data: List<Double>): Boolean = MacdCalc.macdUp(data)
 
 private fun bollinger(data: List<Double>, period: Int = 20): Pair<Double, Double> {
     if (data.size < period) return Pair(0.0, 0.0)
