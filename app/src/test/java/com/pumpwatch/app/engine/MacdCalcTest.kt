@@ -48,22 +48,42 @@ class MacdCalcTest {
     }
 
     @Test
-    fun `macdUp detects bullish cross on synthetic series`() {
+    fun `macdUp true in sustained uptrend (MACD above signal)`() {
         val flat = MutableList(60) { 100.0 }
         val up = MutableList(20) { 100.0 + it * 2.0 }
-        val series = flat + up
-        assertTrue("must detect bullish cross after jump", MacdCalc.macdUp(series))
+        assertTrue("uptrend must be bullish regime", MacdCalc.macdUp(flat + up))
     }
 
     @Test
-    fun `macdUp returns false on flat series`() {
+    fun `macdUp false in sustained downtrend`() {
+        val flat = MutableList(60) { 100.0 }
+        val down = MutableList(20) { 100.0 - it * 2.0 }
+        assertFalse("downtrend must not be bullish regime", MacdCalc.macdUp(flat + down))
+    }
+
+    @Test
+    fun `macdUp false on flat series`() {
         val flat = MutableList(80) { 100.0 }
-        assertFalse("flat series must not trigger bullish cross", MacdCalc.macdUp(flat))
+        assertFalse("flat series has MACD == signal", MacdCalc.macdUp(flat))
     }
 
     @Test
-    fun `macdUp returns false on insufficient data`() {
+    fun `macdUp false on insufficient data`() {
         val small = listOf(1.0, 2.0, 3.0)
         assertFalse(MacdCalc.macdUp(small))
+    }
+
+    @Test
+    fun `macdCrossUp detects fresh cross exactly on jump bar`() {
+        val flat = MutableList(60) { 100.0 }
+        val series = flat + listOf(102.0) // کراس دقیقاً در آخرین کندل
+        assertTrue("fresh bullish cross must be detected", MacdCalc.macdCrossUp(series))
+    }
+
+    @Test
+    fun `macdCrossUp false when cross happened earlier (sustained uptrend)`() {
+        val flat = MutableList(60) { 100.0 }
+        val up = MutableList(20) { 100.0 + it * 2.0 }
+        assertFalse("old cross is not a fresh cross", MacdCalc.macdCrossUp(flat + up))
     }
 }
