@@ -19,13 +19,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Run unit tests
+        run: |
+          if [ -f ./gradlew ]; then
+            chmod +x gradlew
+            ./gradlew testDebugUnitTest --no-daemon
+          else
+            gradle testDebugUnitTest --no-daemon
+          fi
+
       - name: Build debug APK
         run: |
           if [ -f ./gradlew ]; then
             chmod +x gradlew
             ./gradlew assembleDebug --no-daemon
           else
-            gradle assembleDebug
+            gradle assembleDebug --no-daemon
           fi
 
       - name: Upload APK artifact
