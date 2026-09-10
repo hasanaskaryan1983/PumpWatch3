@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,7 +63,12 @@ private val OBPurple = Color(0xFFB388FF)
 
 private const val TWO_PI_F = 6.2831853f
 
-private data class OBPage(val title: String, val desc: String, val img: Int)
+private data class OBPage(
+    val title: String,
+    val desc: String,
+    val img: Int,
+    val crop: Boolean = false
+)
 
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
@@ -78,7 +84,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
             OBPage(
                 "شکار نهنگ‌ها",
                 "ردپای خرید و فروش نهنگ‌ها رو قبل از حرکت بزرگ بازار دنبال کن",
-                R.drawable.onb_p2
+                R.drawable.onb_p2,
+                crop = true
             ),
             OBPage(
                 "تحلیل مثل حرفه‌ای‌ها",
@@ -106,72 +113,70 @@ fun OnboardingScreen(onDone: () -> Unit) {
     val swing by infinite.animateFloat(-15f, 15f, infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "swing")
     val shimmer by infinite.animateFloat(-1f, 2f, infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Restart), label = "shim")
 
-    Box(modifier = Modifier.fillMaxSize().background(Color(0xFF07090D))) {
+    val c1 = lerpColor(Color(0xFF07090D), Color(0xFF0A1F2E), slow)
+    val c2 = lerpColor(Color(0xFF0E2A1E), Color(0xFF1A0E2A), slow)
 
-        val c1 = lerpColor(Color(0xFF07090D), Color(0xFF0A1F2E), slow)
-        val c2 = lerpColor(Color(0xFF0E2A1E), Color(0xFF1A0E2A), slow)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(c1, c2, Color(0xFF07090D))))
-        )
+    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c1, c2, Color(0xFF07090D))))) {
 
-        Crossfade(targetState = page, animationSpec = tween(550)) { p ->
-            Box(modifier = Modifier.fillMaxSize()) {
+        Sparkles(fast, Modifier.fillMaxSize())
 
-                Image(
-                    painter = painterResource(pages[p].img),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.06f + 0.03f * pulse
-                            scaleY = 1.06f + 0.03f * pulse
-                            translationY = -6f + 12f * mid
-                        }
-                )
+        // نوار کندل‌های روان پایین صفحه (صفحه ۱ و ۳)
+        if (page == 0 || page == 2) {
+            FlowingCandles(mid, Modifier.fillMaxWidth().height(90.dp).align(Alignment.BottomCenter))
+        }
 
+        Column(modifier = Modifier.fillMaxSize()) {
+
+            Spacer(Modifier.height(28.dp))
+
+            // ---------- نوار تصویر: کل صحنه کامل دیده می‌شه ----------
+            Crossfade(targetState = page, animationSpec = tween(550)) { p ->
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                0.35f to Color.Transparent,
-                                1f to Color(0xCC07090D)
-                            )
-                        )
-                )
+                        .fillMaxWidth()
+                        .aspectRatio(1.55f)
+                        .padding(horizontal = 12.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                ) {
+                    Image(
+                        painter = painterResource(pages[p].img),
+                        contentDescription = null,
+                        contentScale = if (pages[p].crop) ContentScale.Crop else ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF0A0D12))
+                            .graphicsLayer {
+                                val s = 1.01f + 0.02f * pulse
+                                scaleX = s
+                                scaleY = s
+                            }
+                    )
 
-                when (p) {
-                    0 -> {
-                        FlowingCandles(mid, Modifier.fillMaxWidth().height(120.dp).align(Alignment.BottomCenter))
-                        BellGlow(pulse, Modifier.fillMaxSize())
-                    }
-                    1 -> FallingCandles(mid, Modifier.fillMaxSize())
-                    2 -> {
-                        Scanline(fast, Modifier.fillMaxSize())
-                        FlowingCandles(mid, Modifier.fillMaxWidth().height(100.dp).align(Alignment.BottomCenter))
-                    }
-                    3 -> {
-                        SwingLight(swing, Modifier.fillMaxSize())
-                        Smoke(mid, Modifier.fillMaxSize())
-                    }
-                    4 -> {
-                        RuneRing(slow, fast, Modifier.fillMaxSize())
-                        OrbFlash(fast, Modifier.fillMaxSize())
+                    when (p) {
+                        0 -> BellGlow(pulse, Modifier.fillMaxSize())
+                        1 -> FallingCandles(mid, Modifier.fillMaxSize())
+                        2 -> Scanline(fast, Modifier.fillMaxSize())
+                        3 -> {
+                            SwingLight(swing, Modifier.fillMaxSize())
+                            Smoke(mid, Modifier.fillMaxSize())
+                        }
+                        4 -> {
+                            RuneRing(slow, fast, Modifier.fillMaxSize())
+                            OrbFlash(fast, Modifier.fillMaxSize())
+                        }
                     }
                 }
+            }
 
-                Sparkles(fast, Modifier.fillMaxSize())
+            Spacer(Modifier.weight(1f))
 
+            // ---------- عنوان و توضیح ----------
+            Crossfade(targetState = page, animationSpec = tween(550)) { p ->
                 Column(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 28.dp)
-                        .padding(bottom = 168.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Bottom
+                        .fillMaxWidth()
+                        .padding(horizontal = 28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         pages[p].title,
@@ -190,16 +195,14 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     )
                 }
             }
-        }
 
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Spacer(Modifier.height(22.dp))
+
+            // ---------- نقطه‌ها ----------
+            Row(
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 pages.indices.forEach { i ->
                     val active = i == page
                     val wd by animateDpAsState(if (active) 26.dp else 8.dp, label = "dot$i")
@@ -218,7 +221,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
             Spacer(Modifier.height(16.dp))
 
-            Box(modifier = Modifier.fillMaxWidth()) {
+            // ---------- دکمه اصلی ----------
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
                 Button(
                     onClick = {
                         if (page < pages.size - 1) page++ else onDone()
@@ -252,9 +256,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 )
             }
 
-            TextButton(onClick = onDone) {
+            TextButton(onClick = onDone, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 Text("رد شدن و ورود مستقیم", color = OBGray, fontSize = 12.sp)
             }
+
+            Spacer(Modifier.height(10.dp))
         }
     }
 }
@@ -270,7 +276,7 @@ private fun FlowingCandles(progress: Float, modifier: Modifier = Modifier) {
             val x = (((base - progress * 0.9f) % 1f) + 1f) % 1f * w
             val up = sin(i * 1.7f) * 0.5f + 0.5f
             val ch = h * (0.25f + 0.55f * up)
-            val col = if (i % 3 != 1) OBGreen.copy(alpha = 0.75f) else OBRed.copy(alpha = 0.75f)
+            val col = if (i % 3 != 1) OBGreen.copy(alpha = 0.55f) else OBRed.copy(alpha = 0.55f)
             drawLine(col, Offset(x, h - ch - 12f), Offset(x, h - ch), 3f)
             drawRect(col, Offset(x - 5f, h - ch), Size(10f, ch))
         }
@@ -335,12 +341,11 @@ private fun BellGlow(pulse: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// مخروط نور چراغ بازجویی — چرخش با محاسبه دستی مختصات (بدون تابع rotate)
 @Composable
 private fun SwingLight(swingDeg: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val px = size.width / 2f
-        val bottomY = size.height * 0.72f
+        val bottomY = size.height * 0.95f
         val halfW = size.width * 0.30f
         val ang = swingDeg * PI / 180.0
         val cosA = kotlin.math.cos(ang).toFloat()
@@ -363,19 +368,19 @@ private fun SwingLight(swingDeg: Float, modifier: Modifier = Modifier) {
                 end = Offset(px, bottomY)
             )
         )
-        drawCircle(OBGold.copy(alpha = 0.25f), 46f, Offset(px, 8f))
+        drawCircle(OBGold.copy(alpha = 0.25f), 30f, Offset(px, 4f))
     }
 }
 
 @Composable
 private fun Smoke(progress: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val cx = size.width * 0.30f
+        val cx = size.width * 0.22f
         for (i in 0 until 10) {
             val t = (progress + i / 10f) % 1f
-            val y = size.height * 0.86f - t * size.height * 0.55f
-            val x = cx + sin((t * 5f + i) * 1.35f) * size.width * 0.05f
-            val r = 6f + t * 42f
+            val y = size.height * 0.95f - t * size.height * 0.7f
+            val x = cx + sin((t * 5f + i) * 1.35f) * size.width * 0.04f
+            val r = 4f + t * 26f
             val a = (1f - t) * 0.16f
             drawCircle(Color.White.copy(alpha = a), r, Offset(x, y))
         }
@@ -386,8 +391,8 @@ private fun Smoke(progress: Float, modifier: Modifier = Modifier) {
 private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val cx = size.width / 2f
-        val cy = size.height * 0.42f
-        val r = minOf(size.width, size.height) * 0.30f
+        val cy = size.height * 0.5f
+        val r = minOf(size.width, size.height) * 0.34f
         val rot = slow * 360f
         for (i in 0 until 28) {
             val a = (i * 12.857f + rot).toDouble() * PI / 180.0
@@ -395,7 +400,7 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
             drawLine(
                 col.copy(alpha = 0.55f),
                 Offset(cx + kotlin.math.cos(a).toFloat() * r, cy + sin(a).toFloat() * r),
-                Offset(cx + kotlin.math.cos(a).toFloat() * (r + 14f), cy + sin(a).toFloat() * (r + 14f)),
+                Offset(cx + kotlin.math.cos(a).toFloat() * (r + 10f), cy + sin(a).toFloat() * (r + 10f)),
                 3f
             )
         }
@@ -416,8 +421,8 @@ private fun RuneRing(slow: Float, fast: Float, modifier: Modifier = Modifier) {
 private fun OrbFlash(fast: Float, modifier: Modifier = Modifier) {
     val flick = sin(fast * TWO_PI_F * 3f).coerceAtLeast(0f) * 0.20f
     Canvas(modifier) {
-        val c = Offset(size.width / 2f, size.height * 0.42f)
-        val r = size.width * 0.26f
+        val c = Offset(size.width / 2f, size.height * 0.5f)
+        val r = size.width * 0.30f
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(Color.White.copy(alpha = flick), Color.Transparent),
