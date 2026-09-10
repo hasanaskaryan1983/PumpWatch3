@@ -105,6 +105,7 @@ object MultiExchange {
 
     private suspend fun fetchKlinesNetwork(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
         // 1) Bybit
+        // ساختار: [ts, open, high, low, close, volume, ...]
         try {
             val r = bybit.kline("spot", "${symbolUpper}USDT", bybitInterval(interval), limit)
             val list = r.result?.list
@@ -115,6 +116,7 @@ object MultiExchange {
         } catch (_: Exception) { }
 
         // 2) OKX
+        // ساختار: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
         try {
             val r = okx.candles("${symbolUpper}-USDT", okxBar(interval), limit)
             val list = r.data
@@ -125,10 +127,12 @@ object MultiExchange {
         } catch (_: Exception) { }
 
         // 3) Gate
+        // ساختار واقعی Gate spot: [timestamp, volume, close, high, low, open, quote_volume]
+        // پس: t=0, open=5, high=3, low=4, close=2, volume=1
         try {
             val list = gate.candlesticks("${symbolUpper}_USDT", gateInterval(interval), limit)
             if (list.isNotEmpty()) {
-                val out = list.mapNotNull { a -> candle(a, 0, 2, 3, 4, 5, 6, false) }
+                val out = list.mapNotNull { a -> candle(a, 0, 5, 3, 4, 2, 1, false) }
                 if (out.isNotEmpty()) return out
             }
         } catch (_: Exception) { }
