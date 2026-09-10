@@ -9,15 +9,18 @@ import kotlinx.coroutines.delay
 import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.data.ScanMarket
 import kotlin.math.abs
+import kotlin.math.max
 
 /**
- * BatchScanner Pro — نسخه سازگار نهایی
- * خروجی: List<SignalResult> | ورودی: (mode, params, limit)
+ * BatchScanner Pro — نسخه اصلاح‌شده فاز ۲
+ * اصلاحات:
+ * ۱. فیلتر دقیق استیبل‌کوین (جلوگیری از حذف USDTBULL و جفت‌ارزها)
+ * ۲. محافظت در برابر حجم منفی/غیرواقعی در ساخت کندل CoinGecko
  */
 object BatchScanner {
 
     private const val TAG = "BatchScanner"
-    private val STABLES = setOf("USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD")
+    private val STABLES = setOf("USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD", "TETHER", "USDCOIN")
 
     suspend fun scan(
         mode: String,
@@ -31,7 +34,12 @@ object BatchScanner {
 
             val candidates = markets
                 .filter { m ->
-                    val isStable = STABLES.any { m.symbol.contains(it, true) }
+                    val sym = m.symbol.uppercase().replace("-", "")
+                    // اصلاح فیلتر استیبل‌کوین: فقط خود استیبل‌کوین‌ها یا جفت‌های مستقیم فیات را حذف کن
+                    // این Regex باعث می‌شود USDTBULL یا BTC-USDT به اشتباه حذف نشوند
+                    val isStable = STABLES.contains(sym) ||
+                                   sym.matches(Regex("^(USDT|USDC|DAI|FDUSD|TUSD|BUSD)(USD|EUR|GBP)?$"))
+                    
                     !isStable && (m.volume ?: 0.0) > 500_000.0
                 }
                 .sortedByDescending { quickScore(it) }
@@ -139,7 +147,7 @@ object BatchScanner {
         var low = prices[0][1]
         var lastClose = prices[0][1]
         var vol = 0.0
-        var lastVol = volumes?.firstOrNull()?.get(1) ?: 0.0
+        var lastVol = volumes?.firstOrNull()?.getOrNull(1) ?: 0.0
 
         for (i in 1 until prices.size) {
             val ts = prices[i][0].toLong()
@@ -167,12 +175,18 @@ object BatchScanner {
             }
             lastClose = p
 
-            val v = volumes?.getOrNull(i)?.get(1) ?: 0.0
-            val dv = v - lastVol
-            if (dv > 0) vol += dv
+            // اصلاح محاسبه حجم: جلوگیری از حجم منفی یا جهش‌های غیرمنطقی API CoinGecko
+            val v = volumes?.getOrNull(i)?.getOrNull(1) ?: 0.0
+            val dv = max(0.0, v - lastVol)
+            
+            // اگر جهش حجم غیرمنطقی بود (مثلاً ریست شدن دیتا در API)، آن را نادیده بگیر
+            if (dv < 1_000_000_000.0) {
+                vol += dv
+            }
             lastVol = v
         }
 
+        // اضافه کردن کندل آخر
         out.add(
             Candle(
                 time = bucketStart,
