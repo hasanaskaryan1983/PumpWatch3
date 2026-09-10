@@ -53,16 +53,33 @@ interface GateApi {
     ): List<List<String>>
 }
 
-// ========== کش سراسری — همه بخش‌های اپ از همین‌جا کندل می‌گیرن ==========
+// ========== کش سراسری — thread-safe با سقف اندازه ==========
 private object GlobalKlineCache {
     private val map = mutableMapOf<String, Pair<Long, List<BinanceCandle>>>()
+    private val lock = Any()
+    private const val MAX_SIZE = 500
+    private const val TTL_MS = 5 * 60 * 1000L
+
     fun get(key: String): List<BinanceCandle>? {
-        val e = map[key] ?: return null
-        if (System.currentTimeMillis() - e.first > 5 * 60 * 1000) return null
-        return e.second
+        synchronized(lock) {
+            val e = map[key] ?: return null
+            if (System.currentTimeMillis() - e.first > TTL_MS) {
+                map.remove(key)
+                return null
+            }
+            return e.second
+        }
     }
+
     fun put(key: String, v: List<BinanceCandle>) {
-        map[key] = System.currentTimeMillis() to v
+        synchronized(lock) {
+            // اگر کش پر شد، قدیمی‌ترین کلید را حذف کن (FIFO)
+            if (map.size >= MAX_SIZE) {
+                val oldestKey = map.entries.minByOrNull { it.value.first }?.key
+                if (oldestKey != null) map.remove(oldestKey)
+            }
+            map[key] = System.currentTimeMillis() to v
+        }
     }
 }
 
