@@ -14,6 +14,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -35,6 +36,11 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // پشتیبانی از منابع در تست‌ها
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -55,4 +61,8 @@ dependencies {
 
     // WorkManager (پایش خودکار پس‌زمینه)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // ===== Unit Tests (فاز ۱: Gate parser + MACD هم‌تراز) =====
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.0")
 }
