@@ -59,15 +59,29 @@ object MacdCalc {
     }
 
     /**
-     * تشخیص کراس صعودی MACD در آخرین نقطه کامل.
-     * (قابل استفاده از QuickScanner و CoinDetailScreen — مرحله ۳)
+     * رژیم صعودی: در آخرین نقطه معتبر، خط MACD بالای خط سیگنال باشد.
+     * (کاربرد: امتیازدهی در QuickScanner / CoinDetailScreen / BacktestScreen)
      */
     fun macdUp(closes: List<Double>, fast: Int = 12, slow: Int = 26, sig: Int = 9): Boolean {
         val n = closes.size
         if (n < slow + sig) return false
         val m = macdLine(closes, fast, slow)
         val s = signalLine(closes, fast, slow, sig)
-        if (n < 2) return false
+        val m1 = m[n - 1]
+        val s1 = s[n - 1]
+        if (m1 == null || s1 == null) return false
+        return m1 > s1
+    }
+
+    /**
+     * کراس صعودی تازه: دقیقاً در آخرین کندل، MACD از زیر سیگنال رد شده به بالا.
+     * (کاربرد: تشخیص لحظه وقوع سیگنال جدید)
+     */
+    fun macdCrossUp(closes: List<Double>, fast: Int = 12, slow: Int = 26, sig: Int = 9): Boolean {
+        val n = closes.size
+        if (n < slow + sig + 1) return false
+        val m = macdLine(closes, fast, slow)
+        val s = signalLine(closes, fast, slow, sig)
         val m0 = m[n - 2]; val m1 = m[n - 1]
         val s0 = s[n - 2]; val s1 = s[n - 1]
         if (m0 == null || m1 == null || s0 == null || s1 == null) return false
