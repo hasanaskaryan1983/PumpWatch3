@@ -14,7 +14,10 @@ import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
 import com.pumpwatch.app.store.OfflineCache
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 data class CoinMarket(
     val id: String,
@@ -58,29 +61,61 @@ interface CoinGeckoApi {
     ): MarketChart
 }
 
+/**
+ * Rate-limit مشترک برای همه درخواست‌های CoinGecko.
+ * 
+ * اصلاحات فاز ۲:
+ * - MIN_INTERVAL_MS افزایش به 1500ms (CoinGecko free ~10-30 req/min)
+ * - خواندن و احترام به Retry-After header
+ * - پرتاب RateLimitedException پس از max retries (نه proceed بی‌صدا)
+ * - AtomicLong برای thread-safety
+ */
 object ThrottledHttp {
 
-    private const val MIN_INTERVAL_MS = 250L
-    private var lastRequestMs = 0L
+    // CoinGecko free tier: ~10-30 requests/minute → ~2-6 seconds بین درخواست‌ها
+    // 1500ms یک تعادل منطقی است که هم throughput خوب دارد هم rate-limit نمی‌شود
+    private const val MIN_INTERVAL_MS = 1500L
+    private const val MAX_RETRIES = 5
+    private const val BASE_BACKOFF_MS = 3000L
+    private const val MAX_BACKOFF_MS = 60_000L // سقف 1 دقیقه
+
+    private val lastRequestMs = AtomicLong(0L)
     private val lock = Any()
 
     private val interceptor = object : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
+            // ۱) Throttle: فاصله حداقل بین درخواست‌ها
             synchronized(lock) {
-                val wait = lastRequestMs + MIN_INTERVAL_MS - System.currentTimeMillis()
+                val wait = lastRequestMs.get() + MIN_INTERVAL_MS - System.currentTimeMillis()
                 if (wait > 0) Thread.sleep(wait)
-                lastRequestMs = System.currentTimeMillis()
+                lastRequestMs.set(System.currentTimeMillis())
             }
+
+            // ) Retry با backoff نمایی و احترام به Retry-After
             var retries = 0
-            while (retries < 4) {
+            while (retries < MAX_RETRIES) {
                 val response = chain.proceed(chain.request())
                 if (response.code != 429) return response
+
+                // Rate-limit شد — close کن و backoff
                 response.close()
                 retries++
-                Thread.sleep(2000L * (1L shl (retries - 1)))
-                synchronized(lock) { lastRequestMs = System.currentTimeMillis() }
+
+                // خواندن Retry-After header (ثانیه)
+                val retryAfter = response.header("Retry-After")?.toLongOrNull()
+                val backoffMs = if (retryAfter != null && retryAfter > 0) {
+                    (retryAfter * 1000L).coerceIn(BASE_BACKOFF_MS, MAX_BACKOFF_MS)
+                } else {
+                    // Exponential backoff: 3s, 6s, 12s, 24s, 48s
+                    (BASE_BACKOFF_MS * (1L shl (retries - 1))).coerceAtMost(MAX_BACKOFF_MS)
+                }
+
+                Thread.sleep(backoffMs)
+                synchronized(lock) { lastRequestMs.set(System.currentTimeMillis()) }
             }
-            return chain.proceed(chain.request())
+
+            // پس از MAX_RETRIES، exception خاص پرتاب کن تا caller بداند rate-limit شده
+            throw RateLimitedException("CoinGecko rate limit exceeded after $MAX_RETRIES retries")
         }
     }
 
@@ -92,6 +127,12 @@ object ThrottledHttp {
             .build()
     }
 }
+
+/**
+ * Exception خاص برای rate-limit (HTTP 429).
+ * Caller می‌تواند این را از سایر خطاهای شبکه تشخیص دهد.
+ */
+class RateLimitedException(message: String) : IOException(message)
 
 object ApiClient {
 
@@ -110,10 +151,11 @@ object ApiClient {
     private const val DISK_FRESH_MS = 1_800_000L
     private const val CHART_FRESH_MS = 300_000L
 
-    private var cache1000: List<CoinMarket> = emptyList()
-    private var cache1000Time = 0L
-    private var cache100: List<CoinMarket> = emptyList()
-    private var cache100Time = 0L
+    // Thread-safe cache با AtomicReference/AtomicLong
+    private val cache1000Ref = AtomicReference<List<CoinMarket>>(emptyList())
+    private val cache1000TimeRef = AtomicLong(0L)
+    private val cache100Ref = AtomicReference<List<CoinMarket>>(emptyList())
+    private val cache100TimeRef = AtomicLong(0L)
 
     val api: CoinGeckoApi by lazy {
         Retrofit.Builder()
@@ -127,7 +169,7 @@ object ApiClient {
     // ---------- نمایش فوری: کش یا فقط ۱ صفحه ----------
 
     suspend fun getQuickCoins(): List<CoinMarket> {
-        if (cache1000.isNotEmpty()) return cache1000
+        cache1000Ref.get().takeIf { it.isNotEmpty() }?.let { return it }
         loadList("m250")?.let { return it }
         val p1 = api.getMarkets(perPage = 250, page = 1)
         OfflineCache.save(app, "m250", gson.toJson(p1))
@@ -137,17 +179,20 @@ object ApiClient {
     // ---------- ۱۰۰۰ ارز کامل ----------
 
     suspend fun getTop1000Coins(forceRefresh: Boolean = false): List<CoinMarket> {
-        if (!forceRefresh && cache1000.isNotEmpty() &&
-            System.currentTimeMillis() - cache1000Time < MEM_CACHE_TTL
-        ) return cache1000
+        val cached = cache1000Ref.get()
+        val cachedTime = cache1000TimeRef.get()
 
-        if (!forceRefresh && cache1000.isEmpty()) {
+        if (!forceRefresh && cached.isNotEmpty() &&
+            System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
+        ) return cached
+
+        if (!forceRefresh && cached.isEmpty()) {
             val disk = loadList("m1000")
             if (disk != null &&
                 System.currentTimeMillis() - OfflineCache.time(app, "m1000") < DISK_FRESH_MS
             ) {
-                cache1000 = disk
-                cache1000Time = System.currentTimeMillis()
+                cache1000Ref.set(disk)
+                cache1000TimeRef.set(System.currentTimeMillis())
                 return disk
             }
         }
@@ -156,17 +201,19 @@ object ApiClient {
             val results = mutableListOf<CoinMarket>()
             for (page in 1..4) {
                 results.addAll(api.getMarkets(perPage = 250, page = page))
-                if (page < 4) delay(300)
+                // افزایش delay بین صفحات: 2000ms برای CoinGecko free tier
+                if (page < 4) delay(2000)
             }
-            cache1000 = results.sortedBy { it.market_cap_rank ?: 9999 }
-            cache1000Time = System.currentTimeMillis()
-            OfflineCache.save(app, "m1000", gson.toJson(cache1000))
-            cache1000
+            val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
+            cache1000Ref.set(sorted)
+            cache1000TimeRef.set(System.currentTimeMillis())
+            OfflineCache.save(app, "m1000", gson.toJson(sorted))
+            sorted
         } catch (e: Exception) {
             val disk = loadList("m1000") ?: loadList("m250")
             if (disk != null) {
-                cache1000 = disk
-                cache1000Time = System.currentTimeMillis()
+                cache1000Ref.set(disk)
+                cache1000TimeRef.set(System.currentTimeMillis())
                 disk
             } else throw e
         }
@@ -175,31 +222,35 @@ object ApiClient {
     // ---------- ۱۰۰ ارز ----------
 
     suspend fun getTop100Coins(forceRefresh: Boolean = false): List<CoinMarket> {
-        if (!forceRefresh && cache100.isNotEmpty() &&
-            System.currentTimeMillis() - cache100Time < MEM_CACHE_TTL
-        ) return cache100
+        val cached = cache100Ref.get()
+        val cachedTime = cache100TimeRef.get()
 
-        if (!forceRefresh && cache100.isEmpty()) {
+        if (!forceRefresh && cached.isNotEmpty() &&
+            System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
+        ) return cached
+
+        if (!forceRefresh && cached.isEmpty()) {
             val disk = loadList("m100")
             if (disk != null &&
                 System.currentTimeMillis() - OfflineCache.time(app, "m100") < DISK_FRESH_MS
             ) {
-                cache100 = disk
-                cache100Time = System.currentTimeMillis()
+                cache100Ref.set(disk)
+                cache100TimeRef.set(System.currentTimeMillis())
                 return disk
             }
         }
 
         return try {
-            cache100 = api.getMarkets(perPage = 100, page = 1)
-            cache100Time = System.currentTimeMillis()
-            OfflineCache.save(app, "m100", gson.toJson(cache100))
-            cache100
+            val fresh = api.getMarkets(perPage = 100, page = 1)
+            cache100Ref.set(fresh)
+            cache100TimeRef.set(System.currentTimeMillis())
+            OfflineCache.save(app, "m100", gson.toJson(fresh))
+            fresh
         } catch (e: Exception) {
             val disk = loadList("m100")
             if (disk != null) {
-                cache100 = disk
-                cache100Time = System.currentTimeMillis()
+                cache100Ref.set(disk)
+                cache100TimeRef.set(System.currentTimeMillis())
                 disk
             } else throw e
         }
@@ -233,10 +284,10 @@ object ApiClient {
     }
 
     fun clearMemoryCache() {
-        cache1000 = emptyList()
-        cache1000Time = 0L
-        cache100 = emptyList()
-        cache100Time = 0L
+        cache1000Ref.set(emptyList())
+        cache1000TimeRef.set(0L)
+        cache100Ref.set(emptyList())
+        cache100TimeRef.set(0L)
     }
 
     private fun loadList(key: String): List<CoinMarket>? {
