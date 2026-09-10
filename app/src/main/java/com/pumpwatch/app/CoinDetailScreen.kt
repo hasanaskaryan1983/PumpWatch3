@@ -211,7 +211,7 @@ private fun computeLayer(closes: List<Double>, volumes: List<Double>?): Layer {
 }
 
 private fun lightEmoji(score: Int): String = when {
-    score >= 40 -> "🟢"
+    score >= 40 -> ""
     score <= -40 -> "🔴"
     else -> "🟡"
 }
@@ -265,8 +265,8 @@ private fun buildAnalysis(
     val explanation = buildString {
         append("🧠 معماری امتیازدهی وزنی (Confluence):\n")
         append("EMA 25% + MACD 25% + RSI 20% + حجم 15% + بولینگر 15% = امتیاز پایه (-100 تا +100)\n")
-        append("🚦 هم‌راستایی ۴ تایم‌فریم (۱۵د/۱س/۱۲س/۴س) = +10 پاداش\n")
-        append("⚡ فاندینگ منفی شدید = +10 | فاندینگ مثبت شدید = -10\n")
+        append("🚦 هم‌راستایی ۴ تایم‌فریم (۱۵د/۱س/۲س/۴س) = +10 پاداش\n")
+        append(" فاندینگ منفی شدید = +10 | فاندینگ مثبت شدید = -10\n")
         append("📈 OI صعودی همراه قیمت = +10 | پامپ بدون OI = -10 (پامپ مصنوعی)\n")
         append("🐳 وتوی نهنگی: فشار فروش آن‌چین ≥ 65% = مسدود شدن سیگنال خرید\n")
         append("🎯 آستانه‌ها: ≥75 خرید قوی | ≥40 خرید | ±40 خنثی | ≤-40 فروش\n")
@@ -285,13 +285,14 @@ private fun fmt(v: Double): String =
     if (v >= 1) String.format(Locale.US, "$%,.4f", v)
     else String.format(Locale.US, "$%.6f", v)
 
-private fun formatMarketCap(value: Double?): String {
-    if (value == null) return "-"
+// ⚠️ فقط یک تابع formatMarketCap — با نام پارامتر cap (سازگار با فایل اصلی)
+private fun formatMarketCap(cap: Double?): String {
+    if (cap == null) return "-"
     return when {
-        value >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", value / 1_000_000_000_000)
-        value >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", value / 1_000_000_000)
-        value >= 1_000_000 -> String.format(Locale.US, "$%.2fM", value / 1_000_000)
-        else -> String.format(Locale.US, "$%.2f", value)
+        cap >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", cap / 1_000_000_000_000)
+        cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
+        cap >= 1_000_000 -> String.format(Locale.US, "$%.2fM", cap / 1_000_000)
+        else -> String.format(Locale.US, "$%.2f", cap)
     }
 }
 
@@ -525,7 +526,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             fontSize = 13.sp, color = Gray, fontWeight = FontWeight.Bold
                         )
 
-                        // 🔍 بخش جدید: دلایل سیگنال (قدم ۲ فاز ۳)
+                        // 🔍 بخش جدید: دلایل سیگنال
                         layer?.let { l ->
                             Surface(
                                 color = MaterialTheme.colorScheme.surface,
@@ -576,7 +577,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         fundingRate?.let { fr ->
                             Text(
                                 "⚡ فاندینگ: ${String.format(Locale.US, "%.4f%%", fr * 100)}" +
-                                        (if (fr <= -0.0003) " — پتانسیل اسکوییز 🚀" else if (fr >= 0.0005) " — لانگ‌ها شلوغن 🩸" else ""),
+                                        (if (fr <= -0.0003) " — پتانسیل اسکوییز 🚀" else if (fr >= 0.0005) " — لانگ‌ها شلوغن " else ""),
                                 fontSize = 10.sp,
                                 color = if (fr <= -0.0003) Green else if (fr >= 0.0005) Red else Gray
                             )
@@ -596,7 +597,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         }
 
                         Text(
-                            "🎯 بر اساس: ${tfLabel(tf)} • معماری وزنی Confluence • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
+                            " بر اساس: ${tfLabel(tf)} • معماری وزنی Confluence • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
                             fontSize = 10.sp, color = Gray
                         )
                     }
