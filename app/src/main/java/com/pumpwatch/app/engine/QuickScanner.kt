@@ -322,11 +322,11 @@ object QuickScanner {
         return 100.0 - 100.0 / (1.0 + ag / al)
     }
 
-    private fun macdUp(data: List<Double>): Boolean {
-        if (data.size < 35) return false
-        val prev = data.dropLast(1)
-        return (emaLast(data, 12) - emaLast(data, 26)) > (emaLast(prev, 12) - emaLast(prev, 26))
-    }
+    /**
+     * تشخیص کراس صعودی واقعی MACD — delegate به پیاده‌سازی مشترک MacdCalc.
+     * این تابع بررسی می‌کند که خط MACD در آخرین نقطه از زیر signal عبور کرده به بالا.
+     */
+    private fun macdUp(data: List<Double>): Boolean = MacdCalc.macdUp(data)
 
     private fun bollinger(data: List<Double>, period: Int = 20): Pair<Double, Double> {
         if (data.size < period) return Pair(0.0, 0.0)
