@@ -140,7 +140,8 @@ object MultiExchange {
         return emptyList()
     }
 
-    private fun candle(
+    // internal (نه private) تا تست GateParserTest بتونه مستقیم صداش بزنه
+    internal fun candle(
         a: List<String>,
         t: Int, o: Int, h: Int, l: Int, c: Int, v: Int,
         timeMs: Boolean
