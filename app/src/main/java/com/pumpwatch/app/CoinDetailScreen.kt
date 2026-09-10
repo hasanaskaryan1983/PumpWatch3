@@ -61,6 +61,7 @@ private val Red = Color(0xFFFF5252)
 private val Yellow = Color(0xFFFFC107)
 private val Gray = Color(0xFF8B949E)
 private val Blue = Color(0xFF40C4FF)
+private val TextPrimary = Color(0xFFE6EDF3)
 
 private data class TfInfo(val name: String, val trend: String, val rsi: Double)
 
@@ -283,6 +284,16 @@ private fun buildAnalysis(
 private fun fmt(v: Double): String =
     if (v >= 1) String.format(Locale.US, "$%,.4f", v)
     else String.format(Locale.US, "$%.6f", v)
+
+private fun formatMarketCap(value: Double?): String {
+    if (value == null) return "-"
+    return when {
+        value >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", value / 1_000_000_000_000)
+        value >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", value / 1_000_000_000)
+        value >= 1_000_000 -> String.format(Locale.US, "$%.2fM", value / 1_000_000)
+        else -> String.format(Locale.US, "$%.2f", value)
+    }
+}
 
 @Composable
 fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
@@ -514,13 +525,44 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             fontSize = 13.sp, color = Gray, fontWeight = FontWeight.Bold
                         )
 
+                        // 🔍 بخش جدید: دلایل سیگنال (قدم ۲ فاز ۳)
                         layer?.let { l ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                IndChip("EMA 25%", l.ema)
-                                IndChip("MACD 25%", l.macd)
-                                IndChip("RSI 20%", l.rsi)
-                                IndChip("حجم 15%", l.vol)
-                                IndChip("بولینگر 15%", l.boll)
+                            Surface(
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🔍 چرا این سیگنال؟ (دلایل امتیازدهی):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    
+                                    val reasons = mutableListOf<String>()
+                                    if (l.ema > 0) reasons.add("✅ روند صعودی (قیمت بالای EMA20 و EMA50)")
+                                    else if (l.ema < 0) reasons.add("❌ روند نزولی (قیمت زیر میانگین‌ها)")
+                                    else reasons.add("⚪ روند خنثی")
+
+                                    if (l.macd > 0) reasons.add("✅ مومنتوم مثبت (MACD صعودی)")
+                                    else reasons.add("❌ مومنتوم منفی (MACD نزولی)")
+
+                                    if (l.rsi > 0) reasons.add("✅ اشباع فروش (RSI < 35، پتانسیل برگشت)")
+                                    else if (l.rsi < 0) reasons.add("❌ اشباع خرید (RSI > 65، خطر اصلاح)")
+                                    else reasons.add("⚪ RSI در محدوده خنثی")
+
+                                    if (l.vol > 0) reasons.add("✅ حجم معاملات بالاتر از میانگین (تأیید روند)")
+                                    else if (l.vol < 0) reasons.add("❌ حجم معاملات ضعیف (عدم تأیید)")
+                                    else reasons.add("⚪ حجم معاملات معمولی")
+
+                                    if (l.boll > 0) reasons.add("✅ قیمت نزدیک به کف باند بولینگر (فرصت خرید)")
+                                    else if (l.boll < 0) reasons.add("❌ قیمت نزدیک به سقف باند بولینگر (خطر اصلاح)")
+                                    else reasons.add("⚪ قیمت در محدوده میانی بولینگر")
+
+                                    reasons.forEach { reason ->
+                                        Text(reason, fontSize = 12.sp, color = TextPrimary, lineHeight = 18.sp)
+                                    }
+                                    
+                                    if (aligned) {
+                                        Text("🌟 هم‌راستایی کامل ۴ تایم‌فریم (+۱۰ امتیاز)", fontSize = 12.sp, color = Green, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
 
@@ -529,12 +571,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                                 "🚦 " + lights.joinToString(" • ") { (label, s) -> "$label ${lightEmoji(s)}" },
                                 fontSize = 11.sp, color = Gray
                             )
-                            if (aligned) {
-                                Text(
-                                    "✅ هم‌راستایی کامل ۴ تایم‌فریم (+۱۰ امتیاز)",
-                                    fontSize = 10.sp, color = Green, fontWeight = FontWeight.Bold
-                                )
-                            }
                         }
 
                         fundingRate?.let { fr ->
@@ -734,14 +770,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
     }
-}
-
-@Composable
-private fun IndChip(label: String, dir: Int) {
-    Text(
-        "$label ${if (dir > 0) "🟢" else if (dir < 0) "🔴" else "⚪"}",
-        fontSize = 10.sp
-    )
 }
 
 @Composable
