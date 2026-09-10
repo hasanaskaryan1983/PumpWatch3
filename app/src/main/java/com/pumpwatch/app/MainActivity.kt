@@ -59,6 +59,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.RateLimitedException
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.ui.AssistantScreen
 import com.pumpwatch.app.ui.BacktestScreen
@@ -85,15 +86,16 @@ private val AccentGreen = Color(0xFF00E676)
 private val AccentRed = Color(0xFFFF5252)
 private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
+private val AccentYellow = Color(0xFFFFC107)
 
 enum class Tab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
     ALERTS("هشدار", "🔔"),
     WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
-    BACKTEST("بک‌تست", ""),
-    TOP("برترین", ""),
-    MEME("میم", ""),
+    BACKTEST("بک‌تست", "🧪"),
+    TOP("برترین", "🏆"),
+    MEME("میم", "🐸"),
     LOG("سیگنال", "📓"),
     TRADES("معامله", "📈"),
     WALLETS("کیف پول", "👛")
@@ -108,7 +110,6 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        // مدیریت نتیجه: اگر کاربر رد کرد، وضعیت را ذخیره و اطلاع بده
         val prefs = getSharedPreferences("pumpwatch_prefs", 0)
         prefs.edit().putBoolean("notifications_granted", granted).apply()
         if (!granted) {
@@ -123,21 +124,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // درخواست مجوز اعلان (فقط اندروید ۱۳+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        // زمان‌بندی MonitorWorker (با snapshot mode و backoff نمایی)
         MonitorScheduler.start(this)
-
-        // زمان‌بندی SignalScannerWorker (با backoff و snapshot mode)
         scheduleSignalScanner()
 
         setContent {
             PumpWatchTheme {
                 MainApp(onModeChanged = {
-                    // وقتی کاربر mode را عوض کرد، هر دو Worker را با mode جدید re-schedule کن
                     MonitorScheduler.start(this)
                     scheduleSignalScanner()
                 })
@@ -145,16 +141,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * زمان‌بندی SignalScannerWorker با backoff نمایی و snapshot از mode فعلی.
-     * با ExistingPeriodicWorkPolicy.UPDATE، اگر Worker قبلی با پارامترهای قدیمی در صف باشد، جایگزین می‌شود.
-     */
     private fun scheduleSignalScanner() {
         val prefs = getSharedPreferences("pumpwatch_prefs", 0)
         val currentMode = prefs.getString("mode", "SPOT") ?: "SPOT"
 
         val inputData = Data.Builder()
-            .putString(MonitorWorker.KEY_MODE, currentMode) // reuse same key for consistency
+            .putString(MonitorWorker.KEY_MODE, currentMode)
             .build()
 
         val scanRequest = PeriodicWorkRequestBuilder<SignalScannerWorker>(1, TimeUnit.HOURS)
@@ -164,11 +156,7 @@ class MainActivity : ComponentActivity() {
                     .build()
             )
             .setInputData(inputData)
-            .setBackoffCriteria(
-                BackoffPolicy.EXPONENTIAL,
-                1,
-                TimeUnit.MINUTES
-            )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             SIGNAL_SCANNER_WORK_NAME,
@@ -200,14 +188,13 @@ fun PumpWatchTheme(content: @Composable () -> Unit) {
 fun MainApp(onModeChanged: () -> Unit = {}) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
-    var isFutures by remember {
-        mutableStateOf(prefs.getString("mode", "SPOT") == "FUTURES")
-    }
+    
+    var isFutures by remember { mutableStateOf(prefs.getString("mode", "SPOT") == "FUTURES") }
+    var isPaperBotActive by remember { mutableStateOf(prefs.getBoolean("paper_bot", false)) }
+    
     var selectedTab by remember { mutableStateOf(Tab.MARKET) }
     var selectedCoin by remember { mutableStateOf<CoinMarket?>(null) }
-    var onboarded by remember {
-        mutableStateOf(prefs.getBoolean("onboarded", false))
-    }
+    var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
 
     if (!onboarded) {
         OnboardingScreen(onDone = {
@@ -236,18 +223,16 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                             color = AccentGreen
                         )
                         Spacer(Modifier.weight(1f))
+                        
+                        // دکمه تغییر حالت اسپات/فیوچرز
                         Surface(
                             modifier = Modifier.clickable {
                                 isFutures = !isFutures
-                                prefs.edit()
-                                    .putString("mode", if (isFutures) "FUTURES" else "SPOT")
-                                    .apply()
-                                // با تغییر mode، Workerها را با snapshot جدید re-schedule کن
+                                prefs.edit().putString("mode", if (isFutures) "FUTURES" else "SPOT").apply()
                                 onModeChanged()
                             },
                             shape = RoundedCornerShape(20.dp),
-                            color = if (isFutures) AccentRed.copy(alpha = 0.15f)
-                                    else AccentGreen.copy(alpha = 0.15f)
+                            color = if (isFutures) AccentRed.copy(alpha = 0.15f) else AccentGreen.copy(alpha = 0.15f)
                         ) {
                             Text(
                                 text = if (isFutures) "فیوچرز" else "اسپات",
@@ -257,65 +242,55 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                                 fontSize = 13.sp
                             )
                         }
+                        
+                        Spacer(Modifier.width(8.dp))
+                        
+                        // دکمه وضعیت Paper Bot (جدید در فاز ۳)
+                        Surface(
+                            modifier = Modifier.clickable {
+                                isPaperBotActive = !isPaperBotActive
+                                prefs.edit().putBoolean("paper_bot", isPaperBotActive).apply()
+                                val msg = if (isPaperBotActive) "معامله کاغذی خودکار فعال شد ✅" else "معامله کاغذی خودکار غیرفعال شد ❌"
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isPaperBotActive) AccentYellow.copy(alpha = 0.15f) else DarkCard
+                        ) {
+                            Text(
+                                text = if (isPaperBotActive) "🤖 روشن" else "🤖 خاموش",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                color = if (isPaperBotActive) AccentYellow else TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                 },
                 bottomBar = {
                     Surface(color = DarkSurface, modifier = Modifier.height(120.dp)) {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                             verticalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceAround
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                                 Tab.entries.take(5).forEach { tab ->
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable { selectedTab = tab }
-                                            .padding(4.dp)
+                                        modifier = Modifier.weight(1f).clickable { selectedTab = tab }.padding(4.dp)
                                     ) {
-                                        Text(
-                                            tab.emoji,
-                                            fontSize = 20.sp,
-                                            color = if (selectedTab == tab) AccentGreen else TextSecondary
-                                        )
-                                        Text(
-                                            tab.title,
-                                            fontSize = 8.sp,
-                                            color = if (selectedTab == tab) AccentGreen else TextSecondary,
-                                            modifier = Modifier.padding(top = 2.dp)
-                                        )
+                                        Text(tab.emoji, fontSize = 20.sp, color = if (selectedTab == tab) AccentGreen else TextSecondary)
+                                        Text(tab.title, fontSize = 8.sp, color = if (selectedTab == tab) AccentGreen else TextSecondary, modifier = Modifier.padding(top = 2.dp))
                                     }
                                 }
                             }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceAround
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                                 Tab.entries.drop(5).forEach { tab ->
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable { selectedTab = tab }
-                                            .padding(4.dp)
+                                        modifier = Modifier.weight(1f).clickable { selectedTab = tab }.padding(4.dp)
                                     ) {
-                                        Text(
-                                            tab.emoji,
-                                            fontSize = 20.sp,
-                                            color = if (selectedTab == tab) AccentGreen else TextSecondary
-                                        )
-                                        Text(
-                                            tab.title,
-                                            fontSize = 8.sp,
-                                            color = if (selectedTab == tab) AccentGreen else TextSecondary,
-                                            modifier = Modifier.padding(top = 2.dp)
-                                        )
+                                        Text(tab.emoji, fontSize = 20.sp, color = if (selectedTab == tab) AccentGreen else TextSecondary)
+                                        Text(tab.title, fontSize = 8.sp, color = if (selectedTab == tab) AccentGreen else TextSecondary, modifier = Modifier.padding(top = 2.dp))
                                     }
                                 }
                             }
@@ -323,11 +298,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                     }
                 }
             ) { padding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
+                Box(modifier = Modifier.fillMaxSize().padding(padding)) {
                     when (selectedTab) {
                         Tab.MARKET -> MarketScreen(onCoinClick = { selectedCoin = it })
                         Tab.ALERTS -> SmartAlertsScreen(onCoinClick = { selectedCoin = it })
@@ -344,10 +315,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
             }
 
             if (selectedCoin != null) {
-                Surface(
-                    color = DarkBackground,
-                    modifier = Modifier.fillMaxSize()
-                ) {
+                Surface(color = DarkBackground, modifier = Modifier.fillMaxSize()) {
                     CoinDetailScreen(
                         coin = selectedCoin!!,
                         onBack = { selectedCoin = null }
@@ -385,7 +353,12 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                     } catch (_: Exception) { }
                 }
             } catch (e: Exception) {
-                errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
+                // اصلاح فاز ۳: تشخیص هوشمند نوع خطا
+                errorMsg = if (e is RateLimitedException) {
+                    "⚠️ محدودیت نرخ درخواست سرور. لطفاً ۱ دقیقه صبر کنید و دوباره تلاش کنید."
+                } else {
+                    "خطا در دریافت اطلاعات: ${e.message}"
+                }
             } finally {
                 loading = false
             }
@@ -395,22 +368,14 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     LaunchedEffect(Unit) { load() }
 
     val shown = if (query.isBlank()) coins
-    else coins.filter {
-        it.symbol.contains(query, true) || it.name.contains(query, true)
-    }
+    else coins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "قیمت لحظه‌ای",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Text("قیمت لحظه‌ای", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { load() }) { Text("بروزرسانی") }
         }
@@ -430,17 +395,10 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
 
         when {
-            loading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
+            loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = AccentGreen)
             }
-
-            errorMsg != null -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
+            errorMsg != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     errorMsg ?: "",
                     color = AccentRed,
@@ -448,7 +406,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                     textAlign = TextAlign.Center
                 )
             }
-
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
@@ -471,52 +428,32 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
     Surface(
         color = DarkCard,
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "#$rank  ${coin.symbol.uppercase(Locale.US)}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
+                Text("#$rank  ${coin.symbol.uppercase(Locale.US)}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(coin.name, color = TextSecondary, fontSize = 12.sp)
-                Text(
-                    "کپ: ${formatMarketCap(coin.market_cap)}",
-                    color = TextSecondary,
-                    fontSize = 11.sp
-                )
+                Text("کپ: ${formatMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 11.sp)
             }
 
             Text(
                 "📊",
                 fontSize = 18.sp,
-                modifier = Modifier
-                    .clickable {
-                        try {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id)))
-                            )
-                        } catch (_: Exception) { }
-                    }
-                    .padding(8.dp)
+                modifier = Modifier.clickable {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id))))
+                    } catch (_: Exception) { }
+                }.padding(8.dp)
             )
 
             Spacer(Modifier.width(4.dp))
 
             Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    formatPrice(coin.current_price),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
+                Text(formatPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text(
                     String.format(Locale.US, "%+.2f%%", change),
                     color = if (isUp) AccentGreen else AccentRed,
@@ -526,4 +463,20 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             }
         }
     }
+}
+
+// توابع کمکی فرمت‌دهی (اگر در فایل دیگری نیستند، اینجا می‌مانند)
+private fun formatMarketCap(value: Double?): String {
+    if (value == null) return "-"
+    return when {
+        value >= 1_000_000_000_000 -> String.format(Locale.US, "$%.2fT", value / 1_000_000_000_000)
+        value >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", value / 1_000_000_000)
+        value >= 1_000_000 -> String.format(Locale.US, "$%.2fM", value / 1_000_000)
+        else -> String.format(Locale.US, "$%.2f", value)
+    }
+}
+
+private fun formatPrice(value: Double?): String {
+    if (value == null) return "-"
+    return if (value >= 1) String.format(Locale.US, "$%,.2f", value) else String.format(Locale.US, "$%.6f", value)
 }
