@@ -47,6 +47,7 @@ import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.data.NewsItem
 import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.MacdCalc
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.ui.IndicatorMode
 import com.pumpwatch.app.ui.ProChart
@@ -107,11 +108,7 @@ private fun rsiOf(data: List<Double>, period: Int = 14): Double {
     return 100.0 - 100.0 / (1.0 + ag / al)
 }
 
-private fun macdUp(data: List<Double>): Boolean {
-    if (data.size < 35) return false
-    val prev = data.dropLast(1)
-    return (emaLast(data, 12) - emaLast(data, 26)) > (emaLast(prev, 12) - emaLast(prev, 26))
-}
+private fun macdUp(data: List<Double>): Boolean = MacdCalc.macdUp(data)
 
 private fun atrOf(data: List<Double>, period: Int = 14): Double {
     if (data.size <= period) return 0.0
