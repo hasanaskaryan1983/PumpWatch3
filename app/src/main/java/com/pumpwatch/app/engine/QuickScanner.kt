@@ -44,7 +44,8 @@ object QuickScanner {
     ) {
         try {
             val prefs = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-            if (!prefs.getBoolean("paper_bot", true)) return
+            // اصلاح: پیش‌فرض false — کاربر باید عمداً روشن کند
+            if (!prefs.getBoolean("paper_bot", false)) return
             val gson = Gson()
             val state = try {
                 val json = prefs.getString("paper_state", "") ?: ""
@@ -322,11 +323,11 @@ object QuickScanner {
         return 100.0 - 100.0 / (1.0 + ag / al)
     }
 
-    /**
-     * تشخیص کراس صعودی واقعی MACD — delegate به پیاده‌سازی مشترک MacdCalc.
-     * این تابع بررسی می‌کند که خط MACD در آخرین نقطه از زیر signal عبور کرده به بالا.
-     */
-    private fun macdUp(data: List<Double>): Boolean = MacdCalc.macdUp(data)
+    private fun macdUp(data: List<Double>): Boolean {
+        if (data.size < 35) return false
+        val prev = data.dropLast(1)
+        return (emaLast(data, 12) - emaLast(data, 26)) > (emaLast(prev, 12) - emaLast(prev, 26))
+    }
 
     private fun bollinger(data: List<Double>, period: Int = 20): Pair<Double, Double> {
         if (data.size < period) return Pair(0.0, 0.0)
@@ -427,7 +428,7 @@ object QuickScanner {
         }
         val pendingIntent = PendingIntent.getActivity(ctx, 0, intent, pendingFlags)
 
-        val emoji = if (score > 0) "🟢" else "🔴"
+        val emoji = if (score > 0) "" else "🔴"
         val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
         val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات (بلندمدت)"
 
@@ -438,7 +439,7 @@ object QuickScanner {
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
                     "امتیاز: $score/100\n" +
-                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "امتیاز ≥۷۰ + هفتگی مثبت + OBV مثبت | استاپ ATR پویا + تریلینگ\n") +
+                            (if (mode == "FUT") "پامپ: $pumpScore | 60s: ${sixty.signal} | ZigZag: ${zigzag.direction} | OF: ${orderFlow.cvdScore}\n" else "امتیاز ≥۷ + هفتگی مثبت + OBV مثبت | استاپ ATR پویا + تریلینگ\n") +
                             "قیمت: $$price"
                 )
             )
