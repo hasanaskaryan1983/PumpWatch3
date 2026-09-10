@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -67,7 +66,7 @@ private data class OBPage(
     val title: String,
     val desc: String,
     val img: Int,
-    val crop: Boolean = false
+    val topCrop: Boolean = false
 )
 
 @Composable
@@ -85,7 +84,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 "شکار نهنگ‌ها",
                 "ردپای خرید و فروش نهنگ‌ها رو قبل از حرکت بزرگ بازار دنبال کن",
                 R.drawable.onb_p2,
-                crop = true
+                topCrop = true
             ),
             OBPage(
                 "تحلیل مثل حرفه‌ای‌ها",
@@ -116,59 +115,83 @@ fun OnboardingScreen(onDone: () -> Unit) {
     val c1 = lerpColor(Color(0xFF07090D), Color(0xFF0A1F2E), slow)
     val c2 = lerpColor(Color(0xFF0E2A1E), Color(0xFF1A0E2A), slow)
 
-    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(c1, c2, Color(0xFF07090D))))) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(c1, c2, Color(0xFF07090D))))
+    ) {
 
         Sparkles(fast, Modifier.fillMaxSize())
 
-        // نوار کندل‌های روان پایین صفحه (صفحه ۱ و ۳)
         if (page == 0 || page == 2) {
             FlowingCandles(mid, Modifier.fillMaxWidth().height(90.dp).align(Alignment.BottomCenter))
         }
 
         Column(modifier = Modifier.fillMaxSize()) {
 
-            Spacer(Modifier.height(28.dp))
+            // ---------- ناحیه تصویر: کل فضای بالا رو پر می‌کنه ----------
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
 
-            // ---------- نوار تصویر: کل صحنه کامل دیده می‌شه ----------
-            Crossfade(targetState = page, animationSpec = tween(550)) { p ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1.55f)
-                        .padding(horizontal = 12.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                ) {
-                    Image(
-                        painter = painterResource(pages[p].img),
-                        contentDescription = null,
-                        contentScale = if (pages[p].crop) ContentScale.Crop else ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF0A0D12))
-                            .graphicsLayer {
-                                val s = 1.01f + 0.02f * pulse
-                                scaleX = s
-                                scaleY = s
+                Crossfade(targetState = page, animationSpec = tween(550)) { p ->
+                    Box(modifier = Modifier.fillMaxSize()) {
+
+                        // پس‌زمینه: همون تصویر بزرگ و محو (بدون نوار سیاه)
+                        Image(
+                            painter = painterResource(pages[p].img),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = 0.22f }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0x9907090D))
+                        )
+
+                        // تصویر اصلی: کامل و بدون برش (نهنگ از بالا کراپ می‌شه)
+                        Image(
+                            painter = painterResource(pages[p].img),
+                            contentDescription = null,
+                            contentScale = if (pages[p].topCrop) ContentScale.Crop else ContentScale.Fit,
+                            alignment = if (pages[p].topCrop) Alignment.TopCenter else Alignment.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    val s = 1.01f + 0.02f * pulse
+                                    scaleX = s
+                                    scaleY = s
+                                }
+                        )
+
+                        when (p) {
+                            0 -> BellGlow(pulse, Modifier.fillMaxSize())
+                            1 -> FallingCandles(mid, Modifier.fillMaxSize())
+                            2 -> Scanline(fast, Modifier.fillMaxSize())
+                            3 -> {
+                                SwingLight(swing, Modifier.fillMaxSize())
+                                Smoke(mid, Modifier.fillMaxSize())
                             }
-                    )
-
-                    when (p) {
-                        0 -> BellGlow(pulse, Modifier.fillMaxSize())
-                        1 -> FallingCandles(mid, Modifier.fillMaxSize())
-                        2 -> Scanline(fast, Modifier.fillMaxSize())
-                        3 -> {
-                            SwingLight(swing, Modifier.fillMaxSize())
-                            Smoke(mid, Modifier.fillMaxSize())
-                        }
-                        4 -> {
-                            RuneRing(slow, fast, Modifier.fillMaxSize())
-                            OrbFlash(fast, Modifier.fillMaxSize())
+                            4 -> {
+                                RuneRing(slow, fast, Modifier.fillMaxSize())
+                                OrbFlash(fast, Modifier.fillMaxSize())
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(Modifier.weight(1f))
+                // محو شدن لبه پایین تصویر به پس‌زمینه
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(listOf(Color.Transparent, c1))
+                        )
+                )
+            }
 
             // ---------- عنوان و توضیح ----------
             Crossfade(targetState = page, animationSpec = tween(550)) { p ->
@@ -196,7 +219,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 }
             }
 
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(20.dp))
 
             // ---------- نقطه‌ها ----------
             Row(
@@ -219,7 +242,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
 
             // ---------- دکمه اصلی ----------
             Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
@@ -260,7 +283,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 Text("رد شدن و ورود مستقیم", color = OBGray, fontSize = 12.sp)
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -276,7 +299,7 @@ private fun FlowingCandles(progress: Float, modifier: Modifier = Modifier) {
             val x = (((base - progress * 0.9f) % 1f) + 1f) % 1f * w
             val up = sin(i * 1.7f) * 0.5f + 0.5f
             val ch = h * (0.25f + 0.55f * up)
-            val col = if (i % 3 != 1) OBGreen.copy(alpha = 0.55f) else OBRed.copy(alpha = 0.55f)
+            val col = if (i % 3 != 1) OBGreen.copy(alpha = 0.45f) else OBRed.copy(alpha = 0.45f)
             drawLine(col, Offset(x, h - ch - 12f), Offset(x, h - ch), 3f)
             drawRect(col, Offset(x - 5f, h - ch), Size(10f, ch))
         }
