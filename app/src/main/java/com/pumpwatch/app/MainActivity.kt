@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,7 +50,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.work.*
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.cmcUrl
@@ -65,6 +72,7 @@ import com.pumpwatch.app.ui.TradesScreen
 import com.pumpwatch.app.ui.WalletScreen
 import com.pumpwatch.app.ui.WhaleRadarScreen
 import com.pumpwatch.app.worker.MonitorScheduler
+import com.pumpwatch.app.worker.MonitorWorker
 import com.pumpwatch.app.worker.SignalScannerWorker
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -83,9 +91,9 @@ enum class Tab(val title: String, val emoji: String) {
     ALERTS("هشدار", "🔔"),
     WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
-    BACKTEST("بک‌تست", "🧪"),
-    TOP("برترین", "🏆"),
-    MEME("میم", "🐸"),
+    BACKTEST("بک‌تست", ""),
+    TOP("برترین", ""),
+    MEME("میم", ""),
     LOG("سیگنال", "📓"),
     TRADES("معامله", "📈"),
     WALLETS("کیف پول", "👛")
@@ -93,18 +101,61 @@ enum class Tab(val title: String, val emoji: String) {
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        private const val SIGNAL_SCANNER_WORK_NAME = "SignalScanner"
+    }
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { }
+    ) { granted ->
+        // مدیریت نتیجه: اگر کاربر رد کرد، وضعیت را ذخیره و اطلاع بده
+        val prefs = getSharedPreferences("pumpwatch_prefs", 0)
+        prefs.edit().putBoolean("notifications_granted", granted).apply()
+        if (!granted) {
+            Toast.makeText(
+                this,
+                "برای دریافت هشدارها، لطفاً مجوز اعلان را از تنظیمات فعال کنید",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // درخواست مجوز اعلان (فقط اندروید ۱۳+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
 
+        // زمان‌بندی MonitorWorker (با snapshot mode و backoff نمایی)
         MonitorScheduler.start(this)
+
+        // زمان‌بندی SignalScannerWorker (با backoff و snapshot mode)
+        scheduleSignalScanner()
+
+        setContent {
+            PumpWatchTheme {
+                MainApp(onModeChanged = {
+                    // وقتی کاربر mode را عوض کرد، هر دو Worker را با mode جدید re-schedule کن
+                    MonitorScheduler.start(this)
+                    scheduleSignalScanner()
+                })
+            }
+        }
+    }
+
+    /**
+     * زمان‌بندی SignalScannerWorker با backoff نمایی و snapshot از mode فعلی.
+     * با ExistingPeriodicWorkPolicy.UPDATE، اگر Worker قبلی با پارامترهای قدیمی در صف باشد، جایگزین می‌شود.
+     */
+    private fun scheduleSignalScanner() {
+        val prefs = getSharedPreferences("pumpwatch_prefs", 0)
+        val currentMode = prefs.getString("mode", "SPOT") ?: "SPOT"
+
+        val inputData = Data.Builder()
+            .putString(MonitorWorker.KEY_MODE, currentMode) // reuse same key for consistency
+            .build()
 
         val scanRequest = PeriodicWorkRequestBuilder<SignalScannerWorker>(1, TimeUnit.HOURS)
             .setConstraints(
@@ -112,18 +163,18 @@ class MainActivity : ComponentActivity() {
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build()
             )
+            .setInputData(inputData)
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                1,
+                TimeUnit.MINUTES
+            )
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-            "SignalScanner",
-            ExistingPeriodicWorkPolicy.KEEP,
+            SIGNAL_SCANNER_WORK_NAME,
+            ExistingPeriodicWorkPolicy.UPDATE,
             scanRequest
         )
-
-        setContent {
-            PumpWatchTheme {
-                MainApp()
-            }
-        }
     }
 }
 
@@ -146,7 +197,7 @@ fun PumpWatchTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun MainApp() {
+fun MainApp(onModeChanged: () -> Unit = {}) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
     var isFutures by remember {
@@ -191,6 +242,8 @@ fun MainApp() {
                                 prefs.edit()
                                     .putString("mode", if (isFutures) "FUTURES" else "SPOT")
                                     .apply()
+                                // با تغییر mode، Workerها را با snapshot جدید re-schedule کن
+                                onModeChanged()
                             },
                             shape = RoundedCornerShape(20.dp),
                             color = if (isFutures) AccentRed.copy(alpha = 0.15f)
