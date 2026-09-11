@@ -9,13 +9,16 @@ import kotlinx.coroutines.delay
 import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.data.ScanMarket
 import kotlin.math.abs
-import kotlin.math.max
 
 /**
- * BatchScanner Pro — نسخه اصلاح‌شده فاز ۲
- * اصلاحات:
- * ۱. فیلتر دقیق استیبل‌کوین (جلوگیری از حذف USDTBULL و جفت‌ارزها)
- * ۲. محافظت در برابر حجم منفی/غیرواقعی در ساخت کندل CoinGecko
+ * BatchScanner Pro — نسخه بازبینی دوم
+ * تغییرات قدم ۳:
+ * - buildCandlesChecked: تابع pure و قابل تست برای ساخت کندل ساعتی
+ * - تشخیص واحد timestamp (ثانیه/میلی‌ثانیه)
+ * - مرتب‌سازی صریح داده
+ * - شمارش و لاگ gapهای زمانی
+ * - مدیریت reset حجم (بدون حجم منفی)
+ * - حذف کندل آخر ناتمام از خروجی سیگنال
  */
 object BatchScanner {
 
@@ -35,11 +38,9 @@ object BatchScanner {
             val candidates = markets
                 .filter { m ->
                     val sym = m.symbol.uppercase().replace("-", "")
-                    // اصلاح فیلتر استیبل‌کوین: فقط خود استیبل‌کوین‌ها یا جفت‌های مستقیم فیات را حذف کن
-                    // این Regex باعث می‌شود USDTBULL یا BTC-USDT به اشتباه حذف نشوند
                     val isStable = STABLES.contains(sym) ||
-                                   sym.matches(Regex("^(USDT|USDC|DAI|FDUSD|TUSD|BUSD)(USD|EUR|GBP)?$"))
-                    
+                            sym.matches(Regex("^(USDT|USDC|DAI|FDUSD|TUSD|BUSD)(USD|EUR|GBP)?$"))
+
                     !isStable && (m.volume ?: 0.0) > 500_000.0
                 }
                 .sortedByDescending { quickScore(it) }
@@ -114,7 +115,13 @@ object BatchScanner {
         params: SignalParams
     ): SignalResult? {
         val chart = ScanClient.api.chart(m.id, days = 30)
-        val candles = buildCandles(chart.prices, chart.volumes)
+        val build = buildCandlesChecked(chart.prices, chart.volumes)
+
+        if (build.gapCount > 0) {
+            Log.w(TAG, "${m.symbol}: ${build.gapCount} gap ساعتی در داده — کندل‌ها پیوسته نیستند")
+        }
+
+        val candles = build.candles
         if (candles.size < 100) {
             Log.w(TAG, "${m.symbol}: ${candles.size} candles < 100")
             return null
@@ -131,29 +138,67 @@ object BatchScanner {
         )
     }
 
-    // ---------- ساخت کندل ساعتی از داده‌های چارت ----------
+    // ---------- ساخت کندل ساعتی: تابع pure و قابل تست ----------
 
-    private fun buildCandles(
+    internal data class CandleBuild(
+        val candles: List<Candle>,
+        val gapCount: Int,
+        val droppedTrailingIncomplete: Boolean
+    )
+
+    /**
+     * ورودی: prices = لیست [timestamp, price] و volumes = لیست [timestamp, volume]
+     * (فرمت خام پاسخ market_chart کوین‌گکو)
+     *
+     * قواعد:
+     * ۱) اگر بیشینهٔ timestamp کمتر از 1e11 باشد، واحد «ثانیه» فرض می‌شود و به ms تبدیل می‌گردد.
+     * ۲) داده قبل از bucketing مرتب می‌شود.
+     * ۳) یک bucket فقط وقتی بسته می‌شود که نقطهٔ ساعت بعد رسیده باشد؛
+     *    ساعت‌های گم‌شده بین دو bucket به‌عنوان gap شمرده می‌شوند.
+     * ۴) اگر حجم تجمعی ریست شود (v < lastVol)، مقدار جدید به‌عنوان اختلاف مبنا گرفته می‌شود
+     *    تا حجم منفی تولید نشود.
+     * ۵) آخرین bucket (ناتمام) هرگز وارد خروجی نمی‌شود.
+     */
+    internal fun buildCandlesChecked(
         prices: List<List<Double>>,
         volumes: List<List<Double>>?
-    ): List<Candle> {
-        if (prices.size < 2) return emptyList()
+    ): CandleBuild {
+        if (prices.size < 2) return CandleBuild(emptyList(), 0, false)
         val hourMs = 3_600_000L
-        val out = mutableListOf<Candle>()
 
-        var bucketStart = (prices[0][0].toLong() / hourMs) * hourMs
-        var open = prices[0][1]
-        var high = prices[0][1]
-        var low = prices[0][1]
-        var lastClose = prices[0][1]
+        val pts = prices.filter { it.size >= 2 }.map { it[0] to it[1] }
+        if (pts.size < 2) return CandleBuild(emptyList(), 0, false)
+
+        // ۱) تشخیص واحد timestamp
+        val unitMs = if (pts.maxOf { it.first } < 100_000_000_000.0) 1000.0 else 1.0
+
+        // ۲) مرتب‌سازی صریح
+        val sorted = pts.sortedBy { it.first }
+
+        // ۳) نگاشت حجم بر اساس timestamp
+        val volByTs = volumes
+            ?.filter { it.size >= 2 }
+            ?.associate { (it[0] * unitMs).toLong() to it[1] }
+
+        val firstTs = (sorted.first().first * unitMs).toLong()
+        var bucketStart = (firstTs / hourMs) * hourMs
+        var open = sorted.first().second
+        var high = open
+        var low = open
+        var lastClose = open
         var vol = 0.0
-        var lastVol = volumes?.firstOrNull()?.getOrNull(1) ?: 0.0
+        var lastVol = volByTs?.get(firstTs) ?: 0.0
 
-        for (i in 1 until prices.size) {
-            val ts = prices[i][0].toLong()
-            val p = prices[i][1]
+        val out = mutableListOf<Candle>()
+        var gapCount = 0
 
-            if (ts - bucketStart >= hourMs) {
+        for (i in 1 until sorted.size) {
+            val tsMs = (sorted[i].first * unitMs).toLong()
+            val p = sorted[i].second
+            val bStart = (tsMs / hourMs) * hourMs
+
+            if (bStart != bucketStart) {
+                // بستن bucket قبلی (چون نقطهٔ ساعت بعد رسیده، کامل بوده است)
                 out.add(
                     Candle(
                         time = bucketStart,
@@ -164,7 +209,10 @@ object BatchScanner {
                         volume = vol
                     )
                 )
-                bucketStart = (ts / hourMs) * hourMs
+                val missing = (bStart - bucketStart) / hourMs - 1
+                if (missing > 0) gapCount += missing.toInt()
+
+                bucketStart = bStart
                 open = p
                 high = p
                 low = p
@@ -175,29 +223,16 @@ object BatchScanner {
             }
             lastClose = p
 
-            // اصلاح محاسبه حجم: جلوگیری از حجم منفی یا جهش‌های غیرمنطقی API CoinGecko
-            val v = volumes?.getOrNull(i)?.getOrNull(1) ?: 0.0
-            val dv = max(0.0, v - lastVol)
-            
-            // اگر جهش حجم غیرمنطقی بود (مثلاً ریست شدن دیتا در API)، آن را نادیده بگیر
-            if (dv < 1_000_000_000.0) {
-                vol += dv
+            // ۴) حجم با مدیریت reset
+            val v = volByTs?.get(tsMs)
+            if (v != null) {
+                val dv = if (v >= lastVol) v - lastVol else v
+                if (dv > 0 && dv < 1_000_000_000.0) vol += dv
+                lastVol = v
             }
-            lastVol = v
         }
 
-        // اضافه کردن کندل آخر
-        out.add(
-            Candle(
-                time = bucketStart,
-                open = open,
-                high = high,
-                low = low,
-                close = lastClose,
-                volume = vol
-            )
-        )
-
-        return out
+        // ۵) آخرین bucket ناتمام است (نقطهٔ بعدی برای بستنش نرسیده) → حذف
+        return CandleBuild(out, gapCount, droppedTrailingIncomplete = true)
     }
 }
