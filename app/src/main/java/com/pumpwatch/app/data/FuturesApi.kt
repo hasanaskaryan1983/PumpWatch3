@@ -6,13 +6,16 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
-import java.util.concurrent.TimeUnit
 
+/**
+ * قدم ۴ بازبینی دوم: کلاینت فیوچرز بایننس هم از همان coordinator مشترک
+ * (ExchangeHttp) استفاده می‌کند تا:
+ * - حداقل فاصله بین درخواست‌ها رعایت شود (جلوگیری از burst)
+ * - روی 429/418 با backoff نمایی و Retry-After retry شود
+ * - پس از اتمام retryها به‌جای شکست بی‌صدا، RateLimitedException پرتاب شود
+ */
 private val futClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
+    ExchangeHttp.client()
 }
 
 data class PremiumIndex(
