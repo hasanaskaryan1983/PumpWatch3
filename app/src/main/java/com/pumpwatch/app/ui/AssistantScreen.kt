@@ -41,6 +41,7 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.engine.MacdCalc
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -64,7 +65,7 @@ private data class CoinAnalysis(
     val symbol: String, val name: String, val coingeckoId: String?, val rank: Int?,
     val score: Int, val recommendation: String, val arrow: String,
     val indicators: Map<String, String>, val whaleActivity: String, val reason: String,
-    val trustScore: Int, val isDex: Boolean, val chainName: String?, val poolUrl: String?,
+    val dataScore: Int, val isDex: Boolean, val chainName: String?, val poolUrl: String?,
     val candles: List<DexCandle>
 )
 
@@ -172,7 +173,7 @@ fun AssistantScreen() {
                     Spacer(Modifier.height(8.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("📊 امتیاز: ${a.score}/100", fontSize = 12.sp, color = AGold, fontWeight = FontWeight.Bold)
-                        Text("🛡️ اعتبار: ${a.trustScore}/100", fontSize = 12.sp, color = ABlue, fontWeight = FontWeight.Bold)
+                        Text("🛡️ اعتبار داده: ${a.dataScore}/100", fontSize = 12.sp, color = ABlue, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("📈 اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGreen)
@@ -290,17 +291,6 @@ private fun rsiOf(v: List<Double>, p: Int = 14): Double {
     return if (al == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + ag / al)
 }
 
-private fun macdUp(v: List<Double>): Boolean {
-    if (v.size < 35) return false
-    fun emaL(d: List<Double>, p: Int): Double {
-        val k = 2.0 / (p + 1); var e = d.take(p).average()
-        for (i in p until d.size) e = d[i] * k + e * (1 - k)
-        return e
-    }
-    val p = v.dropLast(1)
-    return (emaL(v, 12) - emaL(v, 26)) > (emaL(p, 12) - emaL(p, 26))
-}
-
 // ================= تحلیل CEX =================
 private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String, rank: Int?): CoinAnalysis =
     withContext(Dispatchers.IO) {
@@ -314,7 +304,8 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
             var score = 50
             val ind = mutableMapOf<String, String>()
             if (closes.size >= 35) {
-                val rsi = rsiOf(closes); val mUp = macdUp(closes)
+                val rsi = rsiOf(closes)
+                val mUp = MacdCalc.macdUp(closes)  // ← اصلاح: استفاده از موتور مشترک
                 val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last()
                 val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last()
                 val px = closes.last()
@@ -346,13 +337,13 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
 
             val rec = when { score >= 80 -> "خرید قوی"; score >= 65 -> "خرید"; score >= 45 -> "صبر"; score >= 30 -> "فروش"; else -> "فروش قوی" }
             val arrow = when { score >= 65 -> "⬆️"; score <= 35 -> "⬇️"; else -> "➡️" }
-            val trust = when {
+            val dataScore = when {
                 rank != null && rank <= 10 -> 95; rank != null && rank <= 50 -> 85
                 rank != null && rank <= 100 -> 75; rank != null && rank <= 500 -> 60
                 rank != null -> 50; else -> 30
             }
             CoinAnalysis(symbol.uppercase(Locale.US), name, coingeckoId, rank, score.coerceIn(0, 100), rec, arrow,
-                ind, whale, "رتبه #$rank • امتیاز $score/100", trust, false, null, poolUrl, emptyList())
+                ind, whale, "رتبه #$rank • امتیاز $score/100", dataScore, false, null, poolUrl, emptyList())
         } catch (t: Throwable) {
             CoinAnalysis(symbol, name, coingeckoId, rank, 50, "صبر", "➡️", mapOf("خطا" to "داده نیست"),
                 "بدون داده", "تحلیل در دسترس نیست", 50, false, null, null, emptyList())
@@ -393,7 +384,8 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
         val ind = mutableMapOf<String, String>()
 
         if (closes.size >= 35) {
-            val rsi = rsiOf(closes); val mUp = macdUp(closes)
+            val rsi = rsiOf(closes)
+            val mUp = MacdCalc.macdUp(closes)  // ← اصلاح: استفاده از موتور مشترک
             val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last()
             val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last()
             val px = closes.last()
@@ -424,15 +416,15 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
             a.createdAt != null, fdv in 100_000.0..20_000_000.0, liq >= 50_000
         )
         val passed = checks.count { it }
-        val trust = passed * 100 / 7
+        val dataScore = passed * 100 / 7
 
         val rec = when { score >= 80 -> "خرید قوی"; score >= 65 -> "خرید"; score >= 45 -> "صبر"; score >= 30 -> "فروش"; else -> "فروش قوی" }
         val arrow = when { score >= 65 -> "⬆️"; score <= 35 -> "⬇️"; else -> "➡️" }
-        val reason = "شبکه $chainName • امتیاز $score/100 • اعتماد $passed/7 • " +
+        val reason = "شبکه $chainName • امتیاز $score/100 • هم‌گرایی داده $passed/7 • " +
                 when { score >= 65 -> "نهنگ‌ها + مومنتوم مثبت"; score <= 35 -> "فشار فروش/روند نزولی"; else -> "منتظر شکست بمون" }
 
         CoinAnalysis(symbol.uppercase(Locale.US), name, null, null, score.coerceIn(0, 100), rec, arrow,
-            ind, whale, reason, trust, true, chainName, poolUrl, candles)
+            ind, whale, reason, dataScore, true, chainName, poolUrl, candles)
     } catch (_: Throwable) {
         null
     }
