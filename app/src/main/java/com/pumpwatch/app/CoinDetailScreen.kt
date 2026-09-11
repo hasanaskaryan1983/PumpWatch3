@@ -43,6 +43,7 @@ import com.pumpwatch.app.data.CoinInfoClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.Derivative
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.data.NewsItem
 import com.pumpwatch.app.data.ScanClient
@@ -136,7 +137,7 @@ private fun trendOf(closes: List<Double>): String {
 private fun tfLabel(tf: String): String = when (tf) {
     "15m" -> "۱۵ دقیقه"
     "1h" -> "۱ ساعته"
-    "12h" -> "۱ ساعته"
+    "12h" -> "۱۲ ساعته"
     "4h" -> "۴ ساعته"
     "1d" -> "روزانه"
     else -> "هفتگی"
@@ -211,9 +212,9 @@ private fun computeLayer(closes: List<Double>, volumes: List<Double>?): Layer {
 }
 
 private fun lightEmoji(score: Int): String = when {
-    score >= 40 -> ""
+    score >= 40 -> "🟢"
     score <= -40 -> "🔴"
-    else -> ""
+    else -> "⚪"
 }
 
 private fun buildAnalysis(
@@ -258,18 +259,18 @@ private fun buildAnalysis(
 
     val tfs = listOf(
         TfInfo("۱ ساعته", trendOf(closes1h), rsiOf(closes1h)),
-        TfInfo(" ساعته", trendOf(c4h), rsiOf(c4h)),
+        TfInfo("۴ ساعته", trendOf(c4h), rsiOf(c4h)),
         TfInfo("روزانه", trendOf(cD), rsiOf(cD))
     )
 
     val explanation = buildString {
         append("🧠 معماری امتیازدهی وزنی (Confluence):\n")
         append("EMA 25% + MACD 25% + RSI 20% + حجم 15% + بولینگر 15% = امتیاز پایه (-100 تا +100)\n")
-        append(" هم‌راستایی ۴ تایم‌فریم (۱۵د/۱س/۱۲س/۴س) = +10 پاداش\n")
+        append("🚦 هم‌راستایی ۴ تایم‌فریم (۱۵د/۱س/۱۲س/۴س) = +10 پاداش\n")
         append("⚡ فاندینگ منفی شدید = +10 | فاندینگ مثبت شدید = -10\n")
         append("📈 OI صعودی همراه قیمت = +10 | پامپ بدون OI = -10 (پامپ مصنوعی)\n")
-        append(" وتوی نهنگی: فشار فروش آن‌چین ≥ 65% = مسدود شدن سیگنال خرید\n")
-        append(" آستانه‌ها: ≥75 خرید قوی | ≥40 خرید | ±40 خنثی | ≤-40 فروش\n")
+        append("🐳 وتوی نهنگی: فشار فروش آن‌چین ≥ 65% = مسدود شدن سیگنال خرید\n")
+        append("🎯 آستانه‌ها: ≥75 خرید قوی | ≥40 خرید | ±40 خنثی | ≤-40 فروش\n")
         append("💡 سیگنال کمتر ولی باکیفیت‌تر = اعتماد بیشتر = سود پایدار")
     }
 
@@ -351,7 +352,9 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     }
                 }
             } catch (e: Exception) {
-                error = e.message
+                // قدم ۵: خطای typed + لاگ با endpoint و symbol
+                NetErr.log("CoinDetail", "coingecko/market_chart", coin.id, e)
+                error = NetErr.msg(e)
             } finally {
                 loading = false
             }
@@ -453,12 +456,15 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                 }
                 verdict = when {
                     vt != null && sc > 0 -> Verdict("⛔ خرید مسدود: $vt", Red)
-                    chs && sc >= 40 -> Verdict(" روند صعودیه ولی قیمت بعد از پامپ فاصله گرفته — منتظر پولبک ", Yellow)
-                    chs && sc <= -40 -> Verdict(" روند نزولیه ولی بعد از ریزش شدید — تعقیب نکن 🔴", Yellow)
+                    chs && sc >= 40 -> Verdict("🟡 روند صعودیه ولی قیمت بعد از پامپ فاصله گرفته — منتظر پولبک 📉", Yellow)
+                    chs && sc <= -40 -> Verdict("🟡 روند نزولیه ولی بعد از ریزش شدید — تعقیب نکن 🔴", Yellow)
                     brk && sc in -20..39 -> Verdict("🚀 شروع حرکت — ورود پله‌ای با استاپ تنگ", Green)
                     else -> base
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                // قدم ۵: لایهٔ تبادل خطا داد — بی‌صدا نیست، با نوعش لاگ می‌شود
+                NetErr.log("CoinDetail", "exchange/layer+$tf", coin.symbol, e)
+            }
         }
     }
 
@@ -515,7 +521,6 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             fontSize = 13.sp, color = Gray, fontWeight = FontWeight.Bold
                         )
 
-                        // 🔍 بخش جدید: دلایل سیگنال
                         layer?.let { l ->
                             Surface(
                                 color = MaterialTheme.colorScheme.surface,
@@ -524,11 +529,11 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                             ) {
                                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("🔍 چرا این سیگنال؟ (دلایل امتیازدهی):", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    
+
                                     val reasons = mutableListOf<String>()
                                     if (l.ema > 0) reasons.add("✅ روند صعودی (قیمت بالای EMA20 و EMA50)")
                                     else if (l.ema < 0) reasons.add("❌ روند نزولی (قیمت زیر میانگین‌ها)")
-                                    else reasons.add(" روند خنثی")
+                                    else reasons.add("⚪ روند خنثی")
 
                                     if (l.macd > 0) reasons.add("✅ مومنتوم مثبت (MACD صعودی)")
                                     else reasons.add("❌ مومنتوم منفی (MACD نزولی)")
@@ -539,7 +544,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
                                     if (l.vol > 0) reasons.add("✅ حجم معاملات بالاتر از میانگین (تأیید روند)")
                                     else if (l.vol < 0) reasons.add("❌ حجم معاملات ضعیف (عدم تأیید)")
-                                    else reasons.add(" حجم معاملات معمولی")
+                                    else reasons.add("⚪ حجم معاملات معمولی")
 
                                     if (l.boll > 0) reasons.add("✅ قیمت نزدیک به کف باند بولینگر (فرصت خرید)")
                                     else if (l.boll < 0) reasons.add("❌ قیمت نزدیک به سقف باند بولینگر (خطر اصلاح)")
@@ -548,9 +553,9 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                                     reasons.forEach { reason ->
                                         Text(reason, fontSize = 12.sp, color = TextPrimary, lineHeight = 18.sp)
                                     }
-                                    
+
                                     if (aligned) {
-                                        Text("🌟 هم‌راستایی کامل ۴ تایم‌فریم (+۱ امتیاز)", fontSize = 12.sp, color = Green, fontWeight = FontWeight.Bold)
+                                        Text("🌟 هم‌راستایی کامل ۴ تایم‌فریم (+۱۰ امتیاز)", fontSize = 12.sp, color = Green, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -565,7 +570,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
 
                         fundingRate?.let { fr ->
                             Text(
-                                " فاندینگ: ${String.format(Locale.US, "%.4f%%", fr * 100)}" +
+                                "⚡ فاندینگ: ${String.format(Locale.US, "%.4f%%", fr * 100)}" +
                                         (if (fr <= -0.0003) " — پتانسیل اسکوییز 🚀" else if (fr >= 0.0005) " — لانگ‌ها شلوغن 🩸" else ""),
                                 fontSize = 10.sp,
                                 color = if (fr <= -0.0003) Green else if (fr >= 0.0005) Red else Gray
@@ -586,7 +591,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         }
 
                         Text(
-                            "🎯 بر اساس: ${tfLabel(tf)} • معماری وزنی Confluence • ${if (isFutures) "فیوچرز ⚡" else "اسپات "}",
+                            "🎯 بر اساس: ${tfLabel(tf)} • معماری وزنی Confluence • ${if (isFutures) "فیوچرز ⚡" else "اسپات 🏦"}",
                             fontSize = 10.sp, color = Gray
                         )
                     }
@@ -682,7 +687,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                         modifier = Modifier.padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("️ فاندامنتال:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("🏛️ فاندامنتال:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         IndRow("رتبه بازار", "#${info?.rank ?: coin.market_cap_rank ?: "-"}", Gray)
                         IndRow("مارکت کپ", formatMarketCap(info?.marketData?.marketCap?.get("usd") ?: coin.market_cap), Gray)
                         val cap = coin.market_cap
