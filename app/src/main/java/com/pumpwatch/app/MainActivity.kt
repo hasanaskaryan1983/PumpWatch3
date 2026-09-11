@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -59,7 +60,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.RateLimitedException
+import com.pumpwatch.app.data.NetErr
+import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.ui.AssistantScreen
 import com.pumpwatch.app.ui.BacktestScreen
@@ -89,7 +91,7 @@ private val TextSecondary = Color(0xFF8B949E)
 private val AccentYellow = Color(0xFFFFC107)
 
 enum class Tab(val title: String, val emoji: String) {
-    MARKET("بازار", ""),
+    MARKET("بازار", "📊"),
     ALERTS("هشدار", "🔔"),
     WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
@@ -188,10 +190,10 @@ fun PumpWatchTheme(content: @Composable () -> Unit) {
 fun MainApp(onModeChanged: () -> Unit = {}) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
-    
+
     var isFutures by remember { mutableStateOf(prefs.getString("mode", "SPOT") == "FUTURES") }
     var isPaperBotActive by remember { mutableStateOf(prefs.getBoolean("paper_bot", false)) }
-    
+
     var selectedTab by remember { mutableStateOf(Tab.MARKET) }
     var selectedCoin by remember { mutableStateOf<CoinMarket?>(null) }
     var onboarded by remember { mutableStateOf(prefs.getBoolean("onboarded", false)) }
@@ -223,7 +225,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                             color = AccentGreen
                         )
                         Spacer(Modifier.weight(1f))
-                        
+
                         Surface(
                             modifier = Modifier.clickable {
                                 isFutures = !isFutures
@@ -241,9 +243,9 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                                 fontSize = 13.sp
                             )
                         }
-                        
+
                         Spacer(Modifier.width(8.dp))
-                        
+
                         Surface(
                             modifier = Modifier.clickable {
                                 isPaperBotActive = !isPaperBotActive
@@ -255,7 +257,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                             color = if (isPaperBotActive) AccentYellow.copy(alpha = 0.15f) else DarkCard
                         ) {
                             Text(
-                                text = if (isPaperBotActive) "🤖 روشن" else " خاموش",
+                                text = if (isPaperBotActive) "🤖 روشن" else "🤖 خاموش",
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                 color = if (isPaperBotActive) AccentYellow else TextSecondary,
                                 fontWeight = FontWeight.Bold,
@@ -348,16 +350,21 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                     try {
                         val full = ApiClient.getTop1000Coins()
                         if (full.size > coins.size) coins = full
-                    } catch (_: Exception) { }
+                    } catch (e: Exception) {
+                        // قدم ۵: خطای بروزرسانی پس‌زمینه بی‌صدا نیست؛ با نوعش لاگ می‌شود
+                        NetErr.log("MarketScreen", "coingecko/coins/markets?page=1..4", null, e)
+                    }
                 }
             } catch (e: Exception) {
-                errorMsg = if (e is RateLimitedException) {
-                    "⚠️ محدودیت نرخ درخواست سرور. لطفاً ۱ دقیقه صبر کنید و دوباره تلاش کنید."
-                } else {
-                    "خطا در دریافت اطلاعات: ${e.message}"
-                }
+                NetErr.log("MarketScreen", "coingecko/coins/markets", null, e)
+                errorMsg = NetErr.msg(e)
             } finally {
                 loading = false
+            }
+            // پاسخ معتبر ولی خالی = EmptyData (نه «سیگنالی نیست»)
+            if (errorMsg == null && coins.isEmpty()) {
+                NetErr.logEmpty("MarketScreen", "coingecko/coins/markets", null)
+                errorMsg = NetErr.msg(NetError.EmptyData)
             }
         }
     }
@@ -382,7 +389,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp)
             )
         }
