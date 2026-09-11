@@ -1,12 +1,15 @@
 package com.pumpwatch.app.data
 
 import com.google.gson.JsonArray
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 data class BinanceCandle(
     val time: Long,
@@ -73,7 +76,6 @@ private object GlobalKlineCache {
 
     fun put(key: String, v: List<BinanceCandle>) {
         synchronized(lock) {
-            // اگر کش پر شد، قدیمی‌ترین کلید را حذف کن (FIFO)
             if (map.size >= MAX_SIZE) {
                 val oldestKey = map.entries.minByOrNull { it.value.first }?.key
                 if (oldestKey != null) map.remove(oldestKey)
@@ -83,23 +85,79 @@ private object GlobalKlineCache {
     }
 }
 
-object MultiExchange {
+/**
+ * قدم ۴ بازبینی دوم: coordinator مشترک درخواست‌های صرافی‌ها.
+ * - حداقل فاصله بین درخواست‌ها (جلوگیری از burst coroutineهای موازی)
+ * - retry با backoff نمایی روی 429/418 + احترام به Retry-After
+ * - پرتاب RateLimitedException به‌جای شکست بی‌صدا
+ */
+object ExchangeHttp {
 
-    private fun client(): OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .addInterceptor { chain ->
-            chain.proceed(
-                chain.request().newBuilder()
-                    .header(
-                        "User-Agent",
-                        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                    )
-                    .header("Accept", "application/json")
-                    .build()
+    private const val MIN_INTERVAL_MS = 250L
+    private const val MAX_RETRIES = 4
+    private const val BASE_BACKOFF_MS = 2000L
+    private const val MAX_BACKOFF_MS = 30_000L
+
+    private val lastRequestMs = AtomicLong(0L)
+    private val lock = Any()
+
+    private val throttleInterceptor = object : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            // صف مشترک: هیچ دو درخواستی کمتر از MIN_INTERVAL_MS فاصله ندارند
+            synchronized(lock) {
+                val wait = lastRequestMs.get() + MIN_INTERVAL_MS - System.currentTimeMillis()
+                if (wait > 0) Thread.sleep(wait)
+                lastRequestMs.set(System.currentTimeMillis())
+            }
+
+            var retries = 0
+            while (retries < MAX_RETRIES) {
+                val response = chain.proceed(chain.request())
+                if (response.code != 429 && response.code != 418) return response
+
+                val retryAfter = response.header("Retry-After")?.toLongOrNull()
+                val host = chain.request().url.host
+                response.close()
+                retries++
+
+                val backoffMs = if (retryAfter != null && retryAfter > 0) {
+                    (retryAfter * 1000L).coerceIn(BASE_BACKOFF_MS, MAX_BACKOFF_MS)
+                } else {
+                    (BASE_BACKOFF_MS * (1L shl (retries - 1))).coerceAtMost(MAX_BACKOFF_MS)
+                }
+                Thread.sleep(backoffMs)
+                synchronized(lock) { lastRequestMs.set(System.currentTimeMillis()) }
+            }
+            throw RateLimitedException(
+                "Exchange rate limit exceeded after $MAX_RETRIES retries: ${chain.request().url.host}"
             )
         }
+    }
+
+    private val headerInterceptor = Interceptor { chain ->
+        chain.proceed(
+            chain.request().newBuilder()
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                )
+                .header("Accept", "application/json")
+                .build()
+        )
+    }
+
+    fun client(): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(throttleInterceptor)
+        .addInterceptor(headerInterceptor)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
         .build()
+}
+
+object MultiExchange {
+
+    // همهٔ صرافی‌ها از همان coordinator مشترک استفاده می‌کنند
+    private fun client(): OkHttpClient = ExchangeHttp.client()
 
     private fun <T> create(baseUrl: String, cls: Class<T>): T = Retrofit.Builder()
         .baseUrl(baseUrl)
@@ -121,8 +179,7 @@ object MultiExchange {
     }
 
     private suspend fun fetchKlinesNetwork(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
-        // 1) Bybit
-        // ساختار: [ts, open, high, low, close, volume, ...]
+        // 1) Bybit — ساختار: [ts, open, high, low, close, volume, ...]
         try {
             val r = bybit.kline("spot", "${symbolUpper}USDT", bybitInterval(interval), limit)
             val list = r.result?.list
@@ -132,8 +189,7 @@ object MultiExchange {
             }
         } catch (_: Exception) { }
 
-        // 2) OKX
-        // ساختار: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+        // 2) OKX — ساختار: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
         try {
             val r = okx.candles("${symbolUpper}-USDT", okxBar(interval), limit)
             val list = r.data
@@ -143,9 +199,7 @@ object MultiExchange {
             }
         } catch (_: Exception) { }
 
-        // 3) Gate
-        // ساختار واقعی Gate spot: [timestamp, volume, close, high, low, open, quote_volume]
-        // پس: t=0, open=5, high=3, low=4, close=2, volume=1
+        // 3) Gate — ساختار: [timestamp, volume, close, high, low, open, quote_volume]
         try {
             val list = gate.candlesticks("${symbolUpper}_USDT", gateInterval(interval), limit)
             if (list.isNotEmpty()) {
@@ -157,7 +211,7 @@ object MultiExchange {
         return emptyList()
     }
 
-    // internal (نه private) تا تست GateParserTest بتونه مستقیم صداش بزنه
+    // internal تا تست GateParserTest بتونه مستقیم صداش بزنه
     internal fun candle(
         a: List<String>,
         t: Int, o: Int, h: Int, l: Int, c: Int, v: Int,
