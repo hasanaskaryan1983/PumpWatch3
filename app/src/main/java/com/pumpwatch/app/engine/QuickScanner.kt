@@ -44,7 +44,7 @@ object QuickScanner {
     ) {
         try {
             val prefs = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-            // اصلاح: پیش‌فرض false — کاربر باید عمداً روشن کند
+            // ایمن: پیش‌فرض false — فقط با opt-in صریح کاربر فعال می‌شود
             if (!prefs.getBoolean("paper_bot", false)) return
             val gson = Gson()
             val state = try {
@@ -137,7 +137,6 @@ object QuickScanner {
                     )
                     if (logged) {
                         signalCount++
-                        // فقط سیگنال‌های خرید → معامله کاغذی پس‌زمینه
                         if (side == "BUY") {
                             openPaperTrade(ctx, symbol, price, stop, target, risk / price * 100, adjusted)
                         }
@@ -209,7 +208,6 @@ object QuickScanner {
                     )
                     if (logged) {
                         signalCount++
-                        // معامله کاغذی پس‌زمینه روی سیگنال اسپات
                         openPaperTrade(ctx, symbol, entry, stop, target, stopPct, score)
                     }
 
@@ -323,11 +321,12 @@ object QuickScanner {
         return 100.0 - 100.0 / (1.0 + ag / al)
     }
 
-    private fun macdUp(data: List<Double>): Boolean {
-        if (data.size < 35) return false
-        val prev = data.dropLast(1)
-        return (emaLast(data, 12) - emaLast(data, 26)) > (emaLast(prev, 12) - emaLast(prev, 26))
-    }
+    /**
+     * اصلاح بازبینی دوم: حذف پیاده‌سازی محلی MACD.
+     * همهٔ مسیرها (اسکن سریع، جزئیات کوین، بک‌تست) از یک موتور مشترک استفاده می‌کنند
+     * تا یک کوین در صفحات مختلف امتیاز یکسان بگیرد.
+     */
+    private fun macdUp(data: List<Double>): Boolean = MacdCalc.macdUp(data)
 
     private fun bollinger(data: List<Double>, period: Int = 20): Pair<Double, Double> {
         if (data.size < period) return Pair(0.0, 0.0)
@@ -428,7 +427,7 @@ object QuickScanner {
         }
         val pendingIntent = PendingIntent.getActivity(ctx, 0, intent, pendingFlags)
 
-        val emoji = if (score > 0) "" else "🔴"
+        val emoji = if (score > 0) "🟢" else "🔴"
         val action = if (side == "BUY") "خرید قوی" else "فروش قوی"
         val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات (بلندمدت)"
 
