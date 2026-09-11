@@ -3,7 +3,6 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   build:
@@ -19,26 +18,29 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Set up Gradle (pinned 9.7.1)
+        uses: actions/setup-gradle@v4
+        with:
+          gradle-version: 9.7.1
+
       - name: Run unit tests
         run: |
           if [ -f ./gradlew ]; then
-            chmod +x gradlew
-            ./gradlew testDebugUnitTest --no-daemon
+            ./gradlew testDebugUnitTest
           else
-            gradle testDebugUnitTest --no-daemon
+            gradle testDebugUnitTest
           fi
 
       - name: Build debug APK
         run: |
           if [ -f ./gradlew ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug --no-daemon
+            ./gradlew assembleDebug
           else
-            gradle assembleDebug --no-daemon
+            gradle assembleDebug
           fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: app-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
