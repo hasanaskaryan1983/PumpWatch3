@@ -7,6 +7,10 @@ import org.junit.Test
 /**
  * تست‌های کندل‌سازی CoinGecko (بازبینی دوم، قدم ۳):
  * واحد timestamp، مرتب‌بودن، gap، reset حجم، و حذف کندل ناتمام.
+ *
+ * نکتهٔ معنایی: close هر کندل = آخرین قیمت داخل همان bucket؛
+ * نقطه‌ای که باعث بستن bucket می‌شود، متعلق به bucket بعدی است
+ * و قیمت آن، open کندل بعدی می‌شود.
  */
 class BuildCandlesTest {
 
@@ -34,11 +38,14 @@ class BuildCandlesTest {
         assertEquals(100.0, c0.open, 1e-9)
         assertEquals(102.0, c0.high, 1e-9)
         assertEquals(100.0, c0.low, 1e-9)
-        assertEquals(101.0, c0.close, 1e-9)
+        assertEquals(102.0, c0.close, 1e-9)   // آخرین قیمت داخل bucket اول
 
         val c1 = r.candles[1]
-        assertEquals(101.0, c1.open, 1e-9)
-        assertEquals(103.0, c1.close, 1e-9)
+        assertEquals(101.0, c1.open, 1e-9)    // نقطهٔ شروع bucket دوم
+        assertEquals(103.0, c1.high, 1e-9)
+        assertEquals(101.0, c1.low, 1e-9)
+        assertEquals(103.0, c1.close, 1e-9)   // آخرین قیمت داخل bucket دوم
+        // نقطهٔ 104 (ساعت سوم) ناتمام است و حذف شده
     }
 
     @Test
@@ -49,8 +56,9 @@ class BuildCandlesTest {
             p((base + 2 * H) / 1000, 104.0)
         )
         val r = BatchScanner.buildCandlesChecked(pricesSec, null)
-        assertEquals(1, r.candles.size)
+        assertEquals(2, r.candles.size)       // ۲ کندل کامل + سومی ناتمام حذف
         assertEquals((base.toLong() / HL) * HL, r.candles[0].time)
+        assertEquals(((base + H).toLong() / HL) * HL, r.candles[1].time)
     }
 
     @Test
