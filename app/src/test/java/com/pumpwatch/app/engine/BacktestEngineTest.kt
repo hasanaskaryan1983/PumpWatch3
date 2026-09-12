@@ -4,41 +4,40 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * تست‌های موتور بک‌تست — نسخهٔ قطعی با حاشیهٔ امن دوطرفه:
+ * کندل شکست U = 5a انتخاب شده تا RSI با هر روش محاسبه‌ای (Wilder یا ساده)
+ * داخل پنجرهٔ 50..70 بماند (Wilder≈58، ساده≈63).
+ * حجم شکست ۱۰ برابر است تا volumeRatio با هر پنجره‌ای >= 1.5 شود.
+ */
 class BacktestEngineTest {
 
-    /**
-     * اصلاح باگ ۳: فاز اول «رنج متقارن» است (＋0.2 / −0.2) تا RSI روی ~50 بماند؛
-     * سپس یک کندل شکست +3 با حجم ۳.75 برابر → RSI به ~68 می‌رسد (داخل پنجره 50..70)
-     * و شرایط breakout + volumeRatio + RSI همزمان برقرار می‌شود.
-     */
+    // ۶۰ کندل نوسان متقارن ±0.2 + ۱ کندل شکست +1.0 با حجم ۱۰ برابر + ۳۹ کندل ملایم
     private fun flatThenBreak(): List<List<Double>> {
-        val flat = (0 until 60).map { i ->
+        val out = mutableListOf<List<Double>>()
+        for (i in 0 until 60) {
             val c = 100.0 + 0.2 * (i % 2)
-            listOf(c, c + 0.1, c - 0.1, c, 800.0)
+            out.add(listOf(c, c + 0.05, c - 0.05, c, 1000.0))
         }
-        val rise = (0 until 40).map { i ->
-            val base = 100.2 + i * 2.5
-            val close = if (i == 0) base + 3.0 else base + 2.0
-            val vol = if (i < 5) 3000.0 else 1500.0
-            listOf(base, close + 0.5, base - 0.5, close, vol)
+        out.add(listOf(100.2, 101.25, 100.0, 101.2, 10000.0)) // کندل شکست
+        for (i in 61 until 100) {
+            val c = 101.2 + 0.1 * (i - 60)
+            out.add(listOf(c - 0.1, c + 0.05, c - 0.05, c, 1000.0))
         }
-        return flat + rise
+        return out
     }
 
-    /**
-     * روند ملایم با نوسان داخلی (تا RSI بین 55 تا 68 بماند)
-     * + اسپایک حجم هر ۲۵ کندل (ratio ≈ 2.5) → سیگنال‌های BUY متعدد
-     */
-    private fun mildUptrendWithSpikes(n: Int): List<List<Double>> {
-        val gains = listOf(1.0, 0.8, 0.6, -0.9, 0.7)
+    // ۳۰۰ کندل نوسان متقارن + اسپایک شکست هر ۳۰ کندل (تا ایندکس 240)
+    private fun oscillatingWithSpikes(): List<List<Double>> {
         val out = mutableListOf<List<Double>>()
-        var price = 100.0
-        for (i in 0 until n) {
-            val g = gains[i % 5]
-            val open = price
-            price += g
-            val vol = if (i % 25 == 0 && i >= 100) 2500.0 else 1000.0
-            out.add(listOf(open, maxOf(open, price) + 0.3, minOf(open, price) - 0.3, price, vol))
+        var base = 100.0
+        for (i in 0 until 300) {
+            val isSpike = i >= 90 && i % 30 == 0
+            if (isSpike) base += 1.0
+            val c = base + 0.2 * (i % 2)
+            val vol = if (isSpike) 10000.0 else 1000.0
+            val low = if (isSpike) c - 1.05 else c - 0.05
+            out.add(listOf(c - 0.2, c + 0.05, low, c, vol))
         }
         return out
     }
@@ -57,7 +56,7 @@ class BacktestEngineTest {
     @Test
     fun `spot backtest with uptrend produces buys`() {
         val (trades, metrics) = BacktestEngine.runSpot(
-            "ETH", mildUptrendWithSpikes(300), 30, scoreThreshold = 10
+            "ETH", oscillatingWithSpikes(), 30, scoreThreshold = 10
         )
         assertTrue("باید حداقل یک معامله BUY تولید شود، تعداد: ${metrics.totalTrades}",
             metrics.totalTrades > 0)
