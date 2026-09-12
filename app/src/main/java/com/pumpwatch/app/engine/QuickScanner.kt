@@ -40,7 +40,6 @@ object QuickScanner {
     ) {
         try {
             val prefs = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-            // اصلاح P0-2: پیش‌فرض false
             if (!prefs.getBoolean("paper_bot", false)) return
             val gson = Gson()
             val state = try {
@@ -77,7 +76,6 @@ object QuickScanner {
                     continue
                 }
                 
-                // تبدیل به فرمت Candle برای UnifiedSignalEngine
                 val candles = klines.mapIndexed { index, k -> 
                     Candle(time = 0L, open = k[1].asDouble, high = k[2].asDouble, low = k[3].asDouble, close = k[4].asDouble, volume = k[5].asDouble)
                 }
@@ -199,7 +197,7 @@ object QuickScanner {
 
         val emoji = if (side == "PUMP") "🟢" else "🔴"
         val action = if (side == "PUMP") "خرید قوی" else "فروش قوی"
-        val modeText = if (mode == "FUT") "⚡ فیوچرز" else "🏦 اسپات"
+        val modeText = if (mode == "FUT") "⚡ فیوچرز" else " اسپات"
 
         val notification = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
