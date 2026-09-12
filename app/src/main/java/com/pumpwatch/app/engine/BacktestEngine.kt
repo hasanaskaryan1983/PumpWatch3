@@ -6,44 +6,25 @@ import kotlin.math.min
 
 object BacktestEngine {
 
-    private const val FEE_RATE = 0.001 // 0.1% per side
-    private const val SLIPPAGE_RATE = 0.0005 // 0.05% per side
+    private const val FEE_RATE = 0.001
+    private const val SLIPPAGE_RATE = 0.0005
 
     data class Trade(
-        val symbol: String,
-        val entryIndex: Int,
-        val exitIndex: Int,
-        val side: String,
-        val entryPrice: Double,
-        val exitPrice: Double,
-        val pnl: Double,
-        val result: String, // WIN, LOSS, EXP
-        val score: Int
+        val symbol: String, val entryIndex: Int, val exitIndex: Int,
+        val side: String, val entryPrice: Double, val exitPrice: Double,
+        val pnl: Double, val result: String, val score: Int
     )
 
     data class BacktestMetrics(
-        val totalTrades: Int,
-        val wins: Int,
-        val losses: Int,
-        val expired: Int,
-        val winRate: Double,
-        val profitFactor: Double,
-        val avgPnl: Double,
-        val avgWin: Double,
-        val avgLoss: Double,
-        val expectancy: Double,
-        val totalPnl: Double,
-        val maxDrawdown: Double,
-        val equityCurve: List<Double>,
-        val inSampleMetrics: SampleMetrics?,
-        val outOfSampleMetrics: SampleMetrics?
+        val totalTrades: Int, val wins: Int, val losses: Int, val expired: Int,
+        val winRate: Double, val profitFactor: Double, val avgPnl: Double,
+        val avgWin: Double, val avgLoss: Double, val expectancy: Double,
+        val totalPnl: Double, val maxDrawdown: Double, val equityCurve: List<Double>,
+        val inSampleMetrics: SampleMetrics?, val outOfSampleMetrics: SampleMetrics?
     )
 
     data class SampleMetrics(
-        val trades: Int,
-        val winRate: Double,
-        val totalPnl: Double,
-        val avgPnl: Double
+        val trades: Int, val winRate: Double, val totalPnl: Double, val avgPnl: Double
     )
 
     fun runFutures(
@@ -52,27 +33,29 @@ object BacktestEngine {
         evalLast: Int,
         hold: Int,
         fundingRate: Double = 0.0,
-        signalThreshold: Int = 70
+        signalThreshold: Int = 70,
+        entryUntilEnd: Boolean = false   // اصلاح باگ ۲: اسپات تا آخرین کندل ورود می‌گیرد
     ): Pair<List<Trade>, BacktestMetrics> {
-        if (klines.size < 100) return emptyList<Trade>() to emptyMetrics()
+        if (klines.size < 60) return emptyList() to emptyMetrics()
 
-        val allCandles = klines.mapIndexed { index, k -> 
+        val allCandles = klines.mapIndexed { index, k ->
             Candle(time = 0L, open = k[0], high = k[1], low = k[2], close = k[3], volume = k[4])
         }
         val closes = allCandles.map { it.close }
         val highs = allCandles.map { it.high }
         val lows = allCandles.map { it.low }
 
-        val start = max(48, closes.size - evalLast)
-        val end = closes.size - hold
+        // اصلاح باگ ۱: حداقل ۶۰ کندل warmup کافی است (هماهنگ با گارد جدید UnifiedSignalEngine)
+        val start = max(60, closes.size - evalLast)
+        val end = if (entryUntilEnd) closes.size - 1 else closes.size - hold
         val trades = mutableListOf<Trade>()
         var prevSide = "NONE"
 
         for (i in start until end) {
             val currentCandles = allCandles.subList(0, i + 1)
-            
+
             val signal = UnifiedSignalEngine.analyze(
-                coinId = "TEST", symbol = symbol, name = symbol, 
+                coinId = "TEST", symbol = symbol, name = symbol,
                 candles1h = currentCandles, mode = "FUT", funding = fundingRate,
                 params = UnifiedSignalParams(minScore = signalThreshold)
             )
@@ -85,11 +68,8 @@ object BacktestEngine {
                 val isLong = side == "PUMP"
                 val score = signal?.score ?: 0
 
-                val entryReal = if (isLong) {
-                    entryPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
-                } else {
-                    entryPrice * (1 - FEE_RATE - SLIPPAGE_RATE)
-                }
+                val entryReal = if (isLong) entryPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
+                                else entryPrice * (1 - FEE_RATE - SLIPPAGE_RATE)
 
                 val atr = atrAt(closes, i)
                 val risk = if (atr > 0) atr * 1.5 else entryPrice * 0.05
@@ -101,8 +81,7 @@ object BacktestEngine {
                 var exitIndex = min(i + hold, closes.size - 1)
 
                 for (j in (i + 1)..min(i + hold, closes.size - 1)) {
-                    val hj = highs[j]
-                    val lj = lows[j]
+                    val hj = highs[j]; val lj = lows[j]
                     if (isLong) {
                         if (lj <= stop) { result = "LOSS"; exitPrice = stop; exitIndex = j; break }
                         if (hj >= target) { result = "WIN"; exitPrice = target; exitIndex = j; break }
@@ -112,26 +91,20 @@ object BacktestEngine {
                     }
                 }
 
-                val exitReal = if (isLong) {
-                    exitPrice * (1 - FEE_RATE - SLIPPAGE_RATE)
-                } else {
-                    exitPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
-                }
+                val exitReal = if (isLong) exitPrice * (1 - FEE_RATE - SLIPPAGE_RATE)
+                               else exitPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
 
-                val fundingCost = if (isLong) {
-                    -fundingRate * (exitIndex - i) / 8.0 * entryPrice
-                } else {
-                    fundingRate * (exitIndex - i) / 8.0 * entryPrice
-                }
+                val fundingCost = if (isLong) -fundingRate * (exitIndex - i) / 8.0 * entryPrice
+                                  else fundingRate * (exitIndex - i) / 8.0 * entryPrice
 
-                val pnl = if (isLong) {
-                    ((exitReal - entryReal) / entryReal * 100) + (fundingCost / entryPrice * 100)
-                } else {
-                    ((entryReal - exitReal) / entryReal * 100) + (fundingCost / entryPrice * 100)
-                }
+                val pnl = if (isLong) ((exitReal - entryReal) / entryReal * 100) + (fundingCost / entryPrice * 100)
+                          else ((entryReal - exitReal) / entryReal * 100) + (fundingCost / entryPrice * 100)
 
-                trades.add(Trade(symbol, i, exitIndex, if (isLong) "BUY" else "SELL", entryPrice, exitPrice, pnl, result, score))
+                trades.add(Trade(symbol, i, exitIndex, if (isLong) "BUY" else "SELL",
+                    entryPrice, exitPrice, pnl, result, score))
                 prevSide = side
+            } else if (side == "NONE") {
+                prevSide = "NONE"
             }
         }
         return trades to computeMetrics(trades)
@@ -143,7 +116,9 @@ object BacktestEngine {
         holdDays: Int,
         scoreThreshold: Int = 70
     ): Pair<List<Trade>, BacktestMetrics> {
-        return runFutures(symbol, klines, holdDays, holdDays, 0.0, scoreThreshold)
+        // اصلاح باگ ۲: کل تاریخچه ارزیابی می‌شود و ورود تا آخرین کندل مجاز است
+        return runFutures(symbol, klines, evalLast = klines.size, hold = holdDays,
+            fundingRate = 0.0, signalThreshold = scoreThreshold, entryUntilEnd = true)
     }
 
     private fun computeMetrics(trades: List<Trade>): BacktestMetrics {
@@ -161,7 +136,6 @@ object BacktestEngine {
         val losingTrades = trades.filter { it.pnl < 0 }
         val avgWin = if (winningTrades.isNotEmpty()) winningTrades.map { it.pnl }.average() else 0.0
         val avgLoss = if (losingTrades.isNotEmpty()) abs(losingTrades.map { it.pnl }.average()) else 0.0
-
         val expectancy = (winRate / 100.0 * avgWin) - ((1 - winRate / 100.0) * avgLoss)
 
         val totalWins = winningTrades.sumOf { it.pnl }
@@ -170,10 +144,7 @@ object BacktestEngine {
 
         val equityCurve = mutableListOf(100.0)
         var equity = 100.0
-        trades.forEach { t ->
-            equity *= (1 + t.pnl / 100.0)
-            equityCurve.add(equity)
-        }
+        trades.forEach { t -> equity *= (1 + t.pnl / 100.0); equityCurve.add(equity) }
 
         var maxDrawdown = 0.0
         var peak = equityCurve[0]
@@ -188,45 +159,28 @@ object BacktestEngine {
         val outOfSampleTrades = trades.subList(splitIndex, trades.size)
 
         val inSampleMetrics = if (inSampleTrades.isNotEmpty()) {
-            val inWins = inSampleTrades.count { it.result == "WIN" }
-            val inLosses = inSampleTrades.count { it.result == "LOSS" }
-            val inDecided = inWins + inLosses
-            SampleMetrics(
-                trades = inSampleTrades.size,
-                winRate = if (inDecided > 0) inWins * 100.0 / inDecided else 0.0,
-                totalPnl = inSampleTrades.sumOf { it.pnl },
-                avgPnl = inSampleTrades.map { it.pnl }.average()
-            )
+            val w = inSampleTrades.count { it.result == "WIN" }
+            val l = inSampleTrades.count { it.result == "LOSS" }
+            SampleMetrics(inSampleTrades.size,
+                if (w + l > 0) w * 100.0 / (w + l) else 0.0,
+                inSampleTrades.sumOf { it.pnl }, inSampleTrades.map { it.pnl }.average())
         } else null
 
         val outOfSampleMetrics = if (outOfSampleTrades.isNotEmpty()) {
-            val outWins = outOfSampleTrades.count { it.result == "WIN" }
-            val outLosses = outOfSampleTrades.count { it.result == "LOSS" }
-            val outDecided = outWins + outLosses
-            SampleMetrics(
-                trades = outOfSampleTrades.size,
-                winRate = if (outDecided > 0) outWins * 100.0 / outDecided else 0.0,
-                totalPnl = outOfSampleTrades.sumOf { it.pnl },
-                avgPnl = outOfSampleTrades.map { it.pnl }.average()
-            )
+            val w = outOfSampleTrades.count { it.result == "WIN" }
+            val l = outOfSampleTrades.count { it.result == "LOSS" }
+            SampleMetrics(outOfSampleTrades.size,
+                if (w + l > 0) w * 100.0 / (w + l) else 0.0,
+                outOfSampleTrades.sumOf { it.pnl }, outOfSampleTrades.map { it.pnl }.average())
         } else null
 
-        return BacktestMetrics(
-            totalTrades = trades.size, wins = wins, losses = losses, expired = expired,
-            winRate = winRate, profitFactor = profitFactor, avgPnl = avgPnl,
-            avgWin = avgWin, avgLoss = avgLoss, expectancy = expectancy, totalPnl = totalPnl,
-            maxDrawdown = maxDrawdown, equityCurve = equityCurve,
-            inSampleMetrics = inSampleMetrics, outOfSampleMetrics = outOfSampleMetrics
-        )
+        return BacktestMetrics(trades.size, wins, losses, expired, winRate, profitFactor,
+            avgPnl, avgWin, avgLoss, expectancy, totalPnl, maxDrawdown, equityCurve,
+            inSampleMetrics, outOfSampleMetrics)
     }
 
     private fun emptyMetrics() = BacktestMetrics(
-        totalTrades = 0, wins = 0, losses = 0, expired = 0,
-        winRate = 0.0, profitFactor = 0.0, avgPnl = 0.0,
-        avgWin = 0.0, avgLoss = 0.0, expectancy = 0.0, totalPnl = 0.0,
-        maxDrawdown = 0.0, equityCurve = listOf(100.0),
-        inSampleMetrics = null, outOfSampleMetrics = null
-    )
+        0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, listOf(100.0), null, null)
 
     private fun atrAt(data: List<Double>, index: Int, period: Int = 14): Double {
         if (index < period) return 0.0
