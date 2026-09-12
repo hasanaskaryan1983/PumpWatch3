@@ -48,15 +48,14 @@ object BacktestEngine {
 
     fun runFutures(
         symbol: String,
-        klines: List<List<Double>>, // [open, high, low, close, volume]
+        klines: List<List<Double>>,
         evalLast: Int,
         hold: Int,
         fundingRate: Double = 0.0,
-        signalThreshold: Int = 70 // هماهنگ با minScore در UnifiedSignalParams
+        signalThreshold: Int = 70
     ): Pair<List<Trade>, BacktestMetrics> {
         if (klines.size < 100) return emptyList<Trade>() to emptyMetrics()
 
-        // بهینه‌سازی: ساخت یک‌بار Candleها به جای ساخت در هر حلقه
         val allCandles = klines.mapIndexed { index, k -> 
             Candle(time = 0L, open = k[0], high = k[1], low = k[2], close = k[3], volume = k[4])
         }
@@ -72,7 +71,6 @@ object BacktestEngine {
         for (i in start until end) {
             val currentCandles = allCandles.subList(0, i + 1)
             
-            // فراخوانی موتور واحد (رفع خطای نوع داده: signalThreshold به‌صورت Int پاس داده می‌شود)
             val signal = UnifiedSignalEngine.analyze(
                 coinId = "TEST", symbol = symbol, name = symbol, 
                 candles1h = currentCandles, mode = "FUT", funding = fundingRate,
@@ -145,7 +143,6 @@ object BacktestEngine {
         holdDays: Int,
         scoreThreshold: Int = 70
     ): Pair<List<Trade>, BacktestMetrics> {
-        // برای یکپارچگی کامل، Spot هم از همان موتور واحد استفاده می‌کند
         return runFutures(symbol, klines, holdDays, holdDays, 0.0, scoreThreshold)
     }
 
