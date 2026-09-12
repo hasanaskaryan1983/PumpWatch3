@@ -2,8 +2,8 @@ package com.pumpwatch.app.engine
 
 import android.util.Log
 import com.pumpwatch.app.data.GeckoPool
+import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GoPlusClient
-import com.pumpwatch.app.data.GoPlusTokenSecurity
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -28,9 +28,11 @@ data class MemeSignal(
     val target1: Double,
     val target2: Double,
     val reasons: List<String>,
-    val rugScore: Int = 100,  // 🆕 Rug Safety Score (0-100, 100 = امن‌ترین)
-    val rugWarnings: List<String> = emptyList()  // 🆕 هشدارهای امنیتی
+    val rugScore: Int = 100,
+    val rugWarnings: List<String> = emptyList()
 )
+
+// ---------- رادار میم‌کوین (GeckoTerminal + Rug Safety Check با GoPlus) ----------
 
 object MemeRadar {
 
@@ -75,7 +77,7 @@ object MemeRadar {
             return emptyList()
         }
 
-        onProgress(70, "تحلیل معیارهای اعتماد...")
+        onProgress(70, "تحلیل معیارهای اعتماد + Rug Safety Check...")
         val results = pools.mapNotNull { analyze(it) }
         onProgress(95, "رتبه‌بندی نهایی...")
         return results.sortedByDescending { it.score }.take(20)
@@ -133,12 +135,12 @@ object MemeRadar {
         val sym = fullName.split("/").firstOrNull()?.trim() ?: "?"
         val chain = p.relationships?.network?.data?.id ?: "?"
 
-        // 🆕 ---------- چک Rug Safety با GoPlus API ----------
+        // ---------- چک Rug Safety با GoPlus API ----------
         val (rugScore, rugWarnings) = checkRugSafety(p, chain)
 
         // اگر Rug Score خیلی پایین است، فیلتر کن
         if (rugScore < 40) {
-            Log.w(TAG, "🚨 ${sym} rug score too low: $rugScore — $rugWarnings")
+            Log.w(TAG, "🚨 $sym rug score too low: $rugScore — $rugWarnings")
             return null
         }
 
@@ -168,22 +170,21 @@ object MemeRadar {
     }
 
     /**
-     * 🆕 چک Rug Safety با GoPlus API
+     * چک Rug Safety با GoPlus API (رایگان، بدون کلید)
      * @return Pair(rugScore: 0-100, warnings: List<String>)
      */
     private suspend fun checkRugSafety(pool: GeckoPool, chain: String): Pair<Int, List<String>> {
         val warnings = mutableListOf<String>()
         var score = 100
 
-        // استخراج آدرس contract از pool ID
         val poolId = pool.id ?: return Pair(50, listOf("⚠️ آدرس contract در دسترس نیست"))
-        val parts = poolId.split("_")
-        if (parts.size < 2) return Pair(50, listOf("⚠️ فرمت pool ID نامعتبر"))
-        val contractAddress = parts.lastOrNull() ?: return Pair(50, listOf("⚠️ آدرس contract یافت نشد"))
+        val contractAddress = poolId.substringAfter('_', "")
+        if (contractAddress.isEmpty()) return Pair(50, listOf("⚠️ آدرس contract یافت نشد"))
 
         return try {
             val response = GoPlusClient.api.getTokenSecurity(chain, contractAddress)
-            val security = response.result?.get(contractAddress)
+            val security = response.result?.get(contractAddress.lowercase())
+                ?: response.result?.get(contractAddress)
 
             if (security == null) {
                 Log.w(TAG, "🚫 GoPlus: داده امنیتی برای $contractAddress در $chain یافت نشد")
@@ -252,11 +253,8 @@ object MemeRadar {
                 score -= 30
                 warnings.add("🚨 Liquidity قفل نیست (خطر Rug Pull)")
             } else {
-                // چک مدت قفل
                 val lockedDetails = lpHolders?.values?.flatMap { it.locked_detail ?: emptyList() }
-                val maxEndTime = lockedDetails?.maxOfOrNull { 
-                    it.end_time?.toLongOrNull() ?: 0L 
-                }
+                val maxEndTime = lockedDetails?.maxOfOrNull { it.end_time?.toLongOrNull() ?: 0L }
                 if (maxEndTime != null && maxEndTime > 0) {
                     val lockDays = (maxEndTime - System.currentTimeMillis() / 1000) / 86400
                     if (lockDays < 30) {
