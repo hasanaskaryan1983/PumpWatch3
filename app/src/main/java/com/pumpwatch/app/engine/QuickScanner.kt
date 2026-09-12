@@ -13,6 +13,7 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.BinanceFutures
 import com.pumpwatch.app.ui.PaperState
 import com.pumpwatch.app.ui.PaperTrade
+import com.pumpwatch.app.engine.MacdCalc
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -44,7 +45,7 @@ object QuickScanner {
     ) {
         try {
             val prefs = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-            // ایمن: پیش‌فرض false — فقط با opt-in صریح کاربر فعال می‌شود
+            // اصلاح P0-2: پیش‌فرض false — فقط با opt-in صریح کاربر فعال می‌شود
             if (!prefs.getBoolean("paper_bot", false)) return
             val gson = Gson()
             val state = try {
@@ -240,7 +241,8 @@ object QuickScanner {
             price < e50 && e50 < e200 -> -50
             else -> -25
         }
-        s += if (macdUp(closes)) 20 else -20
+        // اصلاح P0-1: استفاده از MacdCalc به‌جای پیاده‌سازی محلی
+        s += if (MacdCalc.macdUp(closes)) 20 else -20
         val r = rsiOf(closes)
         s += when {
             r in 45.0..65.0 -> 15
@@ -321,13 +323,6 @@ object QuickScanner {
         return 100.0 - 100.0 / (1.0 + ag / al)
     }
 
-    /**
-     * اصلاح بازبینی دوم: حذف پیاده‌سازی محلی MACD.
-     * همهٔ مسیرها (اسکن سریع، جزئیات کوین، بک‌تست) از یک موتور مشترک استفاده می‌کنند
-     * تا یک کوین در صفحات مختلف امتیاز یکسان بگیرد.
-     */
-    private fun macdUp(data: List<Double>): Boolean = MacdCalc.macdUp(data)
-
     private fun bollinger(data: List<Double>, period: Int = 20): Pair<Double, Double> {
         if (data.size < period) return Pair(0.0, 0.0)
         val win = data.takeLast(period)
@@ -358,7 +353,8 @@ object QuickScanner {
             r >= 65 -> -20
             else -> 0
         }
-        val macd = if (macdUp(closes)) 25 else -25
+        // اصلاح P0-1: استفاده از MacdCalc به‌جای پیاده‌سازی محلی
+        val macd = if (MacdCalc.macdUp(closes)) 25 else -25
 
         val (bu, bl) = bollinger(closes)
         val prev = closes.dropLast(1)
