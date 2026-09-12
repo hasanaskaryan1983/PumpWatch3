@@ -48,7 +48,10 @@ object UnifiedSignalEngine {
         funding: Double? = null,
         params: UnifiedSignalParams = UnifiedSignalParams()
     ): UnifiedSignalResult? {
-        if (candles1h.size < 100) return null
+        // ✅ اصلاح باگ ۱: حداقل ۶۰ کندل کافی است (قبلاً ۱۰۰ بود و باعث می‌شد
+        // برش‌های no-lookahead در بک‌تست هرگز به ۱۰۰ نرسند → همیشه null → صفر معامله)
+        // همهٔ چک‌های داخلی (مثل closes4h.size >= 60) گارد اندازهٔ خودشان را دارند.
+        if (candles1h.size < 60) return null
 
         val closes = Indicators.closes(candles1h)
         val volumes = candles1h.map { it.volume }
@@ -62,10 +65,10 @@ object UnifiedSignalEngine {
 
         val t1hUp = Indicators.emaLast(closes, 20) > Indicators.emaLast(closes, 50) && Indicators.supertrend(candles1h).direction > 0
         val t1hDn = Indicators.emaLast(closes, 20) < Indicators.emaLast(closes, 50) && Indicators.supertrend(candles1h).direction < 0
-        
+
         val t4hUp = closes4h.size >= 60 && Indicators.emaLast(closes4h, 50) > Indicators.emaLast(closes4h, 200)
         val t4hDn = closes4h.size >= 60 && Indicators.emaLast(closes4h, 50) < Indicators.emaLast(closes4h, 200)
-        
+
         val tDUp = closesD.size >= 60 && Indicators.emaLast(closesD, 50) > Indicators.emaLast(closesD, 200)
         val tDDn = closesD.size >= 60 && Indicators.emaLast(closesD, 50) < Indicators.emaLast(closesD, 200)
 
@@ -82,7 +85,7 @@ object UnifiedSignalEngine {
         val macd = Indicators.macd(closes)
         val macdPrev = Indicators.macd(closes.dropLast(1))
         val st = Indicators.supertrend(candles1h)
-        
+
         val lookback = params.breakoutLookback
         val prevHigh = candles1h.dropLast(1).takeLast(lookback).maxOf { it.high }
         val prevLow = candles1h.dropLast(1).takeLast(lookback).minOf { it.low }
@@ -119,7 +122,7 @@ object UnifiedSignalEngine {
 
         val macdUp = macd.macd > macd.signal && macd.histogram > macdPrev.histogram
         val macdDn = macd.macd < macd.signal && macd.histogram < macdPrev.histogram
-        
+
         if (isBullishSetup && macdUp) {
             score += 10
             reasons.add("تأیید مومنتوم MACD صعودی")
