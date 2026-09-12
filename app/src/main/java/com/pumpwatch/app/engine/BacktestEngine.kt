@@ -6,12 +6,12 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * قدم ۷: موتور pure بک‌تست با metrics حرفه‌ای.
+ * موتور pure بک‌تست با metrics حرفه‌ای (مطابق بند ۸ گزارش بازبینی)
  * - Max Drawdown، Equity Curve، Win Rate، Profit Factor
+ * - Avg Win, Avg Loss, Expectancy (امید ریاضی)
  * - Slippage + Fee + Funding
  * - تفکیک In-Sample / Out-of-Sample
  * - no-lookahead: همهٔ محاسبات فقط از دادهٔ تا نقطهٔ ورود
- * - signalThreshold/scoreThreshold پارامتر اختیاری (برای تست‌پذیری؛ پیش‌فرض واقعی)
  */
 object BacktestEngine {
 
@@ -26,7 +26,7 @@ object BacktestEngine {
         val entryPrice: Double,
         val exitPrice: Double,
         val pnl: Double,
-        val result: String,
+        val result: String, // WIN, LOSS, EXP
         val score: Int
     )
 
@@ -38,6 +38,9 @@ object BacktestEngine {
         val winRate: Double,
         val profitFactor: Double,
         val avgPnl: Double,
+        val avgWin: Double,       // ← اضافه‌شده طبق گزارش (میانگین سود)
+        val avgLoss: Double,      // ← اضافه‌شده طبق گزارش (میانگین ضرر)
+        val expectancy: Double,   // ← اضافه‌شده طبق گزارش (امید ریاضی)
         val totalPnl: Double,
         val maxDrawdown: Double,
         val equityCurve: List<Double>,
@@ -48,7 +51,8 @@ object BacktestEngine {
     data class SampleMetrics(
         val trades: Int,
         val winRate: Double,
-        val totalPnl: Double
+        val totalPnl: Double,
+        val avgPnl: Double        // ← اضافه‌شده برای دقت بیشتر در تفکیک
     )
 
     fun runFutures(
@@ -72,6 +76,7 @@ object BacktestEngine {
         var prev = 0
 
         for (i in start until end) {
+            // no-lookahead: فقط از داده تا ایندکس i استفاده می‌کنیم
             val closesSlice = closes.subList(0, i + 1)
             val volumesSlice = volumes.subList(0, i + 1)
             val score = computeScore(closesSlice, volumesSlice)
@@ -82,6 +87,7 @@ object BacktestEngine {
                 val entryPrice = closes[i]
                 val side = if (score > 0) "BUY" else "SELL"
 
+                // slippage + fee در ورود
                 val entryReal = if (side == "BUY") {
                     entryPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
                 } else {
@@ -97,6 +103,7 @@ object BacktestEngine {
                 var exitPrice = closes[min(i + hold, closes.size - 1)]
                 var exitIndex = min(i + hold, closes.size - 1)
 
+                // شبیه‌سازی خروج
                 for (j in (i + 1)..min(i + hold, closes.size - 1)) {
                     val hj = highs[j]
                     val lj = lows[j]
@@ -104,45 +111,27 @@ object BacktestEngine {
                         val hitStop = lj <= stop
                         val hitTarget = hj >= target
                         when {
-                            hitStop -> {
-                                result = "LOSS"
-                                exitPrice = stop
-                                exitIndex = j
-                                break
-                            }
-                            hitTarget -> {
-                                result = "WIN"
-                                exitPrice = target
-                                exitIndex = j
-                                break
-                            }
+                            hitStop -> { result = "LOSS"; exitPrice = stop; exitIndex = j; break }
+                            hitTarget -> { result = "WIN"; exitPrice = target; exitIndex = j; break }
                         }
                     } else {
                         val hitStop = hj >= stop
                         val hitTarget = lj <= target
                         when {
-                            hitStop -> {
-                                result = "LOSS"
-                                exitPrice = stop
-                                exitIndex = j
-                                break
-                            }
-                            hitTarget -> {
-                                result = "WIN"
-                                exitPrice = target
-                                exitIndex = j
-                                break
-                            }
+                            hitStop -> { result = "LOSS"; exitPrice = stop; exitIndex = j; break }
+                            hitTarget -> { result = "WIN"; exitPrice = target; exitIndex = j; break }
                         }
                     }
                 }
 
+                // slippage + fee در خروج
                 val exitReal = if (side == "BUY") {
                     exitPrice * (1 - FEE_RATE - SLIPPAGE_RATE)
                 } else {
                     exitPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
                 }
 
+                // funding cost
                 val fundingCost = if (side == "BUY") {
                     -fundingRate * (exitIndex - i) / 8.0 * entryPrice
                 } else {
@@ -222,23 +211,12 @@ object BacktestEngine {
                     val hitTarget = hj >= target
                     val hitE50 = closes[j] < e50s[j]
                     when {
-                        hitStop -> {
-                            result = "LOSS"
-                            exitPrice = trail
-                            exitIndex = j
-                            break
-                        }
-                        hitTarget -> {
-                            result = "WIN"
-                            exitPrice = target
-                            exitIndex = j
-                            break
-                        }
-                        hitE50 -> {
-                            exitPrice = closes[j]
-                            exitIndex = j
+                        hitStop -> { result = "LOSS"; exitPrice = trail; exitIndex = j; break }
+                        hitTarget -> { result = "WIN"; exitPrice = target; exitIndex = j; break }
+                        hitE50 -> { 
+                            exitPrice = closes[j]; exitIndex = j
                             result = if (exitPrice >= entryPrice) "WIN" else "LOSS"
-                            break
+                            break 
                         }
                     }
                     val nt = closes[j] * (1.0 - stopPct / 100.0)
@@ -267,10 +245,21 @@ object BacktestEngine {
         val avgPnl = trades.map { it.pnl }.average()
         val totalPnl = trades.sumOf { it.pnl }
 
-        val totalWins = trades.filter { it.pnl > 0 }.sumOf { it.pnl }
-        val totalLosses = abs(trades.filter { it.pnl < 0 }.sumOf { it.pnl })
+        // محاسبه میانگین سود و ضرر جداگانه (طبق گزارش)
+        val winningTrades = trades.filter { it.pnl > 0 }
+        val losingTrades = trades.filter { it.pnl < 0 }
+        val avgWin = if (winningTrades.isNotEmpty()) winningTrades.map { it.pnl }.average() else 0.0
+        val avgLoss = if (losingTrades.isNotEmpty()) abs(losingTrades.map { it.pnl }.average()) else 0.0
+
+        // فرمول امید ریاضی (Expectancy) طبق گزارش
+        val expectancy = (winRate / 100.0 * avgWin) - ((1 - winRate / 100.0) * avgLoss)
+
+        // Profit Factor
+        val totalWins = winningTrades.sumOf { it.pnl }
+        val totalLosses = abs(losingTrades.sumOf { it.pnl })
         val profitFactor = if (totalLosses > 0) totalWins / totalLosses else if (totalWins > 0) Double.POSITIVE_INFINITY else 0.0
 
+        // Equity Curve (شروع از 100)
         val equityCurve = mutableListOf(100.0)
         var equity = 100.0
         trades.forEach { t ->
@@ -278,6 +267,7 @@ object BacktestEngine {
             equityCurve.add(equity)
         }
 
+        // Max Drawdown
         var maxDrawdown = 0.0
         var peak = equityCurve[0]
         for (e in equityCurve) {
@@ -286,6 +276,7 @@ object BacktestEngine {
             if (dd > maxDrawdown) maxDrawdown = dd
         }
 
+        // تفکیک In-Sample (70%) / Out-of-Sample (30%)
         val splitIndex = (trades.size * 0.7).toInt()
         val inSampleTrades = trades.subList(0, splitIndex)
         val outOfSampleTrades = trades.subList(splitIndex, trades.size)
@@ -297,7 +288,8 @@ object BacktestEngine {
             SampleMetrics(
                 trades = inSampleTrades.size,
                 winRate = if (inDecided > 0) inWins * 100.0 / inDecided else 0.0,
-                totalPnl = inSampleTrades.sumOf { it.pnl }
+                totalPnl = inSampleTrades.sumOf { it.pnl },
+                avgPnl = inSampleTrades.map { it.pnl }.average()
             )
         } else null
 
@@ -308,7 +300,8 @@ object BacktestEngine {
             SampleMetrics(
                 trades = outOfSampleTrades.size,
                 winRate = if (outDecided > 0) outWins * 100.0 / outDecided else 0.0,
-                totalPnl = outOfSampleTrades.sumOf { it.pnl }
+                totalPnl = outOfSampleTrades.sumOf { it.pnl },
+                avgPnl = outOfSampleTrades.map { it.pnl }.average()
             )
         } else null
 
@@ -320,6 +313,9 @@ object BacktestEngine {
             winRate = winRate,
             profitFactor = profitFactor,
             avgPnl = avgPnl,
+            avgWin = avgWin,
+            avgLoss = avgLoss,
+            expectancy = expectancy,
             totalPnl = totalPnl,
             maxDrawdown = maxDrawdown,
             equityCurve = equityCurve,
@@ -330,7 +326,8 @@ object BacktestEngine {
 
     private fun emptyMetrics() = BacktestMetrics(
         totalTrades = 0, wins = 0, losses = 0, expired = 0,
-        winRate = 0.0, profitFactor = 0.0, avgPnl = 0.0, totalPnl = 0.0,
+        winRate = 0.0, profitFactor = 0.0, avgPnl = 0.0,
+        avgWin = 0.0, avgLoss = 0.0, expectancy = 0.0, totalPnl = 0.0,
         maxDrawdown = 0.0, equityCurve = listOf(100.0),
         inSampleMetrics = null, outOfSampleMetrics = null
     )
