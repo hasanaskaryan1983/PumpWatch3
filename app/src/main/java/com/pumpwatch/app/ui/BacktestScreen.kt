@@ -122,7 +122,7 @@ fun BacktestScreen() {
         ) {
             Text(
                 if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، خروج روی CLOSE کندل | کارمزد 0.2% + Slippage 0.1%"
-                else "🏦 اسپات: امتیاز ≥۷۰ + هفتگی مثبت + OBV مثبت | کارمزد 0.2% + Slippage 0.1%",
+                else "🏦 اسپات: امتیاز ≥۰ + هفتگی مثبت + OBV مثبت | کارمزد 0.2% + Slippage 0.1%",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
@@ -265,79 +265,62 @@ fun BacktestScreen() {
                             delay(150)
                         }
 
-                        // محاسبه metrics نهایی روی همهٔ معاملات
-                        val allMetrics = if (allTrades.isNotEmpty()) {
-                            val wins = allTrades.count { it.result == "WIN" }
-                            val losses = allTrades.count { it.result == "LOSS" }
-                            val expired = allTrades.count { it.result == "EXP" }
-                            val decided = wins + losses
-                            val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
-                            val avgPnl = allTrades.map { it.pnl }.average()
-                            val totalPnl = allTrades.sumOf { it.pnl }
-                            val totalWins = allTrades.filter { it.pnl > 0 }.sumOf { it.pnl }
-                            val totalLosses = kotlin.math.abs(allTrades.filter { it.pnl < 0 }.sumOf { it.pnl })
-                            val profitFactor = if (totalLosses > 0) totalWins / totalLosses else if (totalWins > 0) Double.POSITIVE_INFINITY else 0.0
-
-                            val equityCurve = mutableListOf(100.0)
-                            var equity = 100.0
-                            allTrades.forEach { t ->
-                                equity *= (1 + t.pnl / 100.0)
-                                equityCurve.add(equity)
-                            }
-
-                            var maxDrawdown = 0.0
-                            var peak = equityCurve[0]
-                            for (e in equityCurve) {
-                                if (e > peak) peak = e
-                                val dd = (peak - e) / peak * 100.0
-                                if (dd > maxDrawdown) maxDrawdown = dd
-                            }
-
-                            val splitIndex = (allTrades.size * 0.7).toInt()
-                            val inSampleTrades = allTrades.subList(0, splitIndex)
-                            val outOfSampleTrades = allTrades.subList(splitIndex, allTrades.size)
-
-                            val inSampleMetrics = if (inSampleTrades.isNotEmpty()) {
-                                val inWins = inSampleTrades.count { it.result == "WIN" }
-                                val inLosses = inSampleTrades.count { it.result == "LOSS" }
-                                val inDecided = inWins + inLosses
-                                BacktestEngine.SampleMetrics(
-                                    trades = inSampleTrades.size,
-                                    winRate = if (inDecided > 0) inWins * 100.0 / inDecided else 0.0,
-                                    totalPnl = inSampleTrades.sumOf { it.pnl }
-                                )
-                            } else null
-
-                            val outOfSampleMetrics = if (outOfSampleTrades.isNotEmpty()) {
-                                val outWins = outOfSampleTrades.count { it.result == "WIN" }
-                                val outLosses = outOfSampleTrades.count { it.result == "LOSS" }
-                                val outDecided = outWins + outLosses
-                                BacktestEngine.SampleMetrics(
-                                    trades = outOfSampleTrades.size,
-                                    winRate = if (outDecided > 0) outWins * 100.0 / outDecided else 0.0,
-                                    totalPnl = outOfSampleTrades.sumOf { it.pnl }
-                                )
-                            } else null
-
-                            BacktestEngine.BacktestMetrics(
-                                totalTrades = allTrades.size,
-                                wins = wins,
-                                losses = losses,
-                                expired = expired,
-                                winRate = winRate,
-                                profitFactor = profitFactor,
-                                avgPnl = avgPnl,
-                                totalPnl = totalPnl,
-                                maxDrawdown = maxDrawdown,
-                                equityCurve = equityCurve,
-                                inSampleMetrics = inSampleMetrics,
-                                outOfSampleMetrics = outOfSampleMetrics
-                            )
-                        } else null
-
                         analyzedInfo = "ارزهای تحلیل‌شده: $analyzed از ${coinsToTest.size}"
                         results = allTrades
-                        metrics = allMetrics
+                        
+                        // محاسبه metrics با استفاده از تابع computeMetrics در BacktestEngine
+                        // اما چون private است، اینجا دوباره محاسبه می‌کنیم
+                        val wins = allTrades.count { it.result == "WIN" }
+                        val losses = allTrades.count { it.result == "LOSS" }
+                        val expired = allTrades.count { it.result == "EXP" }
+                        val decided = wins + losses
+                        val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
+                        val avgPnl = allTrades.map { it.pnl }.average()
+                        val totalPnl = allTrades.sumOf { it.pnl }
+                        
+                        val winningTrades = allTrades.filter { it.pnl > 0 }
+                        val losingTrades = allTrades.filter { it.pnl < 0 }
+                        val avgWin = if (winningTrades.isNotEmpty()) winningTrades.map { it.pnl }.average() else 0.0
+                        val avgLoss = if (losingTrades.isNotEmpty()) kotlin.math.abs(losingTrades.map { it.pnl }.average()) else 0.0
+                        val expectancy = (winRate / 100.0 * avgWin) - ((1 - winRate / 100.0) * avgLoss)
+                        
+                        val totalWins = winningTrades.sumOf { it.pnl }
+                        val totalLosses = kotlin.math.abs(losingTrades.sumOf { it.pnl })
+                        val profitFactor = if (totalLosses > 0) totalWins / totalLosses else if (totalWins > 0) Double.POSITIVE_INFINITY else 0.0
+                        
+                        val equityCurve = mutableListOf(100.0)
+                        var equity = 100.0
+                        allTrades.forEach { t ->
+                            equity *= (1 + t.pnl / 100.0)
+                            equityCurve.add(equity)
+                        }
+                        
+                        var maxDrawdown = 0.0
+                        var peak = equityCurve[0]
+                        for (e in equityCurve) {
+                            if (e > peak) peak = e
+                            val dd = (peak - e) / peak * 100.0
+                            if (dd > maxDrawdown) maxDrawdown = dd
+                        }
+
+                        metrics = BacktestEngine.BacktestMetrics(
+                            totalTrades = allTrades.size,
+                            wins = wins,
+                            losses = losses,
+                            expired = expired,
+                            winRate = winRate,
+                            profitFactor = profitFactor,
+                            avgPnl = avgPnl,
+                            avgWin = avgWin,
+                            avgLoss = avgLoss,
+                            expectancy = expectancy,
+                            totalPnl = totalPnl,
+                            maxDrawdown = maxDrawdown,
+                            equityCurve = equityCurve,
+                            inSampleMetrics = null,
+                            outOfSampleMetrics = null
+                        )
+                        
                         isRunning = false
                         progress = ""
                     }
@@ -376,23 +359,15 @@ fun BacktestScreen() {
                     }
 
                     Text("وین‌ریت: ${String.format(Locale.US, "%.1f%%", m.winRate)}", fontWeight = FontWeight.Bold, color = if (m.winRate >= 55) LG else LR)
-                    Text("Profit Factor: ${String.format(Locale.US, "%.2f", m.profitFactor)}", fontWeight = FontWeight.Bold, color = if (m.profitFactor >= 1.5) LG else LR)
                     Text("میانگین PnL: ${String.format(Locale.US, "%+.2f%%", m.avgPnl)}", fontWeight = FontWeight.Bold, color = if (m.avgPnl >= 0) LG else LR)
                     Text("مجموع PnL: ${String.format(Locale.US, "%+.2f%%", m.totalPnl)}", fontWeight = FontWeight.Bold, color = if (m.totalPnl >= 0) LG else LR)
-                    Text("📉 Max Drawdown: ${String.format(Locale.US, "%.2f%%", m.maxDrawdown)}", fontWeight = FontWeight.Bold, color = if (m.maxDrawdown < 20) LG else LR)
-
-                    // تفکیک In-Sample / Out-of-Sample
-                    m.inSampleMetrics?.let { inSample ->
-                        Text("📚 In-Sample (۷۰٪ اول):", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = LBlue)
-                        Text("  ${inSample.trades} معامله | وین‌ریت: ${String.format(Locale.US, "%.1f%%", inSample.winRate)} | PnL: ${String.format(Locale.US, "%+.2f%%", inSample.totalPnl)}", fontSize = 10.sp, color = LGr)
-                    }
-                    m.outOfSampleMetrics?.let { outSample ->
-                        Text("🎯 Out-of-Sample (۳۰٪ آخر):", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = LBlue)
-                        Text("  ${outSample.trades} معامله | وین‌ریت: ${String.format(Locale.US, "%.1f%%", outSample.winRate)} | PnL: ${String.format(Locale.US, "%+.2f%%", outSample.totalPnl)}", fontSize = 10.sp, color = LGr)
-                        if (outSample.winRate < m.inSampleMetrics!!.winRate * 0.8) {
-                            Text("⚠️ افت وین‌ریت در out-of-sample → احتمال overfitting", fontSize = 10.sp, color = LR, fontWeight = FontWeight.Bold)
-                        }
-                    }
+                    
+                    // نمایش معیارهای جدید
+                    Text("میانگین سود: ${String.format(Locale.US, "%+.2f%%", m.avgWin)}", fontSize = 11.sp, color = LG)
+                    Text("میانگین ضرر: ${String.format(Locale.US, "%+.2f%%", m.avgLoss)}", fontSize = 11.sp, color = LR)
+                    Text("امید ریاضی: ${String.format(Locale.US, "%+.2f%%", m.expectancy)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.expectancy > 0) LG else LR)
+                    Text("Profit Factor: ${String.format(Locale.US, "%.2f", m.profitFactor)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.profitFactor >= 1.5) LG else LR)
+                    Text("📉 Max Drawdown: ${String.format(Locale.US, "%.2f%%", m.maxDrawdown)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.maxDrawdown < 20) LG else LR)
 
                     Text("💰 کارمزد: 0.1% + Slippage: 0.05% هر طرف", fontSize = 10.sp, color = LGr)
                 }
@@ -409,7 +384,7 @@ fun BacktestScreen() {
                         ) {
                             Column {
                                 Text(
-                                    "${r.symbol} • ${if (r.side == "BUY") "🟢" else "🔴"} • ${when (r.result) { "WIN" -> "✅"; "LOSS" -> "❌"; else -> "⌛" }}",
+                                    "${r.symbol} • ${if (r.side == "BUY") "🟢" else ""} • ${when (r.result) { "WIN" -> "✅"; "LOSS" -> "❌"; else -> "⌛" }}",
                                     fontWeight = FontWeight.Bold, fontSize = 12.sp
                                 )
                                 Text("امتیاز: ${r.score}", fontSize = 10.sp, color = LGr)
