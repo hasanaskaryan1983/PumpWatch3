@@ -52,14 +52,17 @@ object BacktestEngine {
         evalLast: Int,
         hold: Int,
         fundingRate: Double = 0.0,
-        signalThreshold: Int = 70
+        signalThreshold: Int = 70 // هماهنگ با minScore در UnifiedSignalParams
     ): Pair<List<Trade>, BacktestMetrics> {
         if (klines.size < 100) return emptyList<Trade>() to emptyMetrics()
 
-        val highs = klines.map { it[1] }
-        val lows = klines.map { it[2] }
-        val closes = klines.map { it[3] }
-        val volumes = klines.map { it[4] }
+        // بهینه‌سازی: ساخت یک‌بار Candleها به جای ساخت در هر حلقه
+        val allCandles = klines.mapIndexed { index, k -> 
+            Candle(time = 0L, open = k[0], high = k[1], low = k[2], close = k[3], volume = k[4])
+        }
+        val closes = allCandles.map { it.close }
+        val highs = allCandles.map { it.high }
+        val lows = allCandles.map { it.low }
 
         val start = max(48, closes.size - evalLast)
         val end = closes.size - hold
@@ -67,22 +70,17 @@ object BacktestEngine {
         var prevSide = "NONE"
 
         for (i in start until end) {
-            val closesSlice = closes.subList(0, i + 1)
-            val volumesSlice = volumes.subList(0, i + 1)
+            val currentCandles = allCandles.subList(0, i + 1)
             
-            // ساخت Candle object موقت برای سازگاری با UnifiedSignalEngine
-            val tempCandles = closesSlice.mapIndexed { idx, c -> 
-                Candle(time = 0L, open = c, high = highs[idx], low = lows[idx], close = c, volume = volumesSlice[idx])
-            }
-            
+            // فراخوانی موتور واحد (رفع خطای نوع داده: signalThreshold به‌صورت Int پاس داده می‌شود)
             val signal = UnifiedSignalEngine.analyze(
                 coinId = "TEST", symbol = symbol, name = symbol, 
-                candles1h = tempCandles, mode = "FUT", funding = fundingRate,
-                params = UnifiedSignalParams(minScore = signalThreshold.toDouble())
+                candles1h = currentCandles, mode = "FUT", funding = fundingRate,
+                params = UnifiedSignalParams(minScore = signalThreshold)
             )
 
             val side = signal?.side ?: "NONE"
-            val freshSignal = side != "NONE" && side != prevSide && side != "NONE"
+            val freshSignal = side != "NONE" && side != prevSide
 
             if (freshSignal) {
                 val entryPrice = closes[i]
@@ -141,16 +139,13 @@ object BacktestEngine {
         return trades to computeMetrics(trades)
     }
 
-    // برای Spot هم دقیقاً از همین منطق استفاده می‌کنیم تا یکپارچگی حفظ شود
     fun runSpot(
         symbol: String,
         klines: List<List<Double>>,
         holdDays: Int,
         scoreThreshold: Int = 70
     ): Pair<List<Trade>, BacktestMetrics> {
-        // برای سادگی و یکپارچگی، از همان منطق runFutures با پارامترهای اسپات استفاده می‌کنیم
-        // یا می‌توانید منطق خاص SpotEngine (مثل BTC Gate) را اینجا اضافه کنید.
-        // در اینجا برای حفظ یکپارچگی کامل، از runFutures با holdDays به عنوان evalLast استفاده می‌کنیم.
+        // برای یکپارچگی کامل، Spot هم از همان موتور واحد استفاده می‌کند
         return runFutures(symbol, klines, holdDays, holdDays, 0.0, scoreThreshold)
     }
 
