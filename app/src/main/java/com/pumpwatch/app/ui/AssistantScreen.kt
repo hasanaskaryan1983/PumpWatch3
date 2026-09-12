@@ -84,7 +84,7 @@ fun AssistantScreen() {
         if (q.isEmpty()) return
         scope.launch {
             loading = true; error = null; searchResult = null
-            searchStatus = "🔍 جستجو در ۱۰۰ ارز برتر CEX..."
+            searchStatus = "🔍 جستجو در ۰۰ ارز برتر CEX..."
             try {
                 var coins = withContext(Dispatchers.IO) {
                     try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
@@ -103,7 +103,7 @@ fun AssistantScreen() {
                     searchStatus = "✅ پیدا شد در CEX — رتبه #${found.market_cap_rank ?: "-"}"
                     searchResult = analyzeCex(found.id, found.symbol, found.name, found.market_cap_rank)
                 } else {
-                    searchStatus = "🔍 در CEX نبود؛ جستجو در DEX‌ها..."
+                    searchStatus = " در CEX نبود؛ جستجو در DEX‌ها..."
                     val dex = analyzeDex(q)
                     if (dex != null) {
                         searchStatus = "✅ پیدا شد در DEX (${dex.chainName}) — تحلیل کامل با کندل GeckoTerminal"
@@ -129,7 +129,7 @@ fun AssistantScreen() {
 
         Card(colors = CardDefaults.cardColors(containerColor = ACard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text("🔍 جستجوی ارز (نماد، اسم یا رتبه)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = ABlue)
+                Text(" جستجوی ارز (نماد، اسم یا رتبه)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = ABlue)
                 Spacer(Modifier.height(8.dp))
                 TextField(
                     value = searchQuery, onValueChange = { searchQuery = it },
@@ -176,7 +176,7 @@ fun AssistantScreen() {
                         Text("🛡️ اعتبار داده: ${a.dataScore}/100", fontSize = 12.sp, color = ABlue, fontWeight = FontWeight.Bold)
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text("📈 اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGreen)
+                    Text(" اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGreen)
                     a.indicators.forEach { (k, v) ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(k, fontSize = 10.sp, color = AGray)
@@ -214,7 +214,7 @@ fun AssistantScreen() {
                         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coingecko.com/en/coins/${a.coingeckoId}/chart"))) } catch (_: Throwable) { }
                     }, colors = ButtonDefaults.buttonColors(containerColor = ABlue),
                         shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) {
-                        Text("📈 نمودار CoinGecko", fontSize = 11.sp)
+                        Text(" نمودار CoinGecko", fontSize = 11.sp)
                     }
                 }
                 if (a.poolUrl != null) {
@@ -305,7 +305,7 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
             val ind = mutableMapOf<String, String>()
             if (closes.size >= 35) {
                 val rsi = rsiOf(closes)
-                val mUp = MacdCalc.macdUp(closes)  // ← اصلاح: استفاده از موتور مشترک
+                val mUp = MacdCalc.macdUp(closes)  // ← استفاده از موتور مشترک
                 val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last()
                 val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last()
                 val px = closes.last()
@@ -315,7 +315,7 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
                 if (mUp) { score += 15; ind["MACD"] = "صعودی ✅" } else { score -= 10; ind["MACD"] = "نزولی ❌" }
                 when { px > e20 && e20 > e50 -> { score += 20; ind["EMA"] = "صعودی ✅" }
                        px < e20 && e20 < e50 -> { score -= 20; ind["EMA"] = "نزولی ❌" }
-                       else -> ind["EMA"] = "خنثی ⚪" }
+                       else -> ind["EMA"] = "خنثی " }
             } else ind["تکنیکال"] = "کندل کافی نیست"
 
             var whale = "بدون داده"; var poolUrl: String? = null
@@ -329,7 +329,7 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
                     poolUrl = "https://www.geckoterminal.com/$net/pools/${pool.id?.substringAfter('_') ?: ""}"
                     if (t > 0) {
                         val r = b / t * 100
-                        whale = "فشار خرید ۱س: ${r.toInt()}٪" + (if (r > 60) " 🟢" else if (r < 40) " 🔴" else " ⚪")
+                        whale = "فشار خرید ۱س: ${r.toInt()}٪" + (if (r > 60) " 🟢" else if (r < 40) " 🔴" else " ")
                         score += when { r > 60 -> 10; r < 40 -> -10; else -> 0 }
                     }
                 }
@@ -370,7 +370,6 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
         val ch24 = a.priceChange?.h24 ?: 0.0
         val ratio = if (b1 + s1 > 0) b1 / (b1 + s1) else 0.5
 
-        // ---------- کندل ساعتی از GeckoTerminal (فایل GeckoOhlcv) ----------
         var candles = emptyList<DexCandle>()
         try {
             val oh = GeckoOhlcv.api.poolOhlcvHour(net, addr)
@@ -385,7 +384,7 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
 
         if (closes.size >= 35) {
             val rsi = rsiOf(closes)
-            val mUp = MacdCalc.macdUp(closes)  // ← اصلاح: استفاده از موتور مشترک
+            val mUp = MacdCalc.macdUp(closes)  // ← استفاده از موتور مشترک
             val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last()
             val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last()
             val px = closes.last()
@@ -395,7 +394,7 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
             if (mUp) { score += 10; ind["MACD"] = "صعودی ✅" } else { score -= 8; ind["MACD"] = "نزولی ❌" }
             when { px > e20 && e20 > e50 -> { score += 15; ind["EMA"] = "صعودی ✅" }
                    px < e20 && e20 < e50 -> { score -= 15; ind["EMA"] = "نزولی ❌" }
-                   else -> ind["EMA"] = "خنثی ⚪" }
+                   else -> ind["EMA"] = "خنثی " }
         } else {
             ind["تکنیکال"] = "کندل ساعتی در دسترس نیست"
         }
@@ -403,7 +402,7 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
         score += when { ch24 > 5 -> 10; ch24 > 0 -> 5; ch24 < -5 -> -10; else -> -3 }
         ind["روند ۲۴س"] = String.format(Locale.US, "%+.1f%%", ch24) + if (ch24 > 0) " 🟢" else " 🔴"
         score += when { ratio >= 0.6 -> 10; ratio >= 0.5 -> 4; ratio <= 0.4 -> -10; else -> 0 }
-        ind["فشار خرید نهنگی"] = "${(ratio * 100).toInt()}٪" + if (ratio >= 0.6) " 🟢" else if (ratio <= 0.4) " 🔴" else " ⚪"
+        ind["فشار خرید نهنگی"] = "${(ratio * 100).toInt()}٪" + if (ratio >= 0.6) " " else if (ratio <= 0.4) " 🔴" else " ⚪"
 
         val whale = buildString {
             append("فشار خرید ۱س: ${(ratio * 100).toInt()}٪")
