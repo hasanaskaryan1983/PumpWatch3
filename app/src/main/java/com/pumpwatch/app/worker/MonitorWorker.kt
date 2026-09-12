@@ -8,9 +8,19 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.pumpwatch.app.engine.BatchScanner
+import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.engine.SignalParams
 import java.util.Locale
 
+/**
+ * MonitorWorker — نسخهٔ یکپارچه
+ * تغییرات:
+ * - BatchScanner حالا از UnifiedSignalEngine + Binance klines استفاده می‌کند (همان منبع QuickScanner)
+ * - گیت واحد Dedup: فقط وقتی SignalLogger.log موفق شود نوتیفیکیشن می‌فرستیم
+ *   (این یعنی اگر QuickScanner همان سیگنال را زودتر ثبت کرده باشد، نوتیف تکراری/متناقض نمی‌فرستیم)
+ * - برچسب منبع در نوتیفیکیشن: 📡 کشف بازار
+ */
 class MonitorWorker(
     context: Context,
     params: WorkerParameters
@@ -19,19 +29,12 @@ class MonitorWorker(
     companion object {
         private const val CHANNEL_ID = "pumpwatch_monitor"
         private const val MIN_SCORE = 70
-        
-        /**
-         * کلید inputData برای snapshot کردن mode در زمان enqueue.
-         * Scheduler باید هنگام زمان‌بندی، mode فعلی کاربر را در inputData بگذارد
-         * تا حتی اگر کاربر بعداً mode را عوض کرد، Worker با mode قبلی اجرا شود.
-         */
+
         const val KEY_MODE = "mode"
     }
 
     override suspend fun doWork(): Result {
         return try {
-            // اولویت ۱: snapshot از inputData (زمان enqueue)
-            // اولویت ۲: fallback به prefs (برای backward compatibility)
             val modeRaw = inputData.getString(KEY_MODE)
                 ?: applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
                     .getString("mode", "SPOT")
@@ -42,15 +45,34 @@ class MonitorWorker(
             val hot = results.filter { it.side != "NONE" && it.score >= MIN_SCORE }.take(3)
 
             hot.forEachIndexed { i, r ->
-                showNotification(
-                    id = 1000 + i,
-                    title = "${if (r.side == "PUMP") "🚀 پامپ" else "🩸 دامپ"} ${r.symbol} — ${r.score}/100 ${if (r.golden) "🏅" else ""}",
-                    text = String.format(
-                        Locale.US,
-                        "ورود: %.6f | استاپ: %.6f | هدف: %.6f",
-                        r.entry, r.stopLoss, r.target1
+                val logSide = if (r.side == "PUMP") "BUY" else "SELL"
+
+                // گیت واحد dedup با QuickScanner: اگر قبلاً ثبت شده، log=false و نوتیف نمی‌فرستیم
+                val logged = SignalLogger.log(
+                    applicationContext,
+                    LoggedSignal(
+                        symbol = r.symbol,
+                        side = logSide,
+                        score = r.score,
+                        entry = r.entry,
+                        stop = r.stopLoss,
+                        target = r.target1,
+                        time = System.currentTimeMillis(),
+                        mode = mode
                     )
                 )
+
+                if (logged) {
+                    showNotification(
+                        id = 1000 + i,
+                        title = "${if (r.side == "PUMP") "🚀 پامپ" else "🩸 دامپ"} ${r.symbol} — ${r.score}/100 ${if (r.golden) "🏅" else ""} 📡",
+                        text = String.format(
+                            Locale.US,
+                            "ورود: %.6f | استاپ: %.6f | هدف: %.6f",
+                            r.entry, r.stopLoss, r.target1
+                        )
+                    )
+                }
             }
 
             Result.success()
