@@ -6,19 +6,18 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.data.ScanMarket
 import kotlin.math.abs
 
 /**
- * BatchScanner Pro — نسخه بازبینی دوم
- * تغییرات قدم ۳:
- * - buildCandlesChecked: تابع pure و قابل تست برای ساخت کندل ساعتی
- * - تشخیص واحد timestamp (ثانیه/میلی‌ثانیه)
- * - مرتب‌سازی صریح داده
- * - شمارش و لاگ gapهای زمانی
- * - مدیریت reset حجم (بدون حجم منفی)
- * - حذف کندل آخر ناتمام از خروجی سیگنال
+ * BatchScanner Pro — نسخهٔ یکپارچه (قدم: حذف تضاد موتورهای سیگنال)
+ * تغییرات:
+ * - تحلیل فقط با UnifiedSignalEngine (منبع واحد حقیقت)
+ * - منبع دادهٔ اصلی: Binance klines 1h (همان منبع QuickScanner)
+ * - مسیر fallback: نمودار CoinGecko + buildCandlesChecked (برای جفت‌های غیرBinance)
+ * - خروجی همچنان List<SignalResult> است تا همهٔ فراخوان‌ها (MonitorWorker, PicksStore) سالم بمانند
  */
 object BatchScanner {
 
@@ -106,7 +105,7 @@ object BatchScanner {
         return vol * 0.0000001 + ch * 10
     }
 
-    // ---------- تحلیل کامل یک ارز با SignalEngine ----------
+    // ---------- تحلیل کامل یک ارز: فقط UnifiedSignalEngine ----------
 
     private suspend fun analyze(
         m: ScanMarket,
@@ -114,31 +113,91 @@ object BatchScanner {
         funding: Double?,
         params: SignalParams
     ): SignalResult? {
-        val chart = ScanClient.api.chart(m.id, days = 30)
-        val build = buildCandlesChecked(chart.prices, chart.volumes)
-
-        if (build.gapCount > 0) {
-            Log.w(TAG, "${m.symbol}: ${build.gapCount} gap ساعتی در داده — کندل‌ها پیوسته نیستند")
+        // ۱) منبع اصلی و یکپارچه: Binance klines 1h (همان منبع QuickScanner)
+        val binanceCandles: List<Candle>? = try {
+            val klines = BinanceClient.api.klines("${m.symbol.uppercase()}USDT", "1h", 300)
+            if (klines.size >= 60) {
+                klines.map { k ->
+                    Candle(
+                        time = k[0].asLong,
+                        open = k[1].asDouble,
+                        high = k[2].asDouble,
+                        low = k[3].asDouble,
+                        close = k[4].asDouble,
+                        volume = k[5].asDouble
+                    )
+                }
+            } else null
+        } catch (e: Exception) {
+            Log.w(TAG, "${m.symbol}: Binance klines unavailable (${e.message}) — fallback to CoinGecko")
+            null
         }
 
-        val candles = build.candles
-        if (candles.size < 100) {
-            Log.w(TAG, "${m.symbol}: ${candles.size} candles < 100")
+        // ۲) مسیر fallback: نمودار CoinGecko + buildCandlesChecked (تابع pure و تست‌شده)
+        val candles: List<Candle> = binanceCandles ?: run {
+            val chart = ScanClient.api.chart(m.id, days = 30)
+            val build = buildCandlesChecked(chart.prices, chart.volumes)
+            if (build.gapCount > 0) {
+                Log.w(TAG, "${m.symbol}: ${build.gapCount} gap ساعتی در دادهٔ CoinGecko")
+            }
+            build.candles
+        }
+
+        if (candles.size < 60) {
+            Log.w(TAG, "${m.symbol}: ${candles.size} candles < 60")
             return null
         }
 
-        return SignalEngine.analyze(
+        // ۳) موتور واحد حقیقت
+        val unified = UnifiedSignalEngine.analyze(
             coinId = m.id,
             symbol = m.symbol,
             name = m.name,
             candles1h = candles,
             mode = mode,
             funding = funding,
-            params = params
+            params = toUnifiedParams(params)
         )
+
+        return unified?.toSignalResult()
     }
 
-    // ---------- ساخت کندل ساعتی: تابع pure و قابل تست ----------
+    // ---------- نگاشت انواع برای سازگاری با فراخوان‌های موجود ----------
+
+    private fun toUnifiedParams(p: SignalParams): UnifiedSignalParams = UnifiedSignalParams(
+        rsiPeriod = p.rsiPeriod,
+        adxMin = p.adxMin,
+        volumeMin = p.volumeMin,
+        breakoutLookback = p.breakoutLookback,
+        minScore = p.minScore,
+        goldenScore = p.goldenScore,
+        atrMult = p.atrMult,
+        rr = p.rr
+    )
+
+    private fun UnifiedSignalResult.toSignalResult(): SignalResult = SignalResult(
+        coinId = coinId,
+        symbol = symbol,
+        name = name,
+        price = price,
+        mode = mode,
+        side = side,
+        score = score,
+        golden = golden,
+        mtfAligned = mtfAligned,
+        mtfTrend = mtfTrend,
+        adx = adx,
+        rsi = rsi,
+        volumeRatio = volumeRatio,
+        funding = funding,
+        entry = entry,
+        stopLoss = stopLoss,
+        target1 = target1,
+        target2 = target2,
+        reasons = reasons
+    )
+
+    // ---------- ساخت کندل ساعتی: تابع pure و قابل تست (بدون تغییر — تست‌ها سبز بمانند) ----------
 
     internal data class CandleBuild(
         val candles: List<Candle>,
@@ -146,19 +205,6 @@ object BatchScanner {
         val droppedTrailingIncomplete: Boolean
     )
 
-    /**
-     * ورودی: prices = لیست [timestamp, price] و volumes = لیست [timestamp, volume]
-     * (فرمت خام پاسخ market_chart کوین‌گکو)
-     *
-     * قواعد:
-     * ۱) اگر بیشینهٔ timestamp کمتر از 1e11 باشد، واحد «ثانیه» فرض می‌شود و به ms تبدیل می‌گردد.
-     * ۲) داده قبل از bucketing مرتب می‌شود.
-     * ۳) یک bucket فقط وقتی بسته می‌شود که نقطهٔ ساعت بعد رسیده باشد؛
-     *    ساعت‌های گم‌شده بین دو bucket به‌عنوان gap شمرده می‌شوند.
-     * ۴) اگر حجم تجمعی ریست شود (v < lastVol)، مقدار جدید به‌عنوان اختلاف مبنا گرفته می‌شود
-     *    تا حجم منفی تولید نشود.
-     * ۵) آخرین bucket (ناتمام) هرگز وارد خروجی نمی‌شود.
-     */
     internal fun buildCandlesChecked(
         prices: List<List<Double>>,
         volumes: List<List<Double>>?
@@ -169,13 +215,10 @@ object BatchScanner {
         val pts = prices.filter { it.size >= 2 }.map { it[0] to it[1] }
         if (pts.size < 2) return CandleBuild(emptyList(), 0, false)
 
-        // ۱) تشخیص واحد timestamp
         val unitMs = if (pts.maxOf { it.first } < 100_000_000_000.0) 1000.0 else 1.0
 
-        // ۲) مرتب‌سازی صریح
         val sorted = pts.sortedBy { it.first }
 
-        // ۳) نگاشت حجم بر اساس timestamp
         val volByTs = volumes
             ?.filter { it.size >= 2 }
             ?.associate { (it[0] * unitMs).toLong() to it[1] }
@@ -198,7 +241,6 @@ object BatchScanner {
             val bStart = (tsMs / hourMs) * hourMs
 
             if (bStart != bucketStart) {
-                // بستن bucket قبلی (چون نقطهٔ ساعت بعد رسیده، کامل بوده است)
                 out.add(
                     Candle(
                         time = bucketStart,
@@ -223,7 +265,6 @@ object BatchScanner {
             }
             lastClose = p
 
-            // ۴) حجم با مدیریت reset
             val v = volByTs?.get(tsMs)
             if (v != null) {
                 val dv = if (v >= lastVol) v - lastVol else v
@@ -232,7 +273,6 @@ object BatchScanner {
             }
         }
 
-        // ۵) آخرین bucket ناتمام است (نقطهٔ بعدی برای بستنش نرسیده) → حذف
         return CandleBuild(out, gapCount, droppedTrailingIncomplete = true)
     }
 }
