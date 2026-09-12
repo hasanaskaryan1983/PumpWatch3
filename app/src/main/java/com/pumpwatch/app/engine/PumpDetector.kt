@@ -74,42 +74,38 @@ object PumpDetector {
         return SixtySecondResult(signal, strength, adx, stochK, stochD, isFractalHigh, isFractalLow)
     }
 
+    /**
+     * ✅ اصلاح P0-4: ADX واقعی (Wilder's smoothing)
+     * قبلاً فقط یک نقطهٔ DX لحظه‌ای محاسبه می‌شد.
+     * اکنون: ساخت List<Candle> موقت و delegate به Indicators.adx که Wilder's smoothing صحیح دارد.
+     * برای size < period*2 (یعنی < 28)، صفر برمی‌گرداند → signal = NEUTRAL.
+     */
     private fun calculateADX(
         highs: List<Double>,
         lows: List<Double>,
         closes: List<Double>,
         period: Int
     ): Double {
-        if (closes.size < period + 1) return 0.0
+        if (closes.size < period * 2) return 0.0
 
-        var plusDM = 0.0
-        var minusDM = 0.0
-        var tr = 0.0
-
-        for (i in 1..period) {
-            val upMove = highs[i] - highs[i - 1]
-            val downMove = lows[i - 1] - lows[i]
-
-            plusDM += if (upMove > downMove && upMove > 0) upMove else 0.0
-            minusDM += if (downMove > upMove && downMove > 0) downMove else 0.0
-
-            val currentTR = max(
-                highs[i] - lows[i],
-                max(
-                    abs(highs[i] - closes[i - 1]),
-                    abs(lows[i] - closes[i - 1])
-                )
+        val candles = closes.indices.map { i ->
+            Candle(
+                time = i.toLong(),
+                open = closes[i],
+                high = highs[i],
+                low = lows[i],
+                close = closes[i],
+                volume = 0.0
             )
-            tr += currentTR
         }
-
-        val plusDI = if (tr > 0) (plusDM / tr) * 100 else 0.0
-        val minusDI = if (tr > 0) (minusDM / tr) * 100 else 0.0
-        val dx = if ((plusDI + minusDI) > 0) abs(plusDI - minusDI) / (plusDI + minusDI) * 100 else 0.0
-
-        return dx
+        return Indicators.adx(candles, period)
     }
 
+    /**
+     * ✅ اصلاح P0-4: Stochastic استاندارد
+     * - %K: (close - lowestLow) / (highestHigh - lowestLow) * 100 روی پنجرهٔ kPeriod
+     * - %D: SMA(dPeriod) از سری %K (قبلاً حلقهٔ step‌دار غیراستاندارد بود)
+     */
     private fun calculateStochastic(
         highs: List<Double>,
         lows: List<Double>,
@@ -119,28 +115,26 @@ object PumpDetector {
     ): Pair<Double, Double> {
         if (closes.size < kPeriod) return Pair(50.0, 50.0)
 
-        val recentHighs = highs.takeLast(kPeriod)
-        val recentLows = lows.takeLast(kPeriod)
-        val recentCloses = closes.takeLast(kPeriod)
-
-        val highestHigh = recentHighs.maxOrNull() ?: 0.0
-        val lowestLow = recentLows.minOrNull() ?: 0.0
-        val currentClose = recentCloses.last()
-
-        val k = if (highestHigh != lowestLow) {
-            (currentClose - lowestLow) / (highestHigh - lowestLow) * 100
-        } else 50.0
-
+        // محاسبه %K برای آخرین max(dPeriod, 1) نقطه (تا میانگین SMA درست شود)
         val kValues = mutableListOf<Double>()
-        for (i in max(0, closes.size - kPeriod * dPeriod) until closes.size step kPeriod) {
-            val h = highs.subList(i, min(i + kPeriod, highs.size)).maxOrNull() ?: 0.0
-            val l = lows.subList(i, min(i + kPeriod, lows.size)).minOrNull() ?: 0.0
-            val c = closes[min(i + kPeriod - 1, closes.size - 1)]
-            if (h != l) kValues.add((c - l) / (h - l) * 100)
+        val startIdx = max(kPeriod - 1, closes.size - dPeriod)
+        for (i in startIdx until closes.size) {
+            val windowHigh = highs.subList(i - kPeriod + 1, i + 1).maxOrNull() ?: closes[i]
+            val windowLow = lows.subList(i - kPeriod + 1, i + 1).minOrNull() ?: closes[i]
+            val k = if (windowHigh != windowLow) {
+                (closes[i] - windowLow) / (windowHigh - windowLow) * 100
+            } else 50.0
+            kValues.add(k)
         }
-        val d = if (kValues.isNotEmpty()) kValues.average() else k
 
-        return Pair(k, d)
+        val currentK = kValues.lastOrNull() ?: 50.0
+        val currentD = if (kValues.size >= dPeriod) {
+            kValues.takeLast(dPeriod).average()
+        } else {
+            currentK
+        }
+
+        return Pair(currentK, currentD)
     }
 
     private fun detectFractalHigh(highs: List<Double>, index: Int, bars: Int): Boolean {
@@ -162,6 +156,7 @@ object PumpDetector {
     }
 
     // ==================== ZIG ZAG HIST ====================
+    // ⚠️ این تابع کد مرده است (هیچ‌جا استفاده نمی‌شود) — برای Commit پاک‌سازی بعدی نگه داشته شده
     fun analyzeZigZag(
         highs: List<Double>,
         lows: List<Double>,
@@ -269,6 +264,7 @@ object PumpDetector {
     }
 
     // ==================== ORDER FLOW (CVD) ====================
+    // ⚠️ این تابع کد مرده است — برای Commit پاک‌سازی بعدی نگه داشته شده
     fun analyzeOrderFlow(
         opens: List<Double>,
         highs: List<Double>,
@@ -351,6 +347,7 @@ object PumpDetector {
     }
 
     // ==================== تشخیص پامپ زودهنگام ====================
+    // ⚠️ این تابع کد مرده است — برای Commit پاک‌سازی بعدی نگه داشته شده
     fun detectEarlyPump(
         closes: List<Double>,
         volumes: List<Double>
@@ -392,6 +389,7 @@ object PumpDetector {
     }
 
     // ==================== بررسی سقف قیمتی ====================
+    // ⚠️ این تابع کد مرده است — برای Commit پاک‌سازی بعدی نگه داشته شده
     fun isAtTop(
         closes: List<Double>,
         volumes: List<Double>
@@ -426,6 +424,7 @@ object PumpDetector {
     }
 
     // ==================== محاسبه امتیاز نهایی ====================
+    // ⚠️ این تابع کد مرده است — برای Commit پاک‌سازی بعدی نگه داشته شده
     fun calculateFinalScore(
         baseScore: Int,
         closes: List<Double>,
@@ -437,23 +436,19 @@ object PumpDetector {
     ): Int {
         var score = baseScore
 
-        // 1. فیلتر ضد سقف
         if (isAtTop(closes, volumes)) {
             score -= 40
         }
 
-        // 2. پاداش پامپ زودهنگام
         if (pumpScore >= 60) {
             score += 15
         }
 
-        // 3. فیلتر Sixty Second Trades
         when (sixtyResult.signal) {
             "BUY" -> score += (sixtyResult.strength * 0.25).toInt()
             "SELL" -> score -= (sixtyResult.strength * 0.25).toInt()
         }
 
-        // 4. فیلتر Zig Zag Hist
         when (zigzagResult.direction) {
             "REVERSING_UP" -> score += 20
             "UP" -> score += 10
@@ -461,19 +456,16 @@ object PumpDetector {
             "DOWN" -> score -= 10
         }
 
-        // 5. فیلتر Order Flow
         if (orderFlowResult.cvdScore > 30) {
             score += (orderFlowResult.cvdScore * 0.25).toInt()
         } else if (orderFlowResult.cvdScore < -30) {
             score -= (abs(orderFlowResult.cvdScore) * 0.25).toInt()
         }
 
-        // 6. پاداش Accumulation
         if (orderFlowResult.isAccumulation) {
             score += 15
         }
 
-        // 7. جریمه Distribution
         if (orderFlowResult.isDistribution) {
             score -= 20
         }
