@@ -53,6 +53,7 @@ private val MGold = Color(0xFFFFC107)
 private val MGray = Color(0xFF8B949E)
 private val MCardA = Color(0xFF1A2230)
 private val MCardB = Color(0xFF141B25)
+private val MUnknown = Color(0xFF23272E)
 
 private val MEME_CHAINS = listOf(
     "solana" to "Solana 🟣",
@@ -166,6 +167,7 @@ fun MemeRadarScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("شناسایی قبل از پامپ • خروج قبل از دامپ", fontSize = 11.sp, color = MGray)
                     Text("🛡️ Rug Safety Check فعال — هر توکن ۱۲ چک امنیتی می‌شود", fontSize = 10.sp, color = MGreen)
+                    Text("❓ اگر دادهٔ امنیتی موجود نباشد: برچسب UNKNOWN — هرگز safe", fontSize = 10.sp, color = MGray)
                     Text("📊 ضربه روی هر کارت = نمودار کامل استخر در GeckoTerminal", fontSize = 10.sp, color = MGray)
                     Text("شبکه‌ها: ${MEME_CHAINS.joinToString(" • ") { it.second }}", fontSize = 9.sp, color = MBlue)
                     Text(lastUpdate, fontSize = 9.sp, color = MGray)
@@ -182,11 +184,15 @@ fun MemeRadarScreen() {
                     val chainName = MEME_CHAINS.firstOrNull { it.first == m.chain }?.second ?: m.chain
                     val poolUrl = "https://www.geckoterminal.com/${m.chain}/pools/${m.name.split("/").lastOrNull()?.lowercase() ?: ""}"
 
-                    // رنگ کارت بر اساس Rug Score
+                    // P0-1: val محلی برای smart cast روی Int?
+                    val rug = m.rugScore
+
+                    // رنگ کارت بر اساس Rug Score — UNKNOWN = خاکستری (هرگز سبز)
                     val cardColor = when {
-                        m.rugScore >= 80 -> if (i % 2 == 0) MCardA else MCardB  // سبز - امن
-                        m.rugScore >= 60 -> Color(0xFF2A2520)  // زرد - احتیاط
-                        else -> Color(0xFF3A2020)  // قرمز - خطرناک
+                        rug == null -> MUnknown
+                        rug >= 80 -> if (i % 2 == 0) MCardA else MCardB
+                        rug >= 60 -> Color(0xFF2A2520)
+                        else -> Color(0xFF3A2020)
                     }
 
                     Surface(
@@ -214,30 +220,45 @@ fun MemeRadarScreen() {
 
                             Text(verdict, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = vColor)
 
-                            // 🆕 نمایش Rug Safety Score
+                            // 🛡️ نمایش Rug Safety Score — سه‌حالته (P0-1)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 val rugColor = when {
-                                    m.rugScore >= 80 -> MGreen
-                                    m.rugScore >= 60 -> MGold
+                                    rug == null -> MGray
+                                    rug >= 80 -> MGreen
+                                    rug >= 60 -> MGold
                                     else -> MRed
                                 }
                                 val rugEmoji = when {
-                                    m.rugScore >= 80 -> "✅"
-                                    m.rugScore >= 60 -> "⚠️"
+                                    rug == null -> "❓"
+                                    rug >= 80 -> "✅"
+                                    rug >= 60 -> "⚠️"
                                     else -> "🚨"
                                 }
                                 Text(
-                                    "$rugEmoji Rug Safety: ${m.rugScore}/100",
+                                    if (rug == null) "$rugEmoji Rug Safety: UNKNOWN"
+                                    else "$rugEmoji Rug Safety: $rug/100",
                                     fontSize = 11.sp, color = rugColor, fontWeight = FontWeight.Bold
                                 )
                                 Text("Score: ${m.score}/100", fontSize = 10.sp, color = MBlue, fontWeight = FontWeight.Bold)
+                            }
+
+                            // P0-1: پیام جدا برای EMPTY و FAILED — هیچ‌وقت safe نیست
+                            if (rug == null) {
+                                Text(
+                                    when (m.securityStatus) {
+                                        "EMPTY" -> "❓ GoPlus این توکن را نمی‌شناسد — به‌عنوان safe در نظر گرفته نشده"
+                                        "FAILED" -> "❓ بررسی امنیتی انجام نشد (خطای اتصال) — به‌عنوان safe در نظر گرفته نشده"
+                                        else -> "❓ وضعیت امنیتی نامشخص — به‌عنوان safe در نظر گرفته نشده"
+                                    },
+                                    fontSize = 9.sp, color = MGray, fontWeight = FontWeight.Bold
+                                )
                             }
 
                             // 🆕 نمایش هشدارهای Rug Safety (اگر وجود دارد)
                             if (m.rugWarnings.isNotEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     m.rugWarnings.take(3).forEach { warning ->
-                                        Text(warning, fontSize = 9.sp, color = MRed)
+                                        Text(warning, fontSize = 9.sp, color = if (rug == null) MGray else MRed)
                                     }
                                     if (m.rugWarnings.size > 3) {
                                         Text("... و ${m.rugWarnings.size - 3} هشدار دیگر", fontSize = 8.sp, color = MGray)
