@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,6 +59,8 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.cmcUrl
+import com.pumpwatch.app.data.formatMarketCap
+import com.pumpwatch.app.data.formatPrice
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -71,6 +74,7 @@ import java.util.concurrent.TimeUnit
 
 private val SpotAccent = Color(0xFF00E676)
 private val FuturesAccent = Color(0xFFFF5252)
+private val DarkBackground = Color(0xFF0B0F14)
 private val DarkSurface = Color(0xFF121820)
 private val DarkCard = Color(0xFF1A2230)
 private val TextPrimary = Color(0xFFE6EDF3)
@@ -144,16 +148,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PumpWatchTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = androidx.compose.material3.darkColorScheme(
+        colorScheme = darkColorScheme(
             primary = SpotAccent,
             onPrimary = Color.Black,
-            background = Color(0xFF0B0F14),
+            background = DarkBackground,
             onBackground = TextPrimary,
             surface = DarkSurface,
             onSurface = TextPrimary,
             secondaryContainer = DarkCard,
             onSecondaryContainer = TextPrimary,
-            error = Color(0xFFFF5252)
+            error = FuturesAccent
         ),
         content = content
     )
@@ -235,7 +239,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
         // Coin Detail Overlay (shared across both workspaces)
         if (selectedCoin != null) {
             Surface(
-                color = Color(0xFF0B0F14),
+                color = DarkBackground,
                 modifier = Modifier.fillMaxSize()
             ) {
                 CoinDetailScreen(
@@ -324,7 +328,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             errorMsg != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     errorMsg ?: "",
-                    color = Color(0xFFFF5252),
+                    color = FuturesAccent,
                     modifier = Modifier.padding(16.dp),
                     textAlign = TextAlign.Center
                 )
@@ -379,25 +383,11 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
                 Text(formatPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text(
                     String.format(Locale.US, "%+.2f%%", change),
-                    color = if (isUp) SpotAccent else Color(0xFFFF5252),
+                    color = if (isUp) SpotAccent else FuturesAccent,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
         }
     }
-}
-
-fun formatPrice(p: Double): String = when {
-    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
-    p >= 1 -> String.format(Locale.US, "$%.4f", p)
-    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
-    else -> String.format(Locale.US, "$%.6f", p)
-}
-
-fun formatMarketCap(cap: Double?): String = when {
-    cap == null -> "—"
-    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
-    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
-    else -> String.format(Locale.US, "$%.0f", cap)
 }
