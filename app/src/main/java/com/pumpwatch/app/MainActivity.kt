@@ -1,6 +1,8 @@
 package com.pumpwatch.app
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -12,25 +14,36 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.BackoffPolicy
@@ -40,19 +53,27 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.NetErr
+import com.pumpwatch.app.data.NetError
+import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.ui.FuturesWorkspace
+import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.SpotWorkspace
 import com.pumpwatch.app.worker.MonitorScheduler
 import com.pumpwatch.app.worker.MonitorWorker
 import com.pumpwatch.app.worker.SignalScannerWorker
+import kotlinx.coroutines.launch
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private val SpotAccent = Color(0xFF00E676)
 private val FuturesAccent = Color(0xFFFF5252)
 private val DarkSurface = Color(0xFF121820)
 private val DarkCard = Color(0xFF1A2230)
+private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
 
 class MainActivity : ComponentActivity() {
@@ -86,10 +107,12 @@ class MainActivity : ComponentActivity() {
         scheduleSignalScanner()
 
         setContent {
-            MainApp(onModeChanged = {
-                MonitorScheduler.start(this)
-                scheduleSignalScanner()
-            })
+            PumpWatchTheme {
+                MainApp(onModeChanged = {
+                    MonitorScheduler.start(this)
+                    scheduleSignalScanner()
+                })
+            }
         }
     }
 
@@ -116,6 +139,24 @@ class MainActivity : ComponentActivity() {
             scanRequest
         )
     }
+}
+
+@Composable
+fun PumpWatchTheme(content: @Composable () -> Unit) {
+    MaterialTheme(
+        colorScheme = androidx.compose.material3.darkColorScheme(
+            primary = SpotAccent,
+            onPrimary = Color.Black,
+            background = Color(0xFF0B0F14),
+            onBackground = TextPrimary,
+            surface = DarkSurface,
+            onSurface = TextPrimary,
+            secondaryContainer = DarkCard,
+            onSecondaryContainer = TextPrimary,
+            error = Color(0xFFFF5252)
+        ),
+        content = content
+    )
 }
 
 @Composable
@@ -204,4 +245,159 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
             }
         }
     }
+}
+
+@Composable
+fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
+    var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    fun load() {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
+                val mode = prefs.getString("mode", "SPOT")
+                if (mode == "FUTURES") {
+                    coins = ApiClient.getTop100Coins()
+                } else {
+                    coins = ApiClient.getQuickCoins()
+                    loading = false
+                    try {
+                        val full = ApiClient.getTop1000Coins()
+                        if (full.size > coins.size) coins = full
+                    } catch (e: Exception) {
+                        NetErr.log("MarketScreen", "coingecko/coins/markets?page=1..4", null, e)
+                    }
+                }
+            } catch (e: Exception) {
+                NetErr.log("MarketScreen", "coingecko/coins/markets", null, e)
+                errorMsg = NetErr.msg(e)
+            } finally {
+                loading = false
+            }
+            if (errorMsg == null && coins.isEmpty()) {
+                NetErr.logEmpty("MarketScreen", "coingecko/coins/markets", null)
+                errorMsg = NetErr.msg(NetError.EmptyData)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    val shown = if (query.isBlank()) coins
+    else coins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("قیمت لحظه‌ای", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { load() }) { Text("بروزرسانی") }
+        }
+
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
+
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+            MarketPulseHeader()
+        }
+
+        when {
+            loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = SpotAccent)
+            }
+            errorMsg != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    errorMsg ?: "",
+                    color = Color(0xFFFF5252),
+                    modifier = Modifier.padding(16.dp),
+                    textAlign = TextAlign.Center
+                )
+            }
+            else -> LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(shown) { coin ->
+                    CoinCard(coin = coin, onClick = { onCoinClick(coin) })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val change = coin.price_change_percentage_24h ?: 0.0
+    val isUp = change >= 0
+    val rank = coin.market_cap_rank ?: 0
+    Surface(
+        color = DarkCard,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("#$rank  ${coin.symbol.uppercase(Locale.US)}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+                Text("کپ: ${formatMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 11.sp)
+            }
+
+            Text(
+                "📊",
+                fontSize = 18.sp,
+                modifier = Modifier.clickable {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id))))
+                    } catch (_: Exception) { }
+                }.padding(8.dp)
+            )
+
+            Spacer(Modifier.width(4.dp))
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(formatPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(
+                    String.format(Locale.US, "%+.2f%%", change),
+                    color = if (isUp) SpotAccent else Color(0xFFFF5252),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+fun formatPrice(p: Double): String = when {
+    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
+    p >= 1 -> String.format(Locale.US, "$%.4f", p)
+    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
+    else -> String.format(Locale.US, "$%.6f", p)
+}
+
+fun formatMarketCap(cap: Double?): String = when {
+    cap == null -> "—"
+    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
+    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
+    else -> String.format(Locale.US, "$%.0f", cap)
 }
