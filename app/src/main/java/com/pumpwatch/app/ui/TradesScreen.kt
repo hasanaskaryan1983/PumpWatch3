@@ -152,7 +152,8 @@ fun TradesScreen() {
 
     var state by remember { mutableStateOf(loadState(context)) }
     var alloc by remember { mutableStateOf(loadAlloc(context)) }
-    var botOn by remember { mutableStateOf(prefs.getBoolean("paper_bot", true)) }
+    // P0-5: نصب تازه = ربات خاموش (هم‌راستا با QuickScanner و README)
+    var botOn by remember { mutableStateOf(prefs.getBoolean("paper_bot", false)) }
     var status by remember { mutableStateOf("⏳ منتظر اولین اسکن...") }
     var confirmReset by remember { mutableStateOf(false) }
     var consensus by remember { mutableStateOf<List<ConsensusPick>>(emptyList()) }
@@ -318,7 +319,7 @@ fun TradesScreen() {
                     seen.add(sym)
                     val px = dexInfo[sym]?.first ?: continue
                     var total = 50
-                    total += when { w.first >= 0.7 -> 25; w.first >= 0.6 -> 18; else -> 8 }
+    total += when { w.first >= 0.7 -> 25; w.first >= 0.6 -> 18; else -> 8 }
                     picks.add(ConsensusPick(sym, null, px, w.third, 50, w.first, w.second, 0.0, total.coerceIn(0, 100), true, 12.0))
                 }
 
@@ -333,9 +334,9 @@ fun TradesScreen() {
                 }
                 realWhale = rw
 
-                // ---------- معامله خودکار per tier ----------
+                // ---------- معامله خودکار per tier (فقط وقتی ربات روشن است) ----------
                 var openedNow = 0
-                for ((tierName, range) in TIERS) {
+                if (botOn) for ((tierName, range) in TIERS) {
                     val pct = alloc[tierName] ?: 0
                     if (pct <= 0) continue
                     val tierBudget = eq * pct / 100.0
@@ -387,9 +388,9 @@ fun TradesScreen() {
                     }
                 }
 
-                // ---------- معامله از اجماع ----------
+                // ---------- معامله از اجماع (فقط وقتی ربات روشن است) ----------
                 var consensusOpened = 0
-                for (pk in consensus) {
+                if (botOn) for (pk in consensus) {
                     if (consensusOpened >= 2 || state.cash < 10) break
                     if (pk.total < 80 || pk.trend < 50) continue
                     if (openTrades().any { it.symbol == pk.symbol }) continue
@@ -513,7 +514,7 @@ fun TradesScreen() {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
                         Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                        Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                        Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
                     }
                     realWhale[pk.symbol]?.let { rw ->
                         Text(
