@@ -65,7 +65,7 @@ enum class IndicatorMode(val label: String, val emoji: String) {
     MACD("MACD", ""),
     BOLL("بولینگر", "🎯"),
     SIXTY("Sixty", "⚡"),
-    OF("Order Flow", "💰"),
+    OF("فشار تخمینی", "🔮"),
     NONE("بدون اندیکاتور", "⚪")
 }
 
@@ -280,7 +280,6 @@ private fun bsFromSixty(highs: List<Double>, lows: List<Double>, closes: List<Do
         val prev = stoch[stoch.size - 2]
         val cur = stoch.last()
 
-        // فقط برگشت از اشباع — بدون نیاز به fractal
         if (prev < 20 && cur >= 20) out.add(i to true)
         else if (prev > 80 && cur <= 80) out.add(i to false)
     }
@@ -302,7 +301,6 @@ private fun bsFromOrderFlow(candles: List<Candle>): List<Pair<Int, Boolean>> {
         }
         hist.add(cvd)
     }
-    // فقط تغییر CVD — بدون محدودیت priceChange
     for (i in 20 until candles.size) {
         val before = hist.getOrNull(i - 1 - 10) ?: continue
         val now = hist.getOrNull(i - 1) ?: continue
@@ -422,7 +420,6 @@ private fun ChartCanvas(
             isFakeBoldText = true
         }
 
-        // نقاط هر اندیکاتور با رنگ سبز/قرمز
         allSignals.forEach { (mode, signals) ->
             signals.forEach { (idx, isBuy) ->
                 val r = closes.size - 1 - idx
@@ -440,7 +437,6 @@ private fun ChartCanvas(
             }
         }
 
-        // نقاط مشترک طلایی
         consensusSignals.forEach { (idx, isBuy) ->
             val r = closes.size - 1 - idx
             if (r >= n || r < 0) return@forEach
@@ -668,6 +664,13 @@ fun ProChart(
             Spacer(Modifier.height(6.dp))
             Text("🧠 اندیکاتورها (حداکثر ۳ تا — نقاط مشترک ★):", fontSize = 11.sp, color = PGray)
             ModeChips(selectedModes, ::toggleMode)
+            if (IndicatorMode.OF in selectedModes) {
+                Text(
+                    "🔮 فشار تخمینی = محاسبه از روی کندل‌ها (نه دادهٔ واقعی Order Book)",
+                    fontSize = 9.sp,
+                    color = PGray
+                )
+            }
 
             Spacer(Modifier.height(8.dp))
             ChartBody(coinId, tf, symbol, candles, loading, selectedModes, height = 340.dp)
@@ -698,6 +701,13 @@ fun ProChart(
                 Spacer(Modifier.height(6.dp))
                 Text("🧠 اندیکاتورها (حداکثر ۳ تا — نقاط مشترک ★):", fontSize = 11.sp, color = PGray)
                 ModeChips(selectedModes, ::toggleMode)
+                if (IndicatorMode.OF in selectedModes) {
+                    Text(
+                        "🔮 فشار تخمینی = محاسبه از روی کندل‌ها (نه دادهٔ واقعی Order Book)",
+                        fontSize = 9.sp,
+                        color = PGray
+                    )
+                }
 
                 Spacer(Modifier.height(8.dp))
                 ChartBody(coinId, tf, symbol, candles, loading, selectedModes, height = null)
