@@ -84,7 +84,7 @@ private val CHAINS = listOf(
 )
 
 private data class WalletHolding(
-    val symbol: String, val name: String, val amount: Double, val price: Double, val value: Double,
+    val symbol: String, val name: String, val amount: Double, val price: Double?, val value: Double,
     val contract: String? = null, val host: String? = null,
     var firstBuyTs: Long? = null, var buyPrice: Double? = null
 )
@@ -196,11 +196,12 @@ fun WalletScreen() {
                             } ?: emptyList()
 
                             val list = mutableListOf<WalletHolding>()
-                            for ((mint, amt, acc) in raw.take(15)) {
+                            // P0-3: حذف take(15) — همهٔ توکن‌ها را بررسی کن (تا ۵۰)
+                            for ((mint, amt, acc) in raw.take(50)) {
                                 try {
                                     val t = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
-                                    val px = t?.price_usd?.toDoubleOrNull() ?: 0.0
-                                    val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * px, contract = mint)
+                                    val px = t?.price_usd?.toDoubleOrNull()  // P0-3: nullable (نه 0.0)
+                                    val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * (px ?: 0.0), contract = mint)
                                     try {
                                         if (acc.isNotEmpty()) {
                                             val sg = solanaRaw(mapOf(
@@ -217,10 +218,11 @@ fun WalletScreen() {
                                 } catch (_: Exception) { }
                             }
 
+                            // P0-3: حذف take(6) — همهٔ توکن‌ها قیمت تاریخی می‌گیرند
                             try {
                                 val coinsH = ApiClient.getTop1000Coins()
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                                for (h in list.take(6)) {
+                                for (h in list) {
                                     val coin = coinsH.firstOrNull { it.symbol.equals(h.symbol, true) } ?: continue
                                     try {
                                         val chart = ApiClient.getCoinChart(coin.id, days = 365)
@@ -249,18 +251,20 @@ fun WalletScreen() {
                                     val bs = Blockscout.api(h.bs!!)
                                     val tokens = bs.tokenList("account", "tokenlist", addr).result ?: continue
                                     val list = mutableListOf<WalletHolding>()
-                                    tokens.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.take(10).forEach { t ->
+                                    // P0-3: حذف take(10) — همهٔ توکن‌ها را بررسی کن (تا ۵۰ per chain)
+                                    tokens.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.take(50).forEach { t ->
                                         val dec = t.decimals?.toDoubleOrNull() ?: 18.0
                                         val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                                         val contract = t.contractAddress ?: return@forEach
                                         var px = try {
-                                            GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0
-                                        } catch (_: Exception) { 0.0 }
-                                        if (px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price ?: 0.0
-                                        list.add(WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * px, contract = contract, host = h.bs))
+                                            GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull()  // P0-3: nullable
+                                        } catch (_: Exception) { null }
+                                        if (px == null || px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price
+                                        list.add(WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * (px ?: 0.0), contract = contract, host = h.bs))
                                     }
                                     if (list.isNotEmpty()) {
-                                        for (hd in list.take(6)) {
+                                        // P0-3: حذف take(6) — همهٔ توکن‌ها firstBuyTs می‌گیرند
+                                        for (hd in list) {
                                             try {
                                                 val c = hd.contract ?: continue
                                                 val asc = Blockscout.api(hd.host!!).tokenTx("account", "tokentx", addr, "asc").result
@@ -275,9 +279,10 @@ fun WalletScreen() {
                                 } catch (_: Exception) { }
                             }
 
+                            // P0-3: حذف take(6) — همهٔ توکن‌ها قیمت تاریخی می‌گیرند
                             try {
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                                for (hd in allHold.take(6)) {
+                                for (hd in allHold) {
                                     val sym = hd.symbol.substringBefore('·')
                                     val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
                                     try {
@@ -296,15 +301,17 @@ fun WalletScreen() {
                                 val all = try { Blockscout.api(th.bs!!).tokenTx("account", "tokentx", addr, "desc").result } catch (_: Exception) { null }
                                 val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                                 val sdfShow = SimpleDateFormat("MM/dd", Locale.US)
-                                val rawTxs = all?.take(20)?.mapNotNull { t ->
+                                // P0-3: حذف take(20) — همهٔ تراکنش‌ها را بگیر (تا ۱۰۰)
+                                val rawTxs = all?.take(100)?.mapNotNull { t ->
                                     val ts = (t.timeStamp?.toLongOrNull() ?: return@mapNotNull null) * 1000
                                     val dec = t.tokenDecimal?.toDoubleOrNull() ?: 18.0
                                     val amt = (t.value?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                                     WalletTx(sdfShow.format(Date(ts)), sdfDay.format(Date(ts)), t.tokenSymbol ?: "?", amt, (t.to ?: "").equals(addr, true), null)
                                 } ?: emptyList()
 
+                                // P0-3: حذف take(3) — همهٔ symbolها قیمت می‌گیرند
                                 try {
-                                    for (sym in rawTxs.map { it.symbol }.distinct().take(3)) {
+                                    for (sym in rawTxs.map { it.symbol }.distinct()) {
                                         val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
                                         try {
                                             val chart = ApiClient.getCoinChart(coin.id, days = 365)
@@ -544,7 +551,12 @@ fun WalletScreen() {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
+                                // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
+                                if (h.price != null && h.price > 0) {
+                                    Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
+                                } else {
+                                    Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                                }
                             }
                             Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
                         }
@@ -584,8 +596,14 @@ fun WalletScreen() {
                             Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            if (t.priceUsd != null) Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
-                            Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * (t.priceUsd ?: 0.0))}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
+                            // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
+                            if (t.priceUsd != null && t.priceUsd!! > 0) {
+                                Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
+                                Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * t.priceUsd!!)}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
+                            } else {
+                                Text("قیمت اون روز: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                                Text("ارزش: ❓", fontSize = 10.sp, color = VGray)
+                            }
                         }
                     }
                 }
