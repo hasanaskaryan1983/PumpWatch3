@@ -31,6 +31,7 @@ private val LY = Color(0xFFFFC107)
 private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
+private val LPurple = Color(0xFFCE93D8)
 
 private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
@@ -75,20 +76,19 @@ fun SignalLogScreen() {
         }
     }
 
-    // 🔄 آپدیت خودکار قیمت‌ها هر ۴ ثانیه برای سیگنال‌های باز
+    // 🔄 آپدیت خودکار قیمت‌ها هر ۴۵ ثانیه برای سیگنال‌های باز
     LaunchedEffect(Unit) {
         loadLogs()
         lastScores = prefs.getString("last_scores", "") ?: ""
-        
+
         while (true) {
-            delay(45_000L) // ۴۵ ثانیه
+            delay(45_000L)
             val currentLogs = SignalLogger.load(ctx)
             val hasOpen = currentLogs.any { it.status == "OPEN" || it.status == "EXP" }
             if (hasOpen) {
                 val updated = SignalLogger.updateOpenSignals(ctx, currentLogs)
                 logs = updated
                 SignalLogger.save(ctx, updated)
-                // آپدیت آمار
                 stats = Triple(
                     updated.count { it.status == "WIN" },
                     updated.count { it.status == "LOSS" },
@@ -103,6 +103,23 @@ fun SignalLogScreen() {
         "FUT" -> logs.filter { it.mode == "FUT" }
         else -> logs
     }
+
+    // 🚀 آمار Walk-Forward (مشتق از logs — بدون تغییر داده)
+    val closedSignals = logs.filter { it.status in listOf("WIN", "LOSS", "EXP") }
+    val wfTotal = closedSignals.size
+    val wfWins = closedSignals.count { it.status == "WIN" }
+    val wfLosses = closedSignals.count { it.status == "LOSS" }
+    val wfExpired = closedSignals.count { it.status == "EXP" }
+    val wfDecided = wfWins + wfLosses
+    val wfWinRate = if (wfDecided > 0) wfWins * 100.0 / wfDecided else 0.0
+    val wfExpectancy = closedSignals.mapNotNull { s ->
+        s.exitPrice?.let { ep ->
+            if (s.side == "BUY") (ep - s.entry) / s.entry * 100
+            else (s.entry - ep) / s.entry * 100
+        }
+    }.let { pnls -> if (pnls.isNotEmpty()) pnls.average() else 0.0 }
+    val wfProgressPct = (wfTotal.coerceAtMost(50) * 100.0 / 50.0)
+    val wfReady = wfTotal >= 50
 
     Column(
         Modifier.fillMaxSize().padding(16.dp),
@@ -141,6 +158,68 @@ fun SignalLogScreen() {
             }
         }
 
+        // 🚀 داشبورد پیشرفت Walk-Forward
+        Card(
+            colors = CardDefaults.cardColors(containerColor = LC),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🚀 پیشرفت Walk-Forward", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LPurple)
+                    Spacer(Modifier.weight(1f))
+                    Text("$wfTotal / 50", fontWeight = FontWeight.Black, fontSize = 16.sp, color = if (wfReady) LG else LY)
+                }
+
+                // نوار پیشرفت (بدون وابستگی به نسخهٔ material3)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .background(LGr.copy(alpha = 0.3f), RoundedCornerShape(5.dp))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth((wfProgressPct / 100.0).toFloat().coerceIn(0f, 1f))
+                            .height(10.dp)
+                            .background(if (wfReady) LG else LBlue, RoundedCornerShape(5.dp))
+                    )
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("✅ برد: $wfWins", color = LG, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("❌ باخت: $wfLosses", color = LR, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("⌛ منقضی: $wfExpired", color = LY, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        "وین‌ریت: ${String.format(Locale.US, "%.1f%%", wfWinRate)}",
+                        color = if (wfWinRate >= 55) LG else LR,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        "Expectancy: ${String.format(Locale.US, "%+.2f%%", wfExpectancy)}",
+                        color = if (wfExpectancy >= 0) LG else LR,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Text(
+                    when {
+                        wfTotal == 0 -> "💡 هنوز داده‌ای جمع نشده — از اپ استفاده کنید، سیگنال‌ها خودکار ثبت و ارزیابی می‌شن"
+                        wfReady -> "✅ به ۵۰ سیگنال رسیدیم! آماده برای فعال‌سازی Walk-Forward Optimization"
+                        else -> "📊 به ${50 - wfTotal} سیگنال دیگه نیاز داریم تا دادهٔ کافی برای بهینه‌سازی خودکار وزن‌ها جمع بشه"
+                    },
+                    fontSize = 10.sp,
+                    color = if (wfReady) LG else LGr,
+                    lineHeight = 14.sp
+                )
+            }
+        }
+
         stats?.let { st ->
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                 Text("✅ برد: ${st.first}", color = LG, fontWeight = FontWeight.Bold)
@@ -148,7 +227,7 @@ fun SignalLogScreen() {
                 Text("⌛ منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
             }
             Text("🎯 استراتژی: استاپ دنباله‌رو (Trailing) + هدف شناور. تا وقتی استاپ نخوره، پوزیشن باز می‌مونه!", fontSize = 9.sp, color = LBlue, fontWeight = FontWeight.Bold)
-            
+
             val t = st.first + st.second
             if (t > 0) {
                 val wr = st.first * 100.0 / t
@@ -168,15 +247,15 @@ fun SignalLogScreen() {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(filteredLogs) { s ->
                     val isLong = s.side == "BUY"
-                    val pnl = s.exitPrice?.let { ep -> 
-                        if (isLong) (ep - s.entry) / s.entry * 100 else (s.entry - ep) / s.entry * 100 
+                    val pnl = s.exitPrice?.let { ep ->
+                        if (isLong) (ep - s.entry) / s.entry * 100 else (s.entry - ep) / s.entry * 100
                     }
-                    
+
                     Box(
                         Modifier
                             .fillMaxWidth()
                             .background(
-                                if (s.status == "OPEN") Color(0xFF1A2A3A) else LC, 
+                                if (s.status == "OPEN") Color(0xFF1A2A3A) else LC,
                                 RoundedCornerShape(12.dp)
                             )
                             .padding(12.dp)
@@ -184,13 +263,12 @@ fun SignalLogScreen() {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                                 val modeEmoji = if (s.mode == "FUT") "⚡" else ""
-                                Text("$modeEmoji ${s.symbol} • ${if(isLong)"🟢 Long" else "🔴 Short"}", fontWeight = FontWeight.Bold)
-                                Text("${statusEmoji(s.status)} ${s.status}", color = when(s.status) {
+                                Text("$modeEmoji ${s.symbol} • ${if (isLong) "🟢 Long" else "🔴 Short"}", fontWeight = FontWeight.Bold)
+                                Text("${statusEmoji(s.status)} ${s.status}", color = when (s.status) {
                                     "WIN" -> LG; "LOSS" -> LR; "EXP" -> LY; "OPEN" -> LBlue; else -> LGr
                                 })
                             }
-                            
-                            // نمایش قیمت زنده
+
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                                 Text("ورود: $${fmtPrice(s.entry)}", fontSize = 11.sp, color = LGr)
                                 if (s.currentPrice != null && s.status == "OPEN") {
@@ -198,14 +276,13 @@ fun SignalLogScreen() {
                                 }
                             }
 
-                            // نمایش استاپ و هدف شناور
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                                 if (s.status == "OPEN" && s.trailingStop > 0) {
                                     Text("🛑 استاپ دنباله‌رو: $${fmtPrice(s.trailingStop)}", fontSize = 10.sp, color = LR, fontWeight = FontWeight.Bold)
                                 } else {
                                     Text("استاپ اولیه: $${fmtPrice(s.stop)}", fontSize = 10.sp, color = LR)
                                 }
-                                
+
                                 if (s.status == "OPEN" && s.currentTarget > s.target) {
                                     Text("🎯 هدف شناور: $${fmtPrice(s.currentTarget)}", fontSize = 10.sp, color = LG, fontWeight = FontWeight.Bold)
                                 } else {
