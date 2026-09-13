@@ -62,8 +62,8 @@ private fun translateFng(s: String?): String = when (s) {
     else -> ""
 }
 
-private fun fngColor(v: Int): Color = when {
-    v < 0 -> HGray
+private fun fngColor(v: Int?): Color = when {
+    v == null -> HGray
     v <= 25 -> HRed
     v <= 45 -> HOrange
     v <= 55 -> HYellow
@@ -71,8 +71,11 @@ private fun fngColor(v: Int): Color = when {
 }
 
 @Composable
-private fun FngGauge(value: Int, label: String) {
-    val color = fngColor(value)
+private fun FngGauge(value: Int?, label: String, lastKnown: Int?) {
+    val displayValue = value ?: lastKnown
+    val isCached = value == null && lastKnown != null
+    val color = fngColor(displayValue)
+    
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
             Canvas(modifier = Modifier.size(72.dp)) {
@@ -83,27 +86,35 @@ private fun FngGauge(value: Int, label: String) {
                     useCenter = false,
                     style = Stroke(width = 10f, cap = StrokeCap.Round)
                 )
-                if (value >= 0) {
+                if (displayValue != null && displayValue >= 0) {
                     drawArc(
                         color = color,
                         startAngle = 135f,
-                        sweepAngle = value.coerceIn(0, 100) / 100f * 270f,
+                        sweepAngle = displayValue.coerceIn(0, 100) / 100f * 270f,
                         useCenter = false,
                         style = Stroke(width = 10f, cap = StrokeCap.Round)
                     )
                 }
             }
             Text(
-                if (value >= 0) "$value" else "--",
+                when {
+                    displayValue != null && displayValue >= 0 -> "$displayValue"
+                    isCached -> "⚠️"
+                    else -> "--"
+                },
                 fontWeight = FontWeight.Black,
                 fontSize = 17.sp,
                 color = color
             )
         }
         Text(
-            label.ifEmpty { "ترس و طمع" },
+            when {
+                isCached -> "$label (cached)"
+                label.isNotEmpty() -> label
+                else -> "ترس و طمع"
+            },
             fontSize = 10.sp,
-            color = color,
+            color = if (isCached) HGray else color,
             fontWeight = FontWeight.Bold
         )
     }
@@ -113,12 +124,29 @@ private fun FngGauge(value: Int, label: String) {
 fun MarketPulseHeader() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var fng by remember { mutableStateOf(-1) }
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
+    
+    // State ها nullable هستند تا خطا از موفق متمایز شود
+    var fng by remember { mutableStateOf<Int?>(null) }
     var fngLabel by remember { mutableStateOf("") }
-    var btcDom by remember { mutableStateOf(0.0) }
-    var ethDom by remember { mutableStateOf(0.0) }
-    var capChange by remember { mutableStateOf(0.0) }
+    var btcDom by remember { mutableStateOf<Double?>(null) }
+    var ethDom by remember { mutableStateOf<Double?>(null) }
+    var capChange by remember { mutableStateOf<Double?>(null) }
     var trending by remember { mutableStateOf<List<TrendingItem>>(emptyList()) }
+    
+    // Last known values برای fallback
+    var lastFng by remember { 
+        mutableStateOf(prefs.getInt("last_fng", -1).takeIf { it >= 0 }) 
+    }
+    var lastBtcDom by remember { 
+        mutableStateOf(prefs.getFloat("last_btc_dom", Float.NaN).takeIf { !it.isNaN() }?.toDouble()) 
+    }
+    var lastEthDom by remember { 
+        mutableStateOf(prefs.getFloat("last_eth_dom", Float.NaN).takeIf { !it.isNaN() }?.toDouble()) 
+    }
+    var lastCapChange by remember { 
+        mutableStateOf(prefs.getFloat("last_cap_change", Float.NaN).takeIf { !it.isNaN() }?.toDouble()) 
+    }
 
     LaunchedEffect(Unit) {
         try {
@@ -134,13 +162,26 @@ fun MarketPulseHeader() {
                 }
 
                 f.await()?.data?.firstOrNull()?.let {
-                    fng = it.value?.toIntOrNull() ?: -1
+                    fng = it.value?.toIntOrNull()
                     fngLabel = translateFng(it.classification)
+                    fng?.let { v -> 
+                        prefs.edit().putInt("last_fng", v).apply()
+                        lastFng = v
+                    }
                 }
                 g.await()?.data?.let {
-                    btcDom = it.marketCapPercentage?.get("btc") ?: 0.0
-                    ethDom = it.marketCapPercentage?.get("eth") ?: 0.0
-                    capChange = it.capChange24h ?: 0.0
+                    btcDom = it.marketCapPercentage?.get("btc")
+                    ethDom = it.marketCapPercentage?.get("eth")
+                    capChange = it.capChange24h
+                    // Save to prefs for fallback
+                    prefs.edit()
+                        .putFloat("last_btc_dom", btcDom?.toFloat() ?: Float.NaN)
+                        .putFloat("last_eth_dom", ethDom?.toFloat() ?: Float.NaN)
+                        .putFloat("last_cap_change", capChange?.toFloat() ?: Float.NaN)
+                        .apply()
+                    lastBtcDom = btcDom
+                    lastEthDom = ethDom
+                    lastCapChange = capChange
                 }
                 trending = t.await()?.coins?.mapNotNull { it.item } ?: emptyList()
             }
@@ -159,11 +200,20 @@ fun MarketPulseHeader() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("📡 نبض بازار", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(Modifier.weight(1f))
+                // P0-4: نمایش capChange با fallback
                 Text(
-                    String.format(Locale.US, "%+.2f%% 🌍", capChange),
+                    when {
+                        capChange != null -> String.format(Locale.US, "%+.2f%% 🌍", capChange!!)
+                        lastCapChange != null -> "⚠️ ${String.format(Locale.US, "%+.2f%%", lastCapChange!!)} (cached)"
+                        else -> "⚠️ ناموجود"
+                    },
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (capChange >= 0) HGreen else HRed
+                    color = when {
+                        capChange != null && capChange!! >= 0 -> HGreen
+                        capChange != null -> HRed
+                        else -> HGray
+                    }
                 )
             }
 
@@ -171,30 +221,49 @@ fun MarketPulseHeader() {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                FngGauge(fng, fngLabel)
+                FngGauge(fng, fngLabel, lastFng)
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // P0-4: BTC Dominance با fallback
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("دامیننس BTC:", fontSize = 11.sp, color = HGray)
                         Text(
-                            String.format(Locale.US, "%.1f%%", btcDom),
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = HOrange
+                            when {
+                                btcDom != null -> String.format(Locale.US, "%.1f%%", btcDom!!)
+                                lastBtcDom != null -> "⚠️ ${String.format(Locale.US, "%.1f%%", lastBtcDom!!)} (cached)"
+                                else -> "⚠️ ناموجود"
+                            },
+                            fontSize = 12.sp, 
+                            fontWeight = FontWeight.Bold, 
+                            color = if (btcDom != null) HOrange else HGray
                         )
                     }
+                    // P0-4: ETH Dominance با fallback
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("دامیننس ETH:", fontSize = 11.sp, color = HGray)
                         Text(
-                            String.format(Locale.US, "%.1f%%", ethDom),
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = HCyan
+                            when {
+                                ethDom != null -> String.format(Locale.US, "%.1f%%", ethDom!!)
+                                lastEthDom != null -> "⚠️ ${String.format(Locale.US, "%.1f%%", lastEthDom!!)} (cached)"
+                                else -> "⚠️ ناموجود"
+                            },
+                            fontSize = 12.sp, 
+                            fontWeight = FontWeight.Bold, 
+                            color = if (ethDom != null) HCyan else HGray
                         )
                     }
                     Text(
                         when {
                             fng in 0..25 -> "💡 بازار ترسیده — معمولاً فرصت خرید برای جسورها"
-                            fng >= 75 -> "💡 بازار حریصه — احتیاط، اصلاح نزدیکه"
-                            else -> "💡 بازار متعادله — منتظر سیگنال بمون"
+                            fng != null && fng!! >= 75 -> "💡 بازار حریصه — احتیاط، اصلاح نزدیکه"
+                            fng != null -> "💡 بازار متعادله — منتظر سیگنال بمون"
+                            lastFng in 0..25 -> "💡 بازار ترسیده (cached) — معمولاً فرصت خرید"
+                            lastFng != null && lastFng!! >= 75 -> "💡 بازار حریص (cached) — احتیاط"
+                            lastFng != null -> "💡 بازار متعادله (cached)"
+                            else -> "⚠️ دادهٔ Fear & Greed در دسترس نیست"
                         },
-                        fontSize = 10.sp, color = HGray
+                        fontSize = 10.sp, 
+                        color = if (fng != null) HGray else HGray.copy(alpha = 0.7f)
                     )
                 }
             }
