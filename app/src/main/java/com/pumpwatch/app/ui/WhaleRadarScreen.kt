@@ -147,7 +147,7 @@ private data class AnalysisData(
     val flows: List<FlowRow>,
     val changePct: Double,
     val poolName: String?,
-    val source: String = "DEX"  // "BINANCE_AGG" or "DEX"
+    val source: String = "DEX"  // "BINANCE_AGG" or "DEX" or provider name
 )
 
 private data class WhalePick(
@@ -238,6 +238,18 @@ private fun tfNameOf(k: String): String = when (k) {
     "12h" -> "۱۲ ساعته"
     "3d" -> "۳ روزه"
     else -> "هفتگی"
+}
+
+/**
+ * P0-2: برچسب شفاف منبع واقعی داده — هم نام‌های قدیم و هم جدید را می‌شناسد.
+ */
+private fun sourceLabel(source: String): Pair<String, Color> = when (source) {
+    "BINANCE_AGG", "BINANCE" -> "🐳 واقعی: Binance aggTrades" to WGreen
+    "BYBIT" -> "🐳 واقعی: Bybit trades" to WGreen
+    "OKX" -> "🐳 واقعی: OKX trades" to WGreen
+    "GATE" -> "🐳 واقعی: Gate trades" to WGreen
+    "GECKO_DEX" -> "🐳 واقعی: آن‌چین DEX (GeckoTerminal)" to WBlue
+    else -> "⚠️ تخمین از DEX (حجم استخر)" to WGold
 }
 
 private fun trustChecks(l: WhalePick): List<Pair<String, Boolean>> {
@@ -402,11 +414,11 @@ private fun MethodCard() {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("🛡️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
             Text(
-                "تحلیل دلخواه: فقط ۱۰۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰۰۰ + DEX • شکار میم‌کوین‌ها: تمام شبکه‌های DEX • نتایج تا اسکن دستی بعدی حفظ می‌شن",
+                "تحلیل دلخواه: فقط ۱۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰۰۰ + DEX • شکار میم‌کوین‌ها: تمام شبکه‌های DEX • نتایج تا اسکن دستی بعدی حفظ می‌شن",
                 fontSize = 10.sp, color = WGray, lineHeight = 16.sp
             )
             Text(
-                "⚠️ شفافیت: داده‌ها لحظه‌ای از Binance aggTrades (واقعی) و GeckoTerminal (DEX) هستن. این اپ مشاوره مالی نیست.",
+                "⚠️ شفافیت: داده‌ها لحظه‌ای از aggTrades صرافی‌ها (Binance/Bybit/OKX/Gate) یا آن‌چین DEX (GeckoTerminal) هستن و منبع واقعی زیر هر تحلیل نمایش داده می‌شه. این اپ مشاوره مالی نیست.",
                 fontSize = 10.sp, color = WGold, lineHeight = 16.sp
             )
         }
@@ -607,7 +619,7 @@ fun WhaleRadarScreen() {
                 val flows = mutableListOf<FlowRow>()
                 var source = "DEX"  // default fallback
 
-                // تلاش برای دادهٔ واقعی از Binance aggTrades
+                // تلاش برای دادهٔ واقعی از زنجیرهٔ صرافی‌ها (Commit ۳ آن را فعال می‌کند)
                 try {
                     val whaleResult = withContext(Dispatchers.IO) {
                         WhaleFlowEngine.analyze(
@@ -618,7 +630,7 @@ fun WhaleRadarScreen() {
                     }
                     if (whaleResult != null && whaleResult.whaleTrades > 0) {
                         source = whaleResult.source
-                        flows.add(FlowRow("۱ ساعته (aggTrades)", whaleResult.whaleBuyNotional, whaleResult.whaleSellNotional))
+                        flows.add(FlowRow("۱ ساعته (${whaleResult.source})", whaleResult.whaleBuyNotional, whaleResult.whaleSellNotional))
                         // برای ۶ و ۲۴ ساعته، از DEX fallback استفاده می‌کنیم
                         val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
                         if (pool != null) {
@@ -866,6 +878,7 @@ fun WhaleRadarScreen() {
                             analysisError != null -> Text(analysisError ?: "", color = WRed, fontSize = 12.sp)
                             analysis != null -> {
                                 val an = analysis!!
+                                val (srcText, srcColor) = sourceLabel(an.source)
                                 Text("📈 نمودار کندلی $analysisSymbol", fontSize = 10.sp, color = WGray)
                                 WhaleFlowChart(an.candles, an.zone)
                                 if (an.zone != null) {
@@ -877,11 +890,7 @@ fun WhaleRadarScreen() {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text("💰 جریان پول", fontSize = 11.sp, color = WGray)
                                         Spacer(Modifier.width(8.dp))
-                                        if (an.source == "BINANCE_AGG") {
-                                            Text("🐳 واقعی (aggTrades)", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
-                                        } else {
-                                            Text("⚠️ تخمین از DEX", fontSize = 10.sp, color = WGold, fontWeight = FontWeight.Bold)
-                                        }
+                                        Text(srcText, fontSize = 10.sp, color = srcColor, fontWeight = FontWeight.Bold)
                                     }
                                     if (an.poolName != null) {
                                         Text("استخر: ${an.poolName}", fontSize = 10.sp, color = WGray)
@@ -922,7 +931,7 @@ fun WhaleRadarScreen() {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 }, label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
+                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 }, label = { Text("۱ میلیون", fontSize = 10.sp) })
                     }
 
