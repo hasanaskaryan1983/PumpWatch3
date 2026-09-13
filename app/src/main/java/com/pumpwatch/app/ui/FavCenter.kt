@@ -55,7 +55,11 @@ data class FavWallet(
     var addedTs: Long,
     var lastScanTs: Long = 0L,
     var totalUsd: Double = 0.0,
-    var snap: MutableMap<String, Double> = mutableMapOf()
+    // P0-3: تعداد توکن‌های بدون قیمت شناخته‌شده
+    var unpricedCount: Int = 0,
+    var snap: MutableMap<String, Double> = mutableMapOf(),
+    // P0-3: تعداد کل توکن‌های مشاهده‌شده
+    var tokenCount: Int = 0
 )
 
 data class WalletAlert(val addr: String, val ts: Long, val text: String, var read: Boolean = false)
@@ -70,6 +74,14 @@ private val FAV_EVM = listOf(
     "polygon_pos" to "https://polygon.blockscout.com/",
     "gnosis" to "https://gnosis.blockscout.com/",
     "robinhood" to "https://robinhoodchain.blockscout.com/"
+)
+
+// P0-3: نتیجهٔ اسکن موجودی با تمایز بین قیمت شناخته‌شده و نامشخص
+private data class HoldingsSummary(
+    val balances: Map<String, Double>,
+    val totalUsd: Double,
+    val pricedCount: Int,
+    val unpricedCount: Int
 )
 
 object FavStore {
@@ -138,22 +150,32 @@ object FavStore {
     }
 }
 
-private suspend fun scanHoldings(addr: String): Pair<Map<String, Double>, Double> {
-    val map = mutableMapOf<String, Double>()
+// P0-3: اسکن موجودی با تمایز بین قیمت شناخته‌شده و نامشخص + حذف take(10)
+private suspend fun scanHoldings(addr: String): HoldingsSummary {
+    val balances = mutableMapOf<String, Double>()
     var total = 0.0
+    var priced = 0
+    var unpriced = 0
     try {
         if (addr.startsWith("0x") && addr.length == 42) {
             for ((gt, host) in FAV_EVM) {
                 try {
                     val toks = Blockscout.api(host).tokenList("account", "tokenlist", addr).result ?: continue
-                    toks.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.take(10).forEach { t ->
+                    // P0-3: حذف take(10) — همه توکن‌های دارای موجودی بررسی می‌شوند
+                    toks.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.forEach { t ->
                         val dec = t.decimals?.toDoubleOrNull() ?: 18.0
                         val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                         val sym = t.symbol ?: "?"
                         val c = t.contractAddress ?: return@forEach
-                        val px = try { GeckoPrice.api.tokenInfo(gt, c).data?.attributes?.price_usd?.toDoubleOrNull() ?: 0.0 } catch (_: Exception) { 0.0 }
-                        map[sym] = (map[sym] ?: 0.0) + amt
-                        total += amt * px
+                        // P0-3: nullable (نه 0.0)
+                        val px = try { GeckoPrice.api.tokenInfo(gt, c).data?.attributes?.price_usd?.toDoubleOrNull() } catch (_: Exception) { null }
+                        balances[sym] = (balances[sym] ?: 0.0) + amt
+                        if (px != null && px > 0) {
+                            total += amt * px
+                            priced++
+                        } else {
+                            unpriced++
+                        }
                     }
                 } catch (_: Exception) { }
             }
@@ -170,13 +192,19 @@ private suspend fun scanHoldings(addr: String): Pair<Map<String, Double>, Double
                 val mint = inf.mint ?: return@forEach
                 val t = try { GeckoPrice.api.tokenInfo("solana", mint).data?.attributes } catch (_: Exception) { null }
                 val sym = t?.symbol ?: mint.take(6)
-                val px = t?.price_usd?.toDoubleOrNull() ?: 0.0
-                map[sym] = (map[sym] ?: 0.0) + amt
-                total += amt * px
+                // P0-3: nullable (نه 0.0)
+                val px = t?.price_usd?.toDoubleOrNull()
+                balances[sym] = (balances[sym] ?: 0.0) + amt
+                if (px != null && px > 0) {
+                    total += amt * px
+                    priced++
+                } else {
+                    unpriced++
+                }
             }
         }
     } catch (_: Exception) { }
-    return map to total
+    return HoldingsSummary(balances, total, priced, unpriced)
 }
 
 suspend fun scanStarred(ctx: Context, force: Boolean = false): Int {
@@ -186,7 +214,8 @@ suspend fun scanStarred(ctx: Context, force: Boolean = false): Int {
     var newAlerts = 0
     for (w in FavStore.favs.value.filter { it.starred }) {
         try {
-            val (holds, totalUsd) = scanHoldings(w.addr)
+            val summary = scanHoldings(w.addr)
+            val holds = summary.balances
             for ((sym, amt) in holds) {
                 val old = w.snap[sym]
                 if (old == null) {
@@ -199,7 +228,10 @@ suspend fun scanStarred(ctx: Context, force: Boolean = false): Int {
             }
             w.snap = holds.toMutableMap()
             w.lastScanTs = now
-            w.totalUsd = totalUsd
+            // P0-3: ذخیرهٔ totalUsd واقعی و unpricedCount
+            w.totalUsd = summary.totalUsd
+            w.unpricedCount = summary.unpricedCount
+            w.tokenCount = summary.pricedCount + summary.unpricedCount
         } catch (_: Exception) { }
     }
     FavStore.lastScanTs = now
@@ -223,7 +255,7 @@ fun FavoritesPage() {
 
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("❤️ کیف پول‌های مورد پسند", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FRed)
-        Text("⭐ زرد = بررسی خودکار هر ۶ ساعت + هشدار در ⚡️ •  = انتقال به سطل ♻️", fontSize = 9.sp, color = FGray)
+        Text("⭐ زرد = بررسی خودکار هر ۶ ساعت + هشدار در ⚡️ • 🗑 = انتقال به سطل ♻️", fontSize = 9.sp, color = FGray)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             TextField(value = newAddr, onValueChange = { newAddr = it },
                 placeholder = { Text("آدرس کیف مهم...", fontSize = 11.sp) },
@@ -257,8 +289,20 @@ fun FavoritesPage() {
                     Column(modifier = Modifier.weight(1f).padding(horizontal = 6.dp)) {
                         Text(shortA(w.addr), fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGold)
                         if (w.note.isNotEmpty()) Text(w.note, fontSize = 9.sp, color = FGray)
-                        if (w.starred && w.lastScanTs > 0)
-                            Text("آخرین بررسی: ${sdf.format(Date(w.lastScanTs))} • ارزش: ${String.format(Locale.US, "$%,.0f", w.totalUsd)} • ${w.snap.size} توکن", fontSize = 8.sp, color = FGreen)
+                        if (w.starred && w.lastScanTs > 0) {
+                            // P0-3: نمایش شفاف ارزش واقعی + unpriced count
+                            val pricedCount = w.tokenCount - w.unpricedCount
+                            val valueText = when {
+                                w.tokenCount == 0 -> "بدون توکن"
+                                w.unpricedCount == 0 ->
+                                    "ارزش: ${String.format(Locale.US, "$%,.0f", w.totalUsd)} • ${w.tokenCount} توکن"
+                                pricedCount == 0 ->
+                                    "❓ ${w.tokenCount} توکن (همه بدون قیمت شناخته‌شده)"
+                                else ->
+                                    "ارزش: ${String.format(Locale.US, "$%,.0f", w.totalUsd)} • ${w.tokenCount} توکن (${w.unpricedCount} بدون قیمت)"
+                            }
+                            Text("آخرین بررسی: ${sdf.format(Date(w.lastScanTs))} • $valueText", fontSize = 8.sp, color = FGreen)
+                        }
                     }
                     Button(onClick = { FavStore.moveToTrash(ctx, w.addr) },
                         colors = ButtonDefaults.buttonColors(containerColor = FCard), shape = RoundedCornerShape(6.dp)) { Text("🗑", fontSize = 12.sp) }
@@ -281,7 +325,7 @@ fun AlertsPage() {
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("⚡️ هشدارهای کیف‌ها", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FGold)
         Text("توکن جدید یا افزایش موجودی کیف‌های ستاره‌دار — با باز کردن این صفحه، هشدارها خونده می‌شن", fontSize = 9.sp, color = FGray)
-        if (FavStore.alerts.value.isEmpty()) Text("هنوز هشدارری نیست — توی ❤️ کیف‌ها رو ستاره‌دار کن", fontSize = 10.sp, color = FGray)
+        if (FavStore.alerts.value.isEmpty()) Text("هنوز هشداری نیست — توی ❤️ کیف‌ها رو ستاره‌دار کن", fontSize = 10.sp, color = FGray)
         FavStore.alerts.value.forEach { a ->
             Card(colors = CardDefaults.cardColors(containerColor = FCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
