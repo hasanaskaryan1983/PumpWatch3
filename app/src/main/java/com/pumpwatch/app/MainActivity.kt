@@ -57,6 +57,8 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.cmcUrl
+import com.pumpwatch.app.data.formatMarketCap
+import com.pumpwatch.app.data.formatPrice
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -386,18 +388,4 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             }
         }
     }
-}
-
-fun formatPrice(p: Double): String = when {
-    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
-    p >= 1 -> String.format(Locale.US, "$%.4f", p)
-    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
-    else -> String.format(Locale.US, "$%.6f", p)
-}
-
-fun formatMarketCap(cap: Double?): String = when {
-    cap == null -> "—"
-    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
-    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
-    else -> String.format(Locale.US, "$%.0f", cap)
 }
