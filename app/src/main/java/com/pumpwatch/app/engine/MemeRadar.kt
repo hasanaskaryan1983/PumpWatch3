@@ -4,6 +4,7 @@ import android.util.Log
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GoPlusClient
+import com.pumpwatch.app.data.SecurityResult
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -28,8 +29,11 @@ data class MemeSignal(
     val target1: Double,
     val target2: Double,
     val reasons: List<String>,
-    val rugScore: Int = 100,
-    val rugWarnings: List<String> = emptyList()
+    // P0-1: nullable — null یعنی "UNKNOWN" (داده امنیتی در دسترس نیست)
+    val rugScore: Int? = null,
+    val rugWarnings: List<String> = emptyList(),
+    // P0-1: وضعیت داده امنیتی
+    val securityStatus: String = "UNKNOWN"  // "READY" | "EMPTY" | "FAILED" | "UNKNOWN"
 )
 
 // ---------- رادار میم‌کوین (GeckoTerminal + Rug Safety Check با GoPlus) ----------
@@ -135,11 +139,12 @@ object MemeRadar {
         val sym = fullName.split("/").firstOrNull()?.trim() ?: "?"
         val chain = p.relationships?.network?.data?.id ?: "?"
 
-        // ---------- چک Rug Safety با GoPlus API ----------
-        val (rugScore, rugWarnings) = checkRugSafety(p, chain)
+        // ---------- چک Rug Safety با GoPlus API (مدل سه‌حالته) ----------
+        val (rugScore, rugWarnings, securityStatus) = checkRugSafety(p, chain)
 
-        // اگر Rug Score خیلی پایین است، فیلتر کن
-        if (rugScore < 40) {
+        // P0-1: فقط وقتی rugScore واقعاً پایین است فیلتر کن
+        // null (UNKNOWN) یا score بالا → توکن را نگه دار
+        if (rugScore != null && rugScore < 40) {
             Log.w(TAG, "🚨 $sym rug score too low: $rugScore — $rugWarnings")
             return null
         }
@@ -165,115 +170,126 @@ object MemeRadar {
             target2 = price * 1.60,
             reasons = reasons,
             rugScore = rugScore,
-            rugWarnings = rugWarnings
+            rugWarnings = rugWarnings,
+            securityStatus = securityStatus
         )
     }
 
     /**
-     * چک Rug Safety با GoPlus API (رایگان، بدون کلید)
-     * @return Pair(rugScore: 0-100, warnings: List<String>)
+     * P0-1: چک Rug Safety با GoPlus API (مدل سه‌حالته)
+     * @return Triple(rugScore: Int?, warnings: List<String>, status: String)
+     *
+     * - Ready: rugScore = عدد واقعی (0-100)
+     * - Empty: rugScore = null، status = "EMPTY" (توکن در GoPlus نیست)
+     * - Failed: rugScore = null، status = "FAILED" (API شکست خورد)
+     *
+     * هیچ‌کدام به score خنثی تبدیل نمی‌شوند — UI باید برای UNKNOWN برچسب نمایش دهد.
      */
-    private suspend fun checkRugSafety(pool: GeckoPool, chain: String): Pair<Int, List<String>> {
+    private suspend fun checkRugSafety(
+        pool: GeckoPool,
+        chain: String
+    ): Triple<Int?, List<String>, String> {
         val warnings = mutableListOf<String>()
-        var score = 100
 
-        val poolId = pool.id ?: return Pair(50, listOf("⚠️ آدرس contract در دسترس نیست"))
+        val poolId = pool.id ?: return Triple(null, listOf("⚠️ آدرس contract در دسترس نیست"), "FAILED")
         val contractAddress = poolId.substringAfter('_', "")
-        if (contractAddress.isEmpty()) return Pair(50, listOf("⚠️ آدرس contract یافت نشد"))
+        if (contractAddress.isEmpty()) return Triple(null, listOf("⚠️ آدرس contract یافت نشد"), "FAILED")
 
-        return try {
-            val response = GoPlusClient.api.getTokenSecurity(chain, contractAddress)
-            val security = response.result?.get(contractAddress.lowercase())
-                ?: response.result?.get(contractAddress)
-
-            if (security == null) {
+        // P0-1: استفاده از مدل سه‌حالته
+        return when (val result = GoPlusClient.getTokenSecurityResult(chain, contractAddress)) {
+            is SecurityResult.Failed -> {
+                Log.w(TAG, "GoPlus API failed for $contractAddress: ${result.reason}")
+                Triple(null, listOf("⚠️ خطا در دریافت داده امنیتی"), "FAILED")
+            }
+            is SecurityResult.Empty -> {
                 Log.w(TAG, "🚫 GoPlus: داده امنیتی برای $contractAddress در $chain یافت نشد")
-                return Pair(50, listOf("⚠️ داده امنیتی در دسترس نیست"))
+                Triple(null, listOf("⚠️ داده امنیتی در دسترس نیست"), "EMPTY")
             }
+            is SecurityResult.Ready -> {
+                val security = result.security
+                var score = 100
 
-            // چک Honeypot
-            if (security.is_honeypot == "1") {
-                score -= 80
-                warnings.add("🚨 Honeypot: نمی‌توانید بفروشید!")
-            }
+                // چک Honeypot
+                if (security.is_honeypot == "1") {
+                    score -= 80
+                    warnings.add("🚨 Honeypot: نمی‌توانید بفروشید!")
+                }
 
-            // چک Mintable
-            if (security.is_mintable == "1") {
-                score -= 20
-                warnings.add("⚠️ Mintable: تیم می‌تواند توکن جدید بسازد")
-            }
+                // چک Mintable
+                if (security.is_mintable == "1") {
+                    score -= 20
+                    warnings.add("⚠️ Mintable: تیم می‌تواند توکن جدید بسازد")
+                }
 
-            // چک Owner Change Balance
-            if (security.owner_change_balance == "1") {
-                score -= 30
-                warnings.add("🚨 Owner می‌تواند balance را تغییر دهد")
-            }
+                // چک Owner Change Balance
+                if (security.owner_change_balance == "1") {
+                    score -= 30
+                    warnings.add("🚨 Owner می‌تواند balance را تغییر دهد")
+                }
 
-            // چک Hidden Owner
-            if (security.hidden_owner == "1") {
-                score -= 15
-                warnings.add("⚠️ Owner مخفی")
-            }
+                // چک Hidden Owner
+                if (security.hidden_owner == "1") {
+                    score -= 15
+                    warnings.add("⚠️ Owner مخفی")
+                }
 
-            // چک Self Destruct
-            if (security.selfdestruct == "1") {
-                score -= 50
-                warnings.add("🚨 Contract می‌تواند خود را حذف کند")
-            }
+                // چک Self Destruct
+                if (security.selfdestruct == "1") {
+                    score -= 50
+                    warnings.add("🚨 Contract می‌تواند خود را حذف کند")
+                }
 
-            // چک Proxy Contract
-            if (security.is_proxy == "1") {
-                score -= 10
-                warnings.add("⚠️ Proxy Contract (ممکن است منطق تغییر کند)")
-            }
+                // چک Proxy Contract
+                if (security.is_proxy == "1") {
+                    score -= 10
+                    warnings.add("⚠️ Proxy Contract (ممکن است منطق تغییر کند)")
+                }
 
-            // چک Buy/Sell Tax
-            val buyTax = security.buy_tax?.toDoubleOrNull() ?: 0.0
-            val sellTax = security.sell_tax?.toDoubleOrNull() ?: 0.0
-            if (buyTax > 0.10 || sellTax > 0.10) {
-                score -= 20
-                warnings.add("⚠️ Tax بالا: Buy ${(buyTax * 100).toInt()}% / Sell ${(sellTax * 100).toInt()}%")
-            }
+                // چک Buy/Sell Tax
+                val buyTax = security.buy_tax?.toDoubleOrNull() ?: 0.0
+                val sellTax = security.sell_tax?.toDoubleOrNull() ?: 0.0
+                if (buyTax > 0.10 || sellTax > 0.10) {
+                    score -= 20
+                    warnings.add("⚠️ Tax بالا: Buy ${(buyTax * 100).toInt()}% / Sell ${(sellTax * 100).toInt()}%")
+                }
 
-            // چک Top 10 Holders
-            val topHolders = security.holders?.take(10)
-            val topHoldersPercent = topHolders?.sumOf { it.percent ?: 0.0 } ?: 0.0
-            if (topHoldersPercent > 0.50) {
-                score -= 25
-                warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}% (تمرکز بالا)")
-            } else if (topHoldersPercent > 0.30) {
-                score -= 10
-                warnings.add("⚠️ Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
-            }
+                // چک Top 10 Holders
+                val topHolders = security.holders?.take(10)
+                val topHoldersPercent = topHolders?.sumOf { it.percent ?: 0.0 } ?: 0.0
+                if (topHoldersPercent > 0.50) {
+                    score -= 25
+                    warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}% (تمرکز بالا)")
+                } else if (topHoldersPercent > 0.30) {
+                    score -= 10
+                    warnings.add("⚠️ Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
+                }
 
-            // چک Liquidity Lock
-            val lpHolders = security.lp_holders
-            val lpLocked = lpHolders?.values?.any { it.is_locked == "1" } ?: false
-            if (!lpLocked) {
-                score -= 30
-                warnings.add("🚨 Liquidity قفل نیست (خطر Rug Pull)")
-            } else {
-                val lockedDetails = lpHolders?.values?.flatMap { it.locked_detail ?: emptyList() }
-                val maxEndTime = lockedDetails?.maxOfOrNull { it.end_time?.toLongOrNull() ?: 0L }
-                if (maxEndTime != null && maxEndTime > 0) {
-                    val lockDays = (maxEndTime - System.currentTimeMillis() / 1000) / 86400
-                    if (lockDays < 30) {
-                        score -= 15
-                        warnings.add("⚠️ Liquidity فقط $lockDays روز قفل است")
+                // چک Liquidity Lock
+                val lpHolders = security.lp_holders
+                val lpLocked = lpHolders?.values?.any { it.is_locked == "1" } ?: false
+                if (!lpLocked) {
+                    score -= 30
+                    warnings.add("🚨 Liquidity قفل نیست (خطر Rug Pull)")
+                } else {
+                    val lockedDetails = lpHolders?.values?.flatMap { it.locked_detail ?: emptyList() }
+                    val maxEndTime = lockedDetails?.maxOfOrNull { it.end_time?.toLongOrNull() ?: 0L }
+                    if (maxEndTime != null && maxEndTime > 0) {
+                        val lockDays = (maxEndTime - System.currentTimeMillis() / 1000) / 86400
+                        if (lockDays < 30) {
+                            score -= 15
+                            warnings.add("⚠️ Liquidity فقط $lockDays روز قفل است")
+                        }
                     }
                 }
-            }
 
-            // چک Open Source
-            if (security.is_open_source != "1") {
-                score -= 20
-                warnings.add("⚠️ Contract Open Source نیست")
-            }
+                // چک Open Source
+                if (security.is_open_source != "1") {
+                    score -= 20
+                    warnings.add("⚠️ Contract Open Source نیست")
+                }
 
-            Pair(score.coerceIn(0, 100), warnings)
-        } catch (e: Exception) {
-            Log.w(TAG, "GoPlus API failed for $contractAddress: ${e.message}")
-            Pair(50, listOf("⚠️ خطا در دریافت داده امنیتی"))
+                Triple(score.coerceIn(0, 100), warnings, "READY")
+            }
         }
     }
 }
