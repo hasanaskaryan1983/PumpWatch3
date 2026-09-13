@@ -57,8 +57,6 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.cmcUrl
-import com.pumpwatch.app.data.formatMarketCap
-import com.pumpwatch.app.data.formatPrice
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -182,7 +180,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // TopBar
             Surface(
                 color = DarkSurface,
                 modifier = Modifier.fillMaxWidth()
@@ -203,7 +200,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                     )
                     Spacer(Modifier.weight(1f))
 
-                    // Mode Toggle
                     Surface(
                         modifier = Modifier.clickable {
                             isFutures = !isFutures
@@ -224,7 +220,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                 }
             }
 
-            // Content - Workspace Switcher
             Box(modifier = Modifier.weight(1f)) {
                 if (isFutures) {
                     FuturesWorkspace()
@@ -234,7 +229,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
             }
         }
 
-        // Coin Detail Overlay (shared across both workspaces)
         if (selectedCoin != null) {
             Surface(
                 color = DarkBackground,
@@ -362,7 +356,7 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("#$rank  ${coin.symbol.uppercase(Locale.US)}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(coin.name, color = TextSecondary, fontSize = 12.sp)
-                Text("کپ: ${formatMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 11.sp)
+                Text("کپ: ${fmtMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 11.sp)
             }
 
             Text(
@@ -378,7 +372,7 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             Spacer(Modifier.width(4.dp))
 
             Column(horizontalAlignment = Alignment.End) {
-                Text(formatPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text(fmtPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text(
                     String.format(Locale.US, "%+.2f%%", change),
                     color = if (isUp) SpotAccent else FuturesAccent,
@@ -388,4 +382,20 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             }
         }
     }
+}
+
+// توابع قالب‌بندی قیمت — تعریف‌شده در همین فایل با نام منحصربه‌فرد
+// تا با هیچ فایل دیگری (مثل data/Utils.kt) تداخل نداشته باشند.
+private fun fmtPrice(p: Double): String = when {
+    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
+    p >= 1 -> String.format(Locale.US, "$%.4f", p)
+    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
+    else -> String.format(Locale.US, "$%.6f", p)
+}
+
+private fun fmtMarketCap(cap: Double?): String = when {
+    cap == null -> "—"
+    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
+    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
+    else -> String.format(Locale.US, "$%.0f", cap)
 }
