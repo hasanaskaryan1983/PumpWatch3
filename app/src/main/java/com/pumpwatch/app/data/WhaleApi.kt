@@ -48,18 +48,72 @@ object WhaleClient {
 // 🆕 P0-2: abstraction چندصرافی + کف بدون‌مجوز آن‌چین
 // ============================================
 
+/**
+ * مدل واحد داخلی — همهٔ منابع خروجی خود را به این فرمت تبدیل می‌کنند.
+ * buyerIsMaker = true → فروش تهاجمی (SELL)
+ * buyerIsMaker = false → خرید تهاجمی (BUY)
+ */
 data class AggTradeNormalized(
     val price: Double,
     val qty: Double,
-    val time: Long,
+    val time: Long,        // milliseconds UTC
     val buyerIsMaker: Boolean
 ) {
     val notional: Double get() = price * qty
 }
 
+/**
+ * abstraction یکسان برای همهٔ منابع (CEX و DEX).
+ */
 interface WhaleProvider {
     val name: String
     suspend fun fetchNormalized(symbol: String, limit: Int): List<AggTradeNormalized>
+}
+
+// -------- Shared helpers (top-level) --------
+
+/**
+ * تبدیل مقدار خام (Number یا String یا هر نوع Gson) به Double.
+ * فیلدهای attributes در GeckoTerminal از نوع خام (Any?) هستند،
+ * پس toDoubleOrNull مستقیم رویشان کار نمی‌کند.
+ */
+private fun numd(v: Any?): Double? = when (v) {
+    is Number -> v.toDouble()
+    is String -> v.toDoubleOrNull()
+    else -> null
+}
+
+private fun sharedOkHttp(): OkHttpClient {
+    return OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
+}
+
+/**
+ * نرمال‌سازی نماد برای هر صرافی:
+ *  - ورودی: هر فرمت (BTCUSDT / BTC-USDT / BTC_USDT / btc)
+ *  - خروجی: فرمت مخصوص صرافی
+ */
+private fun normalizeSymbol(symbol: String, exchange: String): String {
+    val cleaned = symbol.uppercase(Locale.US)
+        .replace("_", "-")
+        .replace("USDT", "-USDT")
+        .replace("USD", "-USD")
+    val withDash = if (cleaned.contains("-")) cleaned else "$cleaned-USDT"
+    val parts = withDash.split("-")
+    if (parts.size != 2) {
+        return symbol.uppercase(Locale.US)
+    }
+    val coin = parts[0]
+    val quote = parts[1]
+    return when (exchange) {
+        "BINANCE" -> "$coin$quote"        // BTCUSDT
+        "BYBIT" -> "$coin$quote"          // BTCUSDT
+        "OKX" -> "$coin-$quote"           // BTC-USDT
+        "GATE" -> "${coin}_$quote"        // BTC_USDT
+        else -> symbol.uppercase(Locale.US)
+    }
 }
 
 // -------- Binance --------
@@ -106,7 +160,7 @@ private data class BybitTrade(
     val price: String?,
     val size: String?,
     val time: Long?,
-    val side: String?
+    val side: String?   // "Buy" or "Sell"
 )
 
 private interface BybitRawApi {
@@ -133,8 +187,11 @@ object BybitProvider : WhaleProvider {
         return try {
             val sym = normalizeSymbol(symbol, "BYBIT")
             val resp = api.recentTrades("spot", sym, limit)
-            if (resp.retCode != 0) return emptyList()
-            resp.result?.list?.mapNotNull { t ->
+            if (resp.retCode != 0) {
+                return emptyList()
+            }
+            val list = resp.result?.list
+            list?.mapNotNull { t ->
                 val p = t.price?.toDoubleOrNull() ?: return@mapNotNull null
                 val q = t.size?.toDoubleOrNull() ?: return@mapNotNull null
                 val ts = t.time ?: return@mapNotNull null
@@ -153,8 +210,8 @@ private data class OkxTrade(
     val instId: String?,
     val px: String?,
     val sz: String?,
-    val ts: String?,
-    val side: String?
+    val ts: String?,   // milliseconds as string
+    val side: String?  // "buy" or "sell"
 )
 
 private interface OkxRawApi {
@@ -179,8 +236,10 @@ object OkxProvider : WhaleProvider {
     override suspend fun fetchNormalized(symbol: String, limit: Int): List<AggTradeNormalized> {
         return try {
             val inst = normalizeSymbol(symbol, "OKX")
-            val resp = api.trades(inst, limit.coerceAtMost(100))
-            if (resp.code != "0") return emptyList()
+            val resp = api.trades(inst, limit.coerceAtMost(100)) // OKX limit max 100
+            if (resp.code != "0") {
+                return emptyList()
+            }
             resp.data?.mapNotNull { t ->
                 val p = t.px?.toDoubleOrNull() ?: return@mapNotNull null
                 val q = t.sz?.toDoubleOrNull() ?: return@mapNotNull null
@@ -199,7 +258,7 @@ private data class GateTrade(
     val price: String?,
     val amount: String?,
     val create_time_ms: Long?,
-    val side: String?
+    val side: String?   // "buy" or "sell"
 )
 
 private interface GateRawApi {
@@ -236,8 +295,12 @@ object GateProvider : WhaleProvider {
     }
 }
 
-// -------- 🟢 کف بدون‌مجوز: GeckoTerminal DEX --------
+// -------- 🟢 کف بدون‌مجوز: GeckoTerminal DEX (هرگز جغرافیایی مسدود نمی‌شود) --------
 
+/**
+ * منبع آن‌چین: swapهای واقعی DEX با آدرس کیف و جهت buy/sell.
+ * این‌ها «تخمین» نیستند — تراکنش‌های واقعی روی بلاکچین‌اند.
+ */
 object GeckoDexProvider : WhaleProvider {
     override val name: String = "GECKO_DEX"
 
@@ -250,12 +313,15 @@ object GeckoDexProvider : WhaleProvider {
             val trades = GeckoPrice.api.poolTrades(net, poolAddr).data ?: emptyList()
             trades.mapNotNull { t ->
                 val a = t.attributes ?: return@mapNotNull null
-                val vol = a.volume_in_usd?.toDoubleOrNull() ?: return@mapNotNull null
-                val px = a.price_in_usd?.toDoubleOrNull() ?: a.price?.toDoubleOrNull() ?: return@mapNotNull null
-                if (px <= 0) return@mapNotNull null
-                val tsSec = a.block_timestamp?.toDoubleOrNull() ?: return@mapNotNull null
+                val vol = numd(a.volume_in_usd) ?: return@mapNotNull null
+                val px = numd(a.price_in_usd) ?: numd(a.price) ?: return@mapNotNull null
+                if (px <= 0) {
+                    return@mapNotNull null
+                }
+                val tsSec = numd(a.block_timestamp) ?: return@mapNotNull null
                 val qty = vol / px
-                AggTradeNormalized(px, qty, tsSec.toLong() * 1000L, (a.type ?: "").equals("sell", true))
+                val isSell = a.type?.toString()?.equals("sell", true) == true
+                AggTradeNormalized(px, qty, tsSec.toLong() * 1000L, isSell)
             }.take(limit)
         } catch (_: Exception) {
             emptyList()
@@ -263,41 +329,18 @@ object GeckoDexProvider : WhaleProvider {
     }
 }
 
-// -------- Shared helpers (top-level functions) --------
+// -------- زنجیرهٔ fallback --------
 
-private fun sharedOkHttp(): OkHttpClient {
-    return OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
-}
-
-private fun normalizeSymbol(symbol: String, exchange: String): String {
-    val base = symbol.uppercase(Locale.US)
-        .replace("_", "-")
-        .replace("USDT", "-USDT")
-        .replace("USD", "-USD")
-    val withDash = if (!base.contains("-")) "$base-USDT" else base
-    val parts = withDash.split("-")
-    if (parts.size != 2) return symbol.uppercase(Locale.US)
-    val coin = parts[0]
-    val quote = parts[1]
-
-    return when (exchange) {
-        "BINANCE" -> "$coin$quote"
-        "BYBIT" -> "$coin$quote"
-        "OKX" -> "$coin-$quote"
-        "GATE" -> "${coin}_$quote"
-        else -> symbol.uppercase(Locale.US)
-    }
-}
-
+/**
+ * ترتیب: CEXها اول (دقیق‌ترین برای نهنگ)، و در انتها کف بدون‌مجوز آن‌چین
+ * که تضمین می‌کند قابلیت هرگز کاملاً خالی نشود.
+ */
 object WhaleProviders {
     val all: List<WhaleProvider> = listOf(
         BinanceProvider,
         BybitProvider,
         OkxProvider,
         GateProvider,
-        GeckoDexProvider
+        GeckoDexProvider   // 🟢 کف تضمینی — بدون کلید، بدون مسدودسازی جغرافیایی
     )
 }
