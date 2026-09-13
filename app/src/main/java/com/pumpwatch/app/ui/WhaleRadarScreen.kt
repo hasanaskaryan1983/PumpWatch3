@@ -53,11 +53,13 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.engine.WhaleFlowEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -144,7 +146,8 @@ private data class AnalysisData(
     val zone: Double?,
     val flows: List<FlowRow>,
     val changePct: Double,
-    val poolName: String?
+    val poolName: String?,
+    val source: String = "DEX"  // "BINANCE_AGG" or "DEX"
 )
 
 private data class WhalePick(
@@ -399,11 +402,11 @@ private fun MethodCard() {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("🛡️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
             Text(
-                "تحلیل دلخواه: فقط ۱۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰ + DEX • شکار میم‌کوین‌ها: تمام شبکه‌های DEX • نتایج تا اسکن دستی بعدی حفظ می‌شن",
+                "تحلیل دلخواه: فقط ۱۰۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰۰۰ + DEX • شکار میم‌کوین‌ها: تمام شبکه‌های DEX • نتایج تا اسکن دستی بعدی حفظ می‌شن",
                 fontSize = 10.sp, color = WGray, lineHeight = 16.sp
             )
             Text(
-                "⚠️ شفافیت: داده‌ها لحظه‌ای از GeckoTerminal و CoinGecko هستن. این اپ مشاوره مالی نیست.",
+                "⚠️ شفافیت: داده‌ها لحظه‌ای از Binance aggTrades (واقعی) و GeckoTerminal (DEX) هستن. این اپ مشاوره مالی نیست.",
                 fontSize = 10.sp, color = WGold, lineHeight = 16.sp
             )
         }
@@ -602,30 +605,66 @@ fun WhaleRadarScreen() {
 
                 var poolName: String? = null
                 val flows = mutableListOf<FlowRow>()
+                var source = "DEX"  // default fallback
+
+                // تلاش برای دادهٔ واقعی از Binance aggTrades
                 try {
-                    val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
-                    if (pool != null) {
-                        poolName = pool.attributes?.name
-                        val a = pool.attributes!!
-                        fun split(vol: Double?, b: Double?, s: Double?): Pair<Double, Double> {
-                            val v = vol ?: 0.0; val bb = b ?: 0.0; val ss = s ?: 0.0; val t = bb + ss
-                            if (t <= 0) return Pair(v / 2, v / 2)
-                            return Pair(v * bb / t, v * ss / t)
-                        }
-                        val f1 = split(a.volume?.h1, a.transactions?.h1?.buys, a.transactions?.h1?.sells)
-                        flows.add(FlowRow("۱ ساعته", f1.first, f1.second))
-                        val f6 = split(a.volume?.h6, a.transactions?.h6?.buys, a.transactions?.h6?.sells)
-                        flows.add(FlowRow("۶ ساعته", f6.first, f6.second))
-                        val f24 = split(a.volume?.h24, a.transactions?.h24?.buys, a.transactions?.h24?.sells)
-                        flows.add(FlowRow("۲۴ ساعته", f24.first, f24.second))
+                    val whaleResult = withContext(Dispatchers.IO) {
+                        WhaleFlowEngine.analyze(
+                            symbol = coin.symbol.uppercase(Locale.US) + "USDT",
+                            whaleThresholdUsd = 100_000.0,
+                            limit = 1000
+                        )
                     }
-                } catch (_: Exception) { }
+                    if (whaleResult != null && whaleResult.whaleTrades > 0) {
+                        source = whaleResult.source
+                        flows.add(FlowRow("۱ ساعته (aggTrades)", whaleResult.whaleBuyNotional, whaleResult.whaleSellNotional))
+                        // برای ۶ و ۲۴ ساعته، از DEX fallback استفاده می‌کنیم
+                        val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
+                        if (pool != null) {
+                            poolName = pool.attributes?.name
+                            val a = pool.attributes!!
+                            fun split(vol: Double?, b: Double?, s: Double?): Pair<Double, Double> {
+                                val v = vol ?: 0.0; val bb = b ?: 0.0; val ss = s ?: 0.0; val t = bb + ss
+                                if (t <= 0) return Pair(v / 2, v / 2)
+                                return Pair(v * bb / t, v * ss / t)
+                            }
+                            val f6 = split(a.volume?.h6, a.transactions?.h6?.buys, a.transactions?.h6?.sells)
+                            flows.add(FlowRow("۶ ساعته (DEX)", f6.first, f6.second))
+                            val f24 = split(a.volume?.h24, a.transactions?.h24?.buys, a.transactions?.h24?.sells)
+                            flows.add(FlowRow("۲۴ ساعته (DEX)", f24.first, f24.second))
+                        }
+                    } else {
+                        // fallback کامل به DEX
+                        throw Exception("no whale data")
+                    }
+                } catch (_: Exception) {
+                    // fallback به DEX
+                    try {
+                        val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
+                        if (pool != null) {
+                            poolName = pool.attributes?.name
+                            val a = pool.attributes!!
+                            fun split(vol: Double?, b: Double?, s: Double?): Pair<Double, Double> {
+                                val v = vol ?: 0.0; val bb = b ?: 0.0; val ss = s ?: 0.0; val t = bb + ss
+                                if (t <= 0) return Pair(v / 2, v / 2)
+                                return Pair(v * bb / t, v * ss / t)
+                            }
+                            val f1 = split(a.volume?.h1, a.transactions?.h1?.buys, a.transactions?.h1?.sells)
+                            flows.add(FlowRow("۱ ساعته", f1.first, f1.second))
+                            val f6 = split(a.volume?.h6, a.transactions?.h6?.buys, a.transactions?.h6?.sells)
+                            flows.add(FlowRow("۶ ساعته", f6.first, f6.second))
+                            val f24 = split(a.volume?.h24, a.transactions?.h24?.buys, a.transactions?.h24?.sells)
+                            flows.add(FlowRow("۲۴ ساعته", f24.first, f24.second))
+                        }
+                    } catch (_: Exception) { }
+                }
 
                 analysisSymbol = coin.symbol.uppercase(Locale.US)
-                analysis = AnalysisData(shown, zone, flows, chg, poolName)
+                analysis = AnalysisData(shown, zone, flows, chg, poolName, source)
             } catch (e: Exception) {
                 analysis = null
-                analysisError = "ارز در ۱۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰ تای برتر مجاز است)"
+                analysisError = "ارز در ۱۰۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰ تای برتر مجاز است)"
             }
             analyzing = false
         }
@@ -835,12 +874,23 @@ fun WhaleRadarScreen() {
                                 Text("تغییر بازه: ${String.format(Locale.US, "%+.2f%%", an.changePct)}", fontSize = 11.sp, color = if (an.changePct >= 0) WGreen else WRed)
 
                                 if (an.flows.isNotEmpty()) {
-                                    Text("💰 جریان پول در استخر ${an.poolName ?: ""}:", fontSize = 11.sp, color = WGray)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("💰 جریان پول", fontSize = 11.sp, color = WGray)
+                                        Spacer(Modifier.width(8.dp))
+                                        if (an.source == "BINANCE_AGG") {
+                                            Text("🐳 واقعی (aggTrades)", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
+                                        } else {
+                                            Text("⚠️ تخمین از DEX", fontSize = 10.sp, color = WGold, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    if (an.poolName != null) {
+                                        Text("استخر: ${an.poolName}", fontSize = 10.sp, color = WGray)
+                                    }
                                     an.flows.forEach { f ->
                                         val tot = f.buy + f.sell
                                         val r = if (tot > 0) f.buy / tot else 0.5
                                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                            Text(f.label, fontSize = 11.sp, color = WGray, modifier = Modifier.width(64.dp))
+                                            Text(f.label, fontSize = 11.sp, color = WGray, modifier = Modifier.width(120.dp))
                                             Text("🟢 ${compact(f.buy)}", fontSize = 11.sp, color = WGreen, fontWeight = FontWeight.Bold)
                                             Spacer(Modifier.weight(1f))
                                             Text("🔴 ${compact(f.sell)}", fontSize = 11.sp, color = WRed, fontWeight = FontWeight.Bold)
@@ -872,7 +922,7 @@ fun WhaleRadarScreen() {
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 }, label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
+                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰۰ هزار", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 }, label = { Text("۱ میلیون", fontSize = 10.sp) })
                     }
 
