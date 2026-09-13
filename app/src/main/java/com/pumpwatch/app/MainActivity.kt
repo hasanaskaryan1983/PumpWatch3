@@ -9,7 +9,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,8 +57,6 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.cmcUrl
-import com.pumpwatch.app.data.formatMarketCap
-import com.pumpwatch.app.data.formatPrice
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -390,4 +386,18 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
             }
         }
     }
+}
+
+fun formatPrice(p: Double): String = when {
+    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
+    p >= 1 -> String.format(Locale.US, "$%.4f", p)
+    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
+    else -> String.format(Locale.US, "$%.6f", p)
+}
+
+fun formatMarketCap(cap: Double?): String = when {
+    cap == null -> "—"
+    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
+    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
+    else -> String.format(Locale.US, "$%.0f", cap)
 }
