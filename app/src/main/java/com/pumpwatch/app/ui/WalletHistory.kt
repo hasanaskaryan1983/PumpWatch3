@@ -132,7 +132,7 @@ fun WalletHistorySection() {
                         }
                         else -> {
                             if (addr.length !in 32..44) {
-                                summary = "❌ طول آدرس سولانا باید ۳۲ تا ۴ کاراکتر باشه — دوباره کامل کپی کن"
+                                summary = "❌ طول آدرس سولانا باید ۳۲ تا ۴۴ کاراکتر باشه — دوباره کامل کپی کن"
                                 return@withContext res
                             }
                             var filterMint: String? = null
@@ -229,15 +229,16 @@ fun WalletHistorySection() {
                                 } catch (_: Exception) { }
                             }
 
-                            for ((short, mint) in mintByShort.entries.take(6)) {
+                            // P0-3: حذف take(6) — همهٔ mintها قیمت می‌گیرند، price nullable
+                            for ((short, mint) in mintByShort.entries) {
                                 try {
                                     val at = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
                                     val s2 = at?.symbol
-                                    val px = at?.price_usd?.toDoubleOrNull() ?: 0.0
+                                    val px = at?.price_usd?.toDoubleOrNull()  // P0-3: nullable (نه 0.0)
                                     res.forEach {
                                         if (it.chain == "Solana 🟣" && it.symbol == short) {
                                             if (!s2.isNullOrEmpty()) it.symbol = s2
-                                            if (it.priceUsd == null && px > 0) it.priceUsd = px
+                                            if (it.priceUsd == null && px != null && px > 0) it.priceUsd = px
                                         }
                                     }
                                 } catch (_: Exception) { }
@@ -248,7 +249,8 @@ fun WalletHistorySection() {
                     try {
                         val coins = ApiClient.getTop1000Coins()
                         val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                        for (sym in res.map { it.symbol }.distinct().take(6)) {
+                        // P0-3: حذف take(6) — همهٔ symbolها قیمت تاریخی می‌گیرند
+                        for (sym in res.map { it.symbol }.distinct()) {
                             val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
                             try {
                                 val chart = ApiClient.getCoinChart(coin.id, days = 365)
@@ -258,13 +260,23 @@ fun WalletHistorySection() {
                                 }
                             } catch (_: Exception) { }
                         }
-                        val solPx = coins.firstOrNull { it.symbol.equals("SOL", true) }?.current_price ?: 0.0
-                        if (solPx > 0) res.forEach { if (it.symbol == "SOL" && it.priceUsd == null) it.priceUsd = solPx }
+                        // P0-3: SOL price nullable (نه 0.0)
+                        val solPx = coins.firstOrNull { it.symbol.equals("SOL", true) }?.current_price
+                        if (solPx != null && solPx > 0) res.forEach { if (it.symbol == "SOL" && it.priceUsd == null) it.priceUsd = solPx }
                     } catch (_: Exception) { }
 
                     val totalRead = res.size
-                    val filtered = res.filter { abs(it.amount) * (it.priceUsd ?: 0.0) >= 10.0 }
-                    if (totalRead > 0) summary = "✅ ${filtered.size} تراکنش بالای ۱۰$ (از $totalRead تراکنش خونده‌شده)"
+                    // P0-3: تراکنش بدون price حذف نمی‌شود، نگه داشته می‌شود
+                    val filtered = res.filter {
+                        it.priceUsd == null || abs(it.amount) * it.priceUsd!! >= 10.0
+                    }
+                    if (totalRead > 0) {
+                        val unknownCount = filtered.count { it.priceUsd == null }
+                        val pricedCount = filtered.size - unknownCount
+                        summary = "✅ $pricedCount تراکنش بالای ۱۰$" +
+                            if (unknownCount > 0) " + $unknownCount تراکنش با قیمت نامشخص"
+                            else "" + " (از $totalRead تراکنش خونده‌شده)"
+                    }
                     filtered.sortedByDescending { it.ts }.take(60)
                 }
                 list = out
@@ -279,7 +291,7 @@ fun WalletHistorySection() {
         Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("📜 موتور ۵: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
-                Text("فقط تراکنش‌های بالای ۱۰ دلار • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
+                Text("فقط تراکنش‌های بالای ۱۰ دلار + تراکنش‌های با قیمت نامشخص • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
                     placeholder = { Text("آدرس کیف... (Solana یا 0x)", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -315,7 +327,12 @@ fun WalletHistorySection() {
                         Column(horizontalAlignment = Alignment.End) {
                             Text(String.format(Locale.US, "%s%.4f", if (t.incoming) "+" else "-", t.amount), fontSize = 12.sp, fontWeight = FontWeight.Black,
                                 color = if (t.incoming) XGreen else XRed)
-                            if (t.priceUsd != null) Text("ارزش اون روز: ${String.format(Locale.US, "$%,.2f", t.amount * (t.priceUsd ?: 0.0))}", fontSize = 9.sp, color = XGold)
+                            // P0-3: نمایش قیمت نامشخص به جای حذف/صفر
+                            if (t.priceUsd != null && t.priceUsd!! > 0) {
+                                Text("ارزش اون روز: ${String.format(Locale.US, "$%,.2f", t.amount * t.priceUsd!!)}", fontSize = 9.sp, color = XGold)
+                            } else {
+                                Text("ارزش اون روز: ❓ نامشخص", fontSize = 9.sp, color = XGray, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                     if (t.other.isNotEmpty()) {
