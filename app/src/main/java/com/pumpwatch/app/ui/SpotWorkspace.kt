@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -85,8 +86,12 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
     }
 }
 
+/**
+ * SpotNavItem — آیتم ناوبری یک تب.
+ * به‌صورت extension روی RowScope تعریف شده تا Modifier.weight(1f) در دسترس باشد.
+ */
 @Composable
-private fun SpotNavItem(tab: SpotTab, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.SpotNavItem(tab: SpotTab, selected: Boolean, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.weight(1f).clickable(onClick = onClick).padding(4.dp)
