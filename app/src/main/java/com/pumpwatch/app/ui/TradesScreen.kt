@@ -41,6 +41,8 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.engine.WhaleFlowEngine
+import com.pumpwatch.app.engine.WhaleFlowResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -154,6 +156,7 @@ fun TradesScreen() {
     var status by remember { mutableStateOf("⏳ منتظر اولین اسکن...") }
     var confirmReset by remember { mutableStateOf(false) }
     var consensus by remember { mutableStateOf<List<ConsensusPick>>(emptyList()) }
+    var realWhale by remember { mutableStateOf<Map<String, WhaleFlowResult>>(emptyMap()) }
 
     var mSymbol by remember { mutableStateOf("") }
     var mPrice by remember { mutableStateOf<Double?>(null) }
@@ -321,6 +324,15 @@ fun TradesScreen() {
 
                 consensus = picks.sortedByDescending { it.total }.take(10)
 
+                // 🐳 دادهٔ واقعی نهنگ‌ها (aggTrades) برای ۶ کاندید برتر — فقط نمایشی
+                val rw = mutableMapOf<String, WhaleFlowResult>()
+                consensus.take(6).forEach { pk ->
+                    try {
+                        WhaleFlowEngine.analyze(pk.symbol + "USDT", 100_000.0, 1000)?.let { rw[pk.symbol] = it }
+                    } catch (_: Exception) { }
+                }
+                realWhale = rw
+
                 // ---------- معامله خودکار per tier ----------
                 var openedNow = 0
                 for ((tierName, range) in TIERS) {
@@ -479,9 +491,7 @@ fun TradesScreen() {
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = if (confirmReset) TRed else TCard),
                 shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)
-            ) {
-                Text(if (confirmReset) "مطمئنی؟ بزن قطعی!" else "♻️ ریست کامل", fontSize = 11.sp)
-            }
+            ) { Text(if (confirmReset) "مطمئنی؟ بزن قطعی!" else "♻️ ریست کامل", fontSize = 11.sp) }
         }
         if (confirmReset) Text("⚠️ دکمه ریست رو دوباره بزن تا همه چی صفر بشه", fontSize = 9.sp, color = TRed)
 
@@ -502,8 +512,15 @@ fun TradesScreen() {
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
-                        Text("🐳 نهنگ: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                        Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                        Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
+                        Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                    }
+                    realWhale[pk.symbol]?.let { rw ->
+                        Text(
+                            "🐳 نهنگ واقعی (aggTrades): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۱۰۰K",
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = if (rw.buyRatio >= 0.6) TGreen else if (rw.buyRatio <= 0.4) TRed else TGray
+                        )
                     }
                     if (pk.total >= 80) Text("🎯 سیگنال اجماع — تأیید چند منبع", fontSize = 9.sp, color = TGreen, fontWeight = FontWeight.Bold)
                     Button(
