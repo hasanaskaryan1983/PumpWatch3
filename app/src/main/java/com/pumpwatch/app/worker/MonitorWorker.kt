@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.engine.BatchScanner
 import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.SignalLogger
@@ -20,6 +21,11 @@ import java.util.Locale
  * - گیت واحد Dedup: فقط وقتی SignalLogger.log موفق شود نوتیفیکیشن می‌فرستیم
  *   (این یعنی اگر QuickScanner همان سیگنال را زودتر ثبت کرده باشد، نوتیف تکراری/متناقض نمی‌فرستیم)
  * - برچسب منبع در نوتیفیکیشن: 📡 کشف بازار
+ *
+ * 🚀 P1-4: KlineCache.prune() در ابتدای هر بار اجرا صدا می‌شود تا entryهای منقضی
+ *      (کندل‌های قدیمی‌تر از ۶۰ ثانیه) قبل از scan آزاد شوند.
+ *      این باعث می‌شود در استفادهٔ طولانی‌مدت (چندین روز)، سقف ۳۰۰ entry هیچ‌وقت
+ *      فعال نشود و eviction LRU بی‌مورد فعال نگردد.
  */
 class MonitorWorker(
     context: Context,
@@ -35,6 +41,11 @@ class MonitorWorker(
 
     override suspend fun doWork(): Result {
         return try {
+            // 🚀 P1-4: خانه‌تکانی دوره‌ای cache — حذف entryهای منقضی قبل از scan
+            // این سربار ناچیزی دارد (حذف چند entry از LinkedHashMap) ولی از
+            // پر شدن بی‌مورد سقف ۳۰۰ در استفادهٔ چندروزه جلوگیری می‌کند.
+            KlineCache.prune()
+
             val modeRaw = inputData.getString(KEY_MODE)
                 ?: applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
                     .getString("mode", "SPOT")
