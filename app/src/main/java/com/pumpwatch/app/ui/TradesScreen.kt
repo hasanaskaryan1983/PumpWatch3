@@ -40,11 +40,15 @@ import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -260,11 +264,17 @@ fun TradesScreen() {
                 val coins = withContext(Dispatchers.IO) {
                     try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
                 }
-                val dexPools = withContext(Dispatchers.IO) {
-                    listOf("solana", "bsc", "base", "optimism", "arbitrum", "polygon", "avalanche", "ton").flatMap { ch ->
-                        try { GeckoTerminal.api.trendingPools(ch).data ?: emptyList() } catch (_: Exception) { emptyList() }
-                    }
+
+                // 🚀 P1-2: گرفتن استخرهای ۸ زنجیره به‌صورت هم‌زمان (قبلاً sequential بود)
+                val dexPools = coroutineScope {
+                    listOf("solana", "bsc", "base", "optimism", "arbitrum", "polygon", "avalanche", "ton").map { ch ->
+                        async(Dispatchers.IO) {
+                            try { GeckoTerminal.api.trendingPools(ch).data ?: emptyList<GeckoPool>() }
+                            catch (_: Exception) { emptyList<GeckoPool>() }
+                        }
+                    }.awaitAll().flatten()
                 }
+
                 val dexInfo = mutableMapOf<String, Pair<Double, Double>>()
                 val whaleMap = mutableMapOf<String, Triple<Double, Double, String>>()
                 dexPools.forEach { p ->
@@ -329,13 +339,18 @@ fun TradesScreen() {
                 consensus = picks.sortedByDescending { it.total }.take(10)
 
                 // 🐳 دادهٔ واقعی نهنگ‌ها (aggTrades) برای ۶ کاندید برتر — فقط نمایشی
-                val rw = mutableMapOf<String, WhaleFlowResult>()
-                consensus.take(6).forEach { pk ->
-                    try {
-                        WhaleFlowEngine.analyze(pk.symbol + "USDT", 100_000.0, 1000)?.let { rw[pk.symbol] = it }
-                    } catch (_: Exception) { }
+                // 🚀 P1-2: شش تحلیل به‌صورت هم‌زمان (قبلاً sequential؛ هر کدام تا ۵ provider!)
+                val rwList = coroutineScope {
+                    consensus.take(6).map { pk ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val r = WhaleFlowEngine.analyze(pk.symbol + "USDT", 100_000.0, 1000)
+                                if (r != null) pk.symbol to r else null
+                            } catch (_: Exception) { null }
+                        }
+                    }.awaitAll().filterNotNull()
                 }
-                realWhale = rw
+                realWhale = rwList.toMap()
 
                 // ---------- معامله خودکار per tier (فقط وقتی ربات روشن است) ----------
                 var openedNow = 0
