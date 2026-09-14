@@ -41,11 +41,13 @@ object QuickScanner {
     // P0-6: فرمت نمایش زمان بسته شدن کندل (HH:mm) برای Notification و لاگ
     private val closeTimeFmt = SimpleDateFormat("HH:mm", Locale.US)
 
-    // 🚀 P1-2: تعداد هم‌روندی — ۵ تا ۸ برای Binance ایمن است (limit ۱۲۰۰ req/min)
-    // عدد کمتر از BatchScanner (که ۵ بود) انتخاب شد چون QuickScanner به cache هم ضربه می‌زند
-    // و می‌خواهیم از burst روی Binance جلوگیری کنیم.
+    // 🚀 P1-2: تعداد هم‌روندی — ۵ برای Binance ایمن است (limit ~۱۲۰۰ weight/min)
     private const val PARALLELISM = 5
     private const val CHUNK_DELAY_MS = 200L
+
+    // 🚀 P1-4: آستانهٔ تشخیص «chunk شبکه‌ای» — اگر chunk سریع‌تر از این تمام شد
+    // یعنی از KlineCache آمده و delay لازم نیست
+    private const val CACHED_CHUNK_THRESHOLD_MS = 100L
 
     suspend fun scan(ctx: Context, symbols: List<String>, mode: String): ScanReport {
         return if (mode == "FUTURES") scanFutures(ctx, symbols) else scanSpot(ctx, symbols)
@@ -82,22 +84,22 @@ object QuickScanner {
     }
 
     /**
-     * 🚀 P1-2: نسخهٔ parallel شدهٔ scanFutures.
+     * 🚀 P1-2 + P1-4: اسکن موازی با delay هوشمند.
      *
-     * - نمادها به chunkهای PARALLELISM تقسیم می‌شوند
-     * - هر chunk هم‌زمان روی Dispatchers.IO اجرا می‌شود
-     * - بین chunkها delay کوتاه (۲۰۰ms) برای جلوگیری از burst روی Binance
-     * - خطاهای تک‌نماد در آن نماد محبوس می‌شوند (clash نمی‌کنند)
-     * - ترتیب نتایج حفظ می‌شود (awaitAll ترتیب chunk را نگه می‌دارد)
+     * - نمادها chunkهای ۵تایی می‌شوند و هم‌زمان روی Dispatchers.IO اجرا می‌شوند
+     * - P1-4: زمان هر chunk اندازه‌گیری می‌شود؛ فقط اگر chunk کند بوده
+     *   (≥۱۰۰ms = call شبکه واقعی) delay اعمال می‌شود؛ chunkهای cache‌ای بدون صبر رد می‌شوند
+     * - side-effectها (لاگ/اعلان/معامله کاغذی) بعداً sequential اجرا می‌شوند (thread-safety)
      *
      * منطق P0-6 (Candle.time=k[6]، candleCloseTs) و P1-1 (KlineCache) دست‌نخورده.
      */
     private suspend fun scanFutures(ctx: Context, symbols: List<String>): ScanReport {
-        // هر symbol یک ScanLine برمی‌گرداند یا null در صورت خطا
-        data class ScanLine(val text: String, val signal: com.pumpwatch.app.engine.UnifiedSignalResult?)
+        data class ScanLine(val text: String, val signal: UnifiedSignalResult?)
 
         val allLines = coroutineScope {
             symbols.chunked(PARALLELISM).flatMap { chunk ->
+                // 🚀 P1-4: اندازه‌گیری زمان chunk برای تصمیم هوشمند دربارهٔ delay
+                val chunkStart = System.currentTimeMillis()
                 val deferreds = chunk.map { symbol ->
                     async(Dispatchers.IO) {
                         try {
@@ -144,13 +146,15 @@ object QuickScanner {
                     }
                 }
                 val results = deferreds.awaitAll()
-                delay(CHUNK_DELAY_MS)
+                val chunkElapsed = System.currentTimeMillis() - chunkStart
+                if (chunkElapsed >= CACHED_CHUNK_THRESHOLD_MS) {
+                    delay(CHUNK_DELAY_MS)
+                }
                 results
             }
         }
 
-        // مرحلهٔ دوم: side-effects (log، notification، paper trade) در thread اصلی
-        // تا از race در SharedPreferences جلوگیری شود.
+        // مرحلهٔ دوم: side-effects در thread فراخواننده (بدون race روی SharedPreferences)
         val lines = mutableListOf<String>()
         var signalCount = 0
         for (line in allLines) {
@@ -185,13 +189,14 @@ object QuickScanner {
     }
 
     /**
-     * 🚀 P1-2: نسخهٔ parallel شدهٔ scanSpot — همان الگوی scanFutures.
+     * 🚀 P1-2 + P1-4: نسخهٔ parallel و هوشمند scanSpot — همان الگوی scanFutures.
      */
     private suspend fun scanSpot(ctx: Context, symbols: List<String>): ScanReport {
-        data class ScanLine(val text: String, val signal: com.pumpwatch.app.engine.UnifiedSignalResult?)
+        data class ScanLine(val text: String, val signal: UnifiedSignalResult?)
 
         val allLines = coroutineScope {
             symbols.chunked(PARALLELISM).flatMap { chunk ->
+                val chunkStart = System.currentTimeMillis()
                 val deferreds = chunk.map { symbol ->
                     async(Dispatchers.IO) {
                         try {
@@ -234,7 +239,10 @@ object QuickScanner {
                     }
                 }
                 val results = deferreds.awaitAll()
-                delay(CHUNK_DELAY_MS)
+                val chunkElapsed = System.currentTimeMillis() - chunkStart
+                if (chunkElapsed >= CACHED_CHUNK_THRESHOLD_MS) {
+                    delay(CHUNK_DELAY_MS)
+                }
                 results
             }
         }
