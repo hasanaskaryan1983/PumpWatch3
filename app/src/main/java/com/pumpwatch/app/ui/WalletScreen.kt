@@ -204,14 +204,13 @@ fun WalletScreen() {
                             } ?: emptyList()
 
                             // 🚀 P1-3: tokenInfo + firstBuy به‌صورت موازی (۵ هم‌زمان + delay بین chunkها)
-                            // خطای هر توکن در خودش محبوس می‌شود و بقیهٔ توکن‌ها می‌مانند.
                             val list = coroutineScope {
                                 raw.take(50).chunked(WALLET_PARALLELISM).flatMap { chunk ->
                                     val part = chunk.map { (mint, amt, acc) ->
                                         async(Dispatchers.IO) {
                                             try {
                                                 val t = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
-                                                val px = t?.price_usd?.toDoubleOrNull()  // P0-3: nullable (نه 0.0)
+                                                val px = t?.price_usd?.toDoubleOrNull()
                                                 val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * (px ?: 0.0), contract = mint)
                                                 try {
                                                     if (acc.isNotEmpty()) {
@@ -234,9 +233,7 @@ fun WalletScreen() {
                                 }.toMutableList()
                             }
 
-                            // P0-3: حذف take(6) — همهٔ توکن‌ها قیمت تاریخی می‌گیرند
-                            // ⚠️ P1-3: این حلقه عمداً sequential می‌ماند:
-                            //    chart تاریخی CoinGecko rate limit سخت‌گیرانه دارد (free tier)
+                            // ⚠️ P1-3: sequential (rate limit کوین‌گکو)
                             try {
                                 val coinsH = ApiClient.getTop1000Coins()
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -261,44 +258,81 @@ fun WalletScreen() {
                             if (hosts.isEmpty()) { info = "⚠️ بررسی کیف روی این شبکه پشتیبانی نمی‌شه"; return@withContext }
 
                             val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
-                            val allHold = mutableListOf<WalletHolding>()
-                            var txHost: ChainCfg? = null
 
-                            for (h in hosts) {
-                                try {
-                                    val bs = Blockscout.api(h.bs!!)
-                                    val tokens = bs.tokenList("account", "tokenlist", addr).result ?: continue
-                                    val list = mutableListOf<WalletHolding>()
-                                    // P0-3: حذف take(10) — همهٔ توکن‌ها را بررسی کن (تا ۵۰ per chain)
-                                    tokens.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.take(50).forEach { t ->
-                                        val dec = t.decimals?.toDoubleOrNull() ?: 18.0
-                                        val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
-                                        val contract = t.contractAddress ?: return@forEach
-                                        var px = try {
-                                            GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull()  // P0-3: nullable
-                                        } catch (_: Exception) { null }
-                                        if (px == null || px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price
-                                        list.add(WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * (px ?: 0.0), contract = contract, host = h.bs))
-                                    }
-                                    if (list.isNotEmpty()) {
-                                        // P0-3: حذف take(6) — همهٔ توکن‌ها firstBuyTs می‌گیرند
-                                        for (hd in list) {
-                                            try {
-                                                val c = hd.contract ?: continue
-                                                val asc = Blockscout.api(hd.host!!).tokenTx("account", "tokentx", addr, "asc").result
-                                                val first = asc?.firstOrNull { (it.contractAddress ?: "").equals(c, true) }
-                                                val fts = (first?.timeStamp?.toLongOrNull() ?: 0L) * 1000
-                                                if (fts > 0) hd.firstBuyTs = fts
-                                            } catch (_: Exception) { }
+                            // 🚀 P1-3: اسکن موازی همهٔ زنجیره‌های EVM.
+                            // هر زنجیره به‌صورت مستقل:
+                            //  - tokenList می‌گیرد
+                            //  - تا ۵۰ توکن دارای موجودی را با قیمت پر می‌کند (tokenInfo موازی chunked(5))
+                            //  - firstBuyTs هر توکن را موازی chunked(5) می‌گیرد
+                            // خطای هر زنجیره محبوس است و بقیه را متوقف نمی‌کند.
+                            data class HostResult(val holdings: List<WalletHolding>, val cfg: ChainCfg?)
+                            val hostResults = coroutineScope {
+                                hosts.map { h ->
+                                    async(Dispatchers.IO) {
+                                        try {
+                                            val bs = Blockscout.api(h.bs!!)
+                                            val tokens = bs.tokenList("account", "tokenlist", addr).result
+                                                ?: return@async HostResult(emptyList(), null)
+
+                                            // مرحله ۱: ساخت WalletHolding با قیمت — موازی روی توکن‌ها
+                                            val list = tokens.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }
+                                                .take(50)
+                                                .chunked(WALLET_PARALLELISM)
+                                                .flatMap { chunk ->
+                                                    val part = chunk.map { t ->
+                                                        async(Dispatchers.IO) {
+                                                            try {
+                                                                val dec = t.decimals?.toDoubleOrNull() ?: 18.0
+                                                                val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
+                                                                val contract = t.contractAddress ?: return@async null
+                                                                var px = try {
+                                                                    GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull()
+                                                                } catch (_: Exception) { null }
+                                                                if (px == null || px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price
+                                                                WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * (px ?: 0.0), contract = contract, host = h.bs)
+                                                            } catch (_: Exception) { null }
+                                                        }
+                                                    }.awaitAll().filterNotNull()
+                                                    delay(WALLET_CHUNK_DELAY_MS)
+                                                    part
+                                                }.toMutableList()
+
+                                            // مرحله ۲: پر کردن firstBuyTs برای همهٔ توکن‌های این زنجیره — موازی
+                                            if (list.isNotEmpty()) {
+                                                list.chunked(WALLET_PARALLELISM).forEach { chunk ->
+                                                    chunk.map { hd ->
+                                                        async(Dispatchers.IO) {
+                                                            try {
+                                                                val c = hd.contract ?: return@async
+                                                                val asc = Blockscout.api(hd.host!!).tokenTx("account", "tokentx", addr, "asc").result
+                                                                val first = asc?.firstOrNull { (it.contractAddress ?: "").equals(c, true) }
+                                                                val fts = (first?.timeStamp?.toLongOrNull() ?: 0L) * 1000
+                                                                if (fts > 0) hd.firstBuyTs = fts
+                                                            } catch (_: Exception) { }
+                                                        }
+                                                    }.awaitAll()
+                                                    delay(WALLET_CHUNK_DELAY_MS)
+                                                }
+                                            }
+
+                                            HostResult(list, if (list.isNotEmpty()) h else null)
+                                        } catch (_: Exception) {
+                                            HostResult(emptyList(), null)
                                         }
-                                        allHold.addAll(list)
-                                        if (txHost == null) txHost = h
                                     }
-                                } catch (_: Exception) { }
+                                }.awaitAll()
                             }
 
-                            // P0-3: حذف take(6) — همهٔ توکن‌ها قیمت تاریخی می‌گیرند
-                            // ⚠️ P1-3: sequential می‌ماند (rate limit کوین‌گکو)
+                            val allHold = mutableListOf<WalletHolding>()
+                            var txHost: ChainCfg? = null
+                            for (r in hostResults) {
+                                if (r.holdings.isNotEmpty()) {
+                                    allHold.addAll(r.holdings)
+                                    if (txHost == null) txHost = r.cfg
+                                }
+                            }
+
+                            // ⚠️ P1-3: sequential (rate limit کوین‌گکو)
                             try {
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                                 for (hd in allHold) {
@@ -320,7 +354,6 @@ fun WalletScreen() {
                                 val all = try { Blockscout.api(th.bs!!).tokenTx("account", "tokentx", addr, "desc").result } catch (_: Exception) { null }
                                 val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                                 val sdfShow = SimpleDateFormat("MM/dd", Locale.US)
-                                // P0-3: حذف take(20) — همهٔ تراکنش‌ها را بگیر (تا ۱۰۰)
                                 val rawTxs = all?.take(100)?.mapNotNull { t ->
                                     val ts = (t.timeStamp?.toLongOrNull() ?: return@mapNotNull null) * 1000
                                     val dec = t.tokenDecimal?.toDoubleOrNull() ?: 18.0
@@ -328,8 +361,7 @@ fun WalletScreen() {
                                     WalletTx(sdfShow.format(Date(ts)), sdfDay.format(Date(ts)), t.tokenSymbol ?: "?", amt, (t.to ?: "").equals(addr, true), null)
                                 } ?: emptyList()
 
-                                // P0-3: حذف take(3) — همهٔ symbolها قیمت می‌گیرند
-                                // ⚠️ P1-3: sequential می‌ماند (rate limit کوین‌گکو)
+                                // ⚠️ P1-3: sequential (rate limit کوین‌گکو)
                                 try {
                                     for (sym in rawTxs.map { it.symbol }.distinct()) {
                                         val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
@@ -616,7 +648,6 @@ fun WalletScreen() {
                             Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
                             if (t.priceUsd != null && t.priceUsd!! > 0) {
                                 Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
                                 Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * t.priceUsd!!)}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
