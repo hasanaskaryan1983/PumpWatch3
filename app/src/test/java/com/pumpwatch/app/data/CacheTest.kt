@@ -13,26 +13,16 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * تست‌های واحد برای لایهٔ cache عمومی (TtlCache) و KlineCache.
  *
- * P1-1 acceptance criteria:
- *  - TTL lazy expiry: entry منقضی روی get حذف می‌شود
- *  - Thread-safety: چند thread هم‌زمان بدون race یا crash
- *  - prune(): حذف فعال entryهای منقضی
- *  - invalidate/clear: رفتار درست حذف
- *  - getOrPut: load یکبار، cache، برگرداندن
- *
- * P1-4 acceptance criteria:
- *  - maxEntries: سقف تعداد با eviction قدیمی‌ترین entry
- *  - update روی key موجود eviction نمی‌کند
- *  - KlineCache سقف معقول دارد
+ * P1-1: TTL lazy expiry، thread-safety، prune، invalidate/clear، getOrPut
+ * P1-4: maxEntries با eviction، update بدون eviction، KlineCache bounds
  */
 class CacheTest {
 
-    // TTL کوتاه برای تست (۱۰۰ میلی‌ثانیه) — کافی برای اندازه‌گیری در CI
     private val SHORT_TTL = 100L
 
     @Test
     fun `put then get returns value before expiry`() {
-        val cache = TtlCache<String>(SHORT_TTL * 10) // TTL طولانی‌تر برای جلوگیری از انقضا
+        val cache = TtlCache<String>(SHORT_TTL * 10)
         cache.put("key1", "value1")
         assertEquals("value1", cache.get("key1"))
     }
@@ -49,7 +39,7 @@ class CacheTest {
         cache.put("key1", "value1")
         assertEquals("value1", cache.get("key1"))
 
-        Thread.sleep(SHORT_TTL + 50) // صبر بیشتر از TTL
+        Thread.sleep(SHORT_TTL + 50)
 
         assertNull("entry باید پس از TTL منقضی شود", cache.get("key1"))
     }
@@ -64,12 +54,10 @@ class CacheTest {
             "loaded_value"
         }
 
-        // اولین بار: loader اجرا می‌شود
         val v1 = cache.getOrPut("key1", loader)
         assertEquals("loaded_value", v1)
         assertEquals(1, loadCount.get())
 
-        // دومین بار: از cache خوانده می‌شود (loader اجرا نمی‌شود)
         val v2 = cache.getOrPut("key1", loader)
         assertEquals("loaded_value", v2)
         assertEquals("loader باید فقط یکبار اجرا شود", 1, loadCount.get())
@@ -85,12 +73,10 @@ class CacheTest {
             null
         }
 
-        // اولین بار: loader اجرا می‌شود و null برمی‌گرداند
         val v1 = cache.getOrPut("key1", loader)
         assertNull(v1)
         assertEquals(1, loadCount.get())
 
-        // دومین بار: چون null cache نشده، loader دوباره اجرا می‌شود
         val v2 = cache.getOrPut("key1", loader)
         assertNull(v2)
         assertEquals("loader باید دوباره اجرا شود چون null cache نمی‌شود", 2, loadCount.get())
@@ -124,9 +110,9 @@ class CacheTest {
         val cache = TtlCache<String>(SHORT_TTL)
         cache.put("old", "value1")
 
-        Thread.sleep(SHORT_TTL + 50) // صبر برای انقضای "old"
+        Thread.sleep(SHORT_TTL + 50)
 
-        cache.put("fresh", "value2") // این تازه است
+        cache.put("fresh", "value2")
 
         cache.prune()
 
@@ -134,16 +120,6 @@ class CacheTest {
         assertEquals("fresh باید باقی بماند", "value2", cache.get("fresh"))
     }
 
-    /**
-     * Thread-safety: چند thread هم‌زمان روی یک key یکسان getOrPut می‌کنند.
-     * انتظار:
-     *  - هیچ exception نمی‌دهد
-     *  - همه threadها مقدار یکسان می‌گیرند
-     *  - cache اندازه نهایی ۱ است
-     *
-     * نکتهٔ شناخته‌شده: loader ممکن است چند بار اجرا شود (race بی‌ضرر)،
-     * چون TtlCache از lock استفاده نمی‌کند. مهم این است که نتیجه درست است.
-     */
     @Test
     fun `concurrent getOrPut on same key is thread-safe`() {
         val cache = TtlCache<String>(SHORT_TTL * 100)
@@ -155,7 +131,7 @@ class CacheTest {
 
         val loader: () -> String = {
             loadCount.incrementAndGet()
-            Thread.sleep(10) // شبیه‌سازی کار طولانی (API call)
+            Thread.sleep(10)
             "shared_value"
         }
 
@@ -173,14 +149,11 @@ class CacheTest {
         assertTrue(latch.await(5, TimeUnit.SECONDS))
         pool.shutdown()
 
-        // همه threadها مقدار یکسان گرفتند
         assertEquals("همه threadها باید مقدار یکسان بگیرند", 1, results.toSet().size)
         assertEquals("shared_value", results.first())
 
-        // loader حداقل یکبار اجرا شده (ممکن است چند بار به‌خاطر race)
         assertTrue("loader حداقل یکبار اجرا شده", loadCount.get() >= 1)
 
-        // cache فقط یک entry دارد
         assertEquals(1, cache.size())
     }
 
@@ -229,19 +202,18 @@ class CacheTest {
 
     /**
      * 🚀 P1-4: وقتی maxEntries پر شد، put باید قدیمی‌ترین entry را حذف کند.
-     * انتظار: size روی maxEntries می‌ماند، قدیمی‌ترین حذف می‌شود، بقیه می‌مانند.
+     * Thread.sleep(20) برای اطمینان از nanoTime متفاوت بین putها.
      */
     @Test
     fun `put evicts oldest entry when maxEntries reached`() {
         val cache = TtlCache<String>(SHORT_TTL * 100, maxEntries = 3)
         cache.put("a", "1")
-        Thread.sleep(5)
+        Thread.sleep(20)
         cache.put("b", "2")
-        Thread.sleep(5)
+        Thread.sleep(20)
         cache.put("c", "3")
         assertEquals(3, cache.size())
 
-        // d تازه‌تر از همه است → a قدیمی‌ترین می‌شود و evict می‌شود
         cache.put("d", "4")
         assertEquals("size باید روی maxEntries بماند", 3, cache.size())
         assertNull("قدیمی‌ترین (a) باید evict شده باشد", cache.get("a"))
@@ -257,8 +229,11 @@ class CacheTest {
     fun `put updates existing key without triggering eviction`() {
         val cache = TtlCache<String>(SHORT_TTL * 100, maxEntries = 3)
         cache.put("a", "1")
+        Thread.sleep(20)
         cache.put("b", "2")
+        Thread.sleep(20)
         cache.put("c", "3")
+        Thread.sleep(20)
 
         cache.put("a", "1-updated")
         assertEquals("size باید بدون تغییر بماند", 3, cache.size())
@@ -268,12 +243,12 @@ class CacheTest {
     }
 
     /**
-     * 🚀 P1-4: KlineCache سقف معقول دارد (نه خیلی کوچک نه خیلی بزرگ).
+     * 🚀 P1-4: KlineCache سقف معقول دارد.
      */
     @Test
     fun `KlineCache has sensible max size`() {
         val max = KlineCache.maxSize()
-        assertTrue("KlineCache maxSize باید حداقل ۱۰۰ باشد (کافی برای TOP_SYMBOLS + buffer)", max >= 100)
-        assertTrue("KlineCache maxSize نباید از ۱۰۰۰ بیشتر باشد (جلوگیری از مصرف بی‌رویه حافظه)", max <= 1000)
+        assertTrue("KlineCache maxSize باید حداقل ۱۰۰ باشد", max >= 100)
+        assertTrue("KlineCache maxSize نباید از ۱۰۰۰ بیشتر باشد", max <= 1000)
     }
 }
