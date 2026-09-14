@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 import com.google.gson.JsonArray
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.data.KlineCache as SharedKlineCache
 import com.pumpwatch.app.engine.BacktestEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -32,28 +33,16 @@ private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
 
-private object KlineCache {
-    private val map = mutableMapOf<String, Pair<Long, List<JsonArray>>>()
-    fun get(key: String): List<JsonArray>? {
-        val e = map[key] ?: return null
-        if (System.currentTimeMillis() - e.first > 10 * 60 * 1000) return null
-        return e.second
-    }
-    fun put(key: String, v: List<JsonArray>) {
-        map[key] = System.currentTimeMillis() to v
-    }
-}
-
+/**
+ * 🚀 P1-1: حذف cache موازی محلی — حالا از KlineCache مرکزی (thread-safe, TTL=60s) استفاده می‌کنیم.
+ * امضای تابع حفظ شد تا هیچ فراخوانی در این فایل نشکند.
+ */
 private suspend fun getKlinesCached(symbol: String, interval: String, limit: Int): List<JsonArray> {
-    val key = "$symbol|$interval|$limit"
-    KlineCache.get(key)?.let { return it }
-    val data = try {
-        BinanceClient.api.klines(symbol, interval, limit)
-    } catch (e: Exception) {
+    return try {
+        SharedKlineCache.klines(symbol, interval, limit)
+    } catch (_: Exception) {
         emptyList()
     }
-    if (data.isNotEmpty()) KlineCache.put(key, data)
-    return data
 }
 
 private data class Tf(val label: String, val interval: String, val limit: Int, val evalLast: Int, val hold: Int)
