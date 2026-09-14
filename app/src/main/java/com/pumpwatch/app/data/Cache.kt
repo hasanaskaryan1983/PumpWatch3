@@ -11,19 +11,27 @@ import java.util.concurrent.ConcurrentHashMap
  * - P1-4: اگر تعداد entryها از maxEntries تجاوز کند، قدیمی‌ترین entry
  *   حذف می‌شود (LRU-like eviction) تا حافظه از کنترل خارج نشود
  * - prune() برای پاک‌سازی دوره‌ای بر اساس زمان
+ *
+ * نکته: storedAtNano از System.nanoTime() برای ordering دقیق استفاده می‌کند
+ *       (millis precision کافی نیست؛ ممکن است چند entry در یک millis باشند)
+ *       ولی storedAtMs از System.currentTimeMillis() برای TTL check استفاده می‌شود.
  */
 class TtlCache<V>(
     private val ttlMillis: Long,
     private val maxEntries: Int = Int.MAX_VALUE
 ) {
 
-    private class Entry<V>(val value: V, val storedAt: Long)
+    private class Entry<V>(
+        val value: V,
+        val storedAtMs: Long,      // برای TTL check (wall clock)
+        val storedAtNano: Long     // برای ordering دقیق (monotonic)
+    )
 
     private val map = ConcurrentHashMap<String, Entry<V>>()
 
     fun get(key: String): V? {
         val e = map[key] ?: return null
-        if (System.currentTimeMillis() - e.storedAt >= ttlMillis) {
+        if (System.currentTimeMillis() - e.storedAtMs >= ttlMillis) {
             map.remove(key)
             return null
         }
@@ -31,23 +39,23 @@ class TtlCache<V>(
     }
 
     fun put(key: String, value: V) {
-        // P1-4: اگر سقف فعال است و پر شده، قدیمی‌ترین entry را حذف کن
+        // P1-4: اگر سقف فعال است و پر شده و key جدید است، قدیمی‌ترین entry را حذف کن
         if (maxEntries < Int.MAX_VALUE && map.size >= maxEntries && !map.containsKey(key)) {
             evictOldest()
         }
-        map[key] = Entry(value, System.currentTimeMillis())
+        map[key] = Entry(value, System.currentTimeMillis(), System.nanoTime())
     }
 
     /**
-     * حذف قدیمی‌ترین entry بر اساس storedAt (LRU-like).
-     * O(n) است ولی فقط هنگام پر شدن سقف فراخوانی می‌شود.
+     * حذف قدیمی‌ترین entry بر اساس storedAtNano (LRU-like).
+     * از nanoTime استفاده می‌کنیم چون millis precision کافی ندارد.
      */
     private fun evictOldest() {
         var oldestKey: String? = null
-        var oldestTs = Long.MAX_VALUE
+        var oldestNano = Long.MAX_VALUE
         for ((k, e) in map) {
-            if (e.storedAt < oldestTs) {
-                oldestTs = e.storedAt
+            if (e.storedAtNano < oldestNano) {
+                oldestNano = e.storedAtNano
                 oldestKey = k
             }
         }
@@ -66,7 +74,7 @@ class TtlCache<V>(
 
     fun prune() {
         val now = System.currentTimeMillis()
-        map.entries.removeIf { now - it.value.storedAt >= ttlMillis }
+        map.entries.removeIf { now - it.value.storedAtMs >= ttlMillis }
     }
 
     fun size(): Int = map.size
@@ -75,14 +83,9 @@ class TtlCache<V>(
 
 /**
  * کندل‌های Binance با cache شصت‌ثانیه‌ای و سقف ۳۰۰ entry.
- *
- * چرا ۳۰۰: TOP_SYMBOLS=۵۰ + چندین تایم‌فریم در TradesScreen + buffer برای
- * BatchScanner که تا ۱۰۰ ارز را با ۱h/۱d می‌خواند. در بک‌تست طولانی،
- * قدیمی‌ترین entryها خودکار evict می‌شوند تا حافظه از کنترل خارج نشود.
  */
 object KlineCache {
     private const val TTL_MS = 60_000L
-    // 🚀 P1-4: سقف ۳۰۰ entry — جلوگیری از رشد بی‌پایان حافظه در اسکن‌های مکرر
     private const val MAX_ENTRIES = 300
     private val cache = TtlCache<List<JsonArray>>(TTL_MS, MAX_ENTRIES)
 
