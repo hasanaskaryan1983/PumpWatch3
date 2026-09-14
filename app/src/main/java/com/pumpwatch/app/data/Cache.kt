@@ -1,34 +1,27 @@
 package com.pumpwatch.app.data
 
 import com.google.gson.JsonArray
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 🚀 Sprint 2 (P1-1 + P1-4): لایهٔ cache عمومی با TTL و سقف تعداد.
  *
- * - thread-safe با ConcurrentHashMap
- * - هر entry پس از ttlMillis منقضی می‌شود (تنبل: هنگام get بررسی می‌شود)
- * - P1-4: اگر تعداد entryها از maxEntries تجاوز کند، قدیمی‌ترین entry
- *   حذف می‌شود (LRU-like eviction) تا حافظه از کنترل خارج نشود
- * - prune() برای پاک‌سازی دوره‌ای بر اساس زمان
- *
- * نکته: storedAtNano از System.nanoTime() برای ordering دقیق استفاده می‌کند
- *       (millis precision کافی نیست؛ ممکن است چند entry در یک millis باشند)
- *       ولی storedAtMs از System.currentTimeMillis() برای TTL check استفاده می‌شود.
+ * پیاده‌سازی با LinkedHashMap + @Synchronized:
+ *  - LinkedHashMap به‌طور طبیعی insertion order را حفظ می‌کند
+ *  - put روی key موجود ابتدا remove می‌کند تا entry به انتهای order برود (LRU-like)
+ *  - eviction با `keys.firstOrNull()` ساده و deterministic است
+ *  - @Synchronized thread-safety کامل (کمی سربار، ولی قابل‌قبول برای cache)
+ *  - ConcurrentHashMap به‌خاطر size() تقریبی برای eviction مناسب نیست
  */
 class TtlCache<V>(
     private val ttlMillis: Long,
     private val maxEntries: Int = Int.MAX_VALUE
 ) {
 
-    private class Entry<V>(
-        val value: V,
-        val storedAtMs: Long,      // برای TTL check (wall clock)
-        val storedAtNano: Long     // برای ordering دقیق (monotonic)
-    )
+    private class Entry<V>(val value: V, val storedAtMs: Long)
 
-    private val map = ConcurrentHashMap<String, Entry<V>>()
+    private val map = LinkedHashMap<String, Entry<V>>()
 
+    @Synchronized
     fun get(key: String): V? {
         val e = map[key] ?: return null
         if (System.currentTimeMillis() - e.storedAtMs >= ttlMillis) {
@@ -38,41 +31,46 @@ class TtlCache<V>(
         return e.value
     }
 
+    @Synchronized
     fun put(key: String, value: V) {
-        if (maxEntries < Int.MAX_VALUE && map.size >= maxEntries && !map.containsKey(key)) {
-            evictOldest()
+        // Remove first: if updating existing key, this moves it to the end (most recent)
+        map.remove(key)
+        map[key] = Entry(value, System.currentTimeMillis())
+        // Evict oldest entries if over cap
+        while (map.size > maxEntries) {
+            val oldest = map.keys.firstOrNull() ?: break
+            map.remove(oldest)
         }
-        map[key] = Entry(value, System.currentTimeMillis(), System.nanoTime())
     }
 
-    private fun evictOldest() {
-        var oldestKey: String? = null
-        var oldestNano = Long.MAX_VALUE
-        for ((k, e) in map) {
-            if (e.storedAtNano < oldestNano) {
-                oldestNano = e.storedAtNano
-                oldestKey = k
-            }
-        }
-        oldestKey?.let { map.remove(it) }
-    }
-
+    @Synchronized
     fun getOrPut(key: String, loader: () -> V?): V? {
-        get(key)?.let { return it }
+        val existing = get(key)
+        if (existing != null) return existing
         val value = loader() ?: return null
         put(key, value)
         return value
     }
 
-    fun invalidate(key: String) { map.remove(key) }
-    fun clear() { map.clear() }
+    @Synchronized
+    fun invalidate(key: String) {
+        map.remove(key)
+    }
 
+    @Synchronized
+    fun clear() {
+        map.clear()
+    }
+
+    @Synchronized
     fun prune() {
         val now = System.currentTimeMillis()
         map.entries.removeIf { now - it.value.storedAtMs >= ttlMillis }
     }
 
+    @Synchronized
     fun size(): Int = map.size
+
     fun maxSize(): Int = maxEntries
 }
 
