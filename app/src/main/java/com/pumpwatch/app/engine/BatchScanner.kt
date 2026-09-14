@@ -18,6 +18,9 @@ import kotlin.math.abs
  * - منبع دادهٔ اصلی: Binance klines 1h (همان منبع QuickScanner)
  * - مسیر fallback: نمودار CoinGecko + buildCandlesChecked (برای جفت‌های غیرBinance)
  * - خروجی همچنان List<SignalResult> است تا همهٔ فراخوان‌ها (MonitorWorker, PicksStore) سالم بمانند
+ *
+ * P0-6: استانداردسازی Candle.time = زمان بسته شدن کندل (نه باز شدن)
+ *       تا UnifiedSignalEngine بتواند candleCloseTs دقیق تولید کند.
  */
 object BatchScanner {
 
@@ -119,7 +122,8 @@ object BatchScanner {
             if (klines.size >= 60) {
                 klines.map { k ->
                     Candle(
-                        time = k[0].asLong,
+                        // P0-6: k[6] = close time رسمی Binance (نه k[0] که open time است)
+                        time = k[6].asLong,
                         open = k[1].asDouble,
                         high = k[2].asDouble,
                         low = k[3].asDouble,
@@ -197,7 +201,7 @@ object BatchScanner {
         reasons = reasons
     )
 
-    // ---------- ساخت کندل ساعتی: تابع pure و قابل تست (بدون تغییر — تست‌ها سبز بمانند) ----------
+    // ---------- ساخت کندل ساعتی: تابع pure و قابل تست ----------
 
     internal data class CandleBuild(
         val candles: List<Candle>,
@@ -241,9 +245,10 @@ object BatchScanner {
             val bStart = (tsMs / hourMs) * hourMs
 
             if (bStart != bucketStart) {
+                // P0-6: time = پایان bucket (زمان بسته شدن کندل)، نه شروع آن
                 out.add(
                     Candle(
-                        time = bucketStart,
+                        time = bucketStart + hourMs,
                         open = open,
                         high = high,
                         low = low,
