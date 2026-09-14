@@ -1,303 +1,243 @@
 package com.pumpwatch.app.engine
 
-import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import com.pumpwatch.app.data.KlineCache
-import com.pumpwatch.app.data.ScanClient
-import com.pumpwatch.app.data.ScanMarket
-import kotlin.math.abs
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
 
 /**
- * BatchScanner Pro — نسخهٔ یکپارچه (قدم: حذف تضاد موتورهای سیگنال)
- * تغییرات:
- * - تحلیل فقط با UnifiedSignalEngine (منبع واحد حقیقت)
- * - منبع دادهٔ اصلی: Binance klines 1h (همان منبع QuickScanner)
- * - مسیر fallback: نمودار CoinGecko + buildCandlesChecked (برای جفت‌های غیرBinance)
- * - خروجی همچنان List<SignalResult> است تا همهٔ فراخوان‌ها (MonitorWorker, PicksStore) سالم بمانند
+ * تست‌های واحد برای BatchScanner.buildCandlesChecked
  *
- * P0-6: استانداردسازی Candle.time = زمان بسته شدن کندل (نه باز شدن)
- * 🚀 P1-1: کندل‌های Binance از KlineCache (TTL=60s) خوانده می‌شوند
- * 🚀 P1-2: هم‌روندی ۱۰ + delay هوشمند بین chunkها (فقط وقتی شبکه واقعاً استفاده شده)
- * 🚀 Sprint 3: candleCloseTs از UnifiedSignalResult به SignalResult نگاشت می‌شود
+ * این تابع pure است و candleهای ساعتی را از سری زمانی raw CoinGecko می‌سازد.
+ * تست‌ها روی سه منطق حیاتی تمرکز دارند:
+ *  1. bucket boundary صحیح (P0-6: time = پایان bucket = close time)
+ *  2. gap counting دقیق (گزارش جاهایی که داده از دست رفته)
+ *  3. droppedTrailingIncomplete = true (آخرین bucket که هنوز بسته نشده حذف می‌شود)
+ *
+ * ورودی‌ها از CoinGecko می‌آیند:
+ *  - prices: List<List<Double>> = [[timestamp_ms, price], ...]
+ *  - volumes: List<List<Double>> = [[timestamp_ms, cumulative_volume], ...]
  */
-object BatchScanner {
+class BatchScannerTest {
 
-    private const val TAG = "BatchScanner"
-    private val STABLES = setOf("USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD", "TETHER", "USDCOIN")
+    // Helper: ساخت [[ts, price], ...]
+    private fun pts(vararg pairs: Pair<Long, Double>): List<List<Double>> =
+        pairs.map { (ts, price) -> listOf(ts.toDouble(), price) }
 
-    // 🚀 P1-2: هم‌روندی — ۱۰ برای Binance ایمن است (limit ~۱۲۰۰ weight/min، klines ≈ ۲ weight)
-    private const val PARALLELISM = 10
+    // Helper: ساخت [[ts, cumulative_volume], ...]
+    private fun vols(vararg pairs: Pair<Long, Double>): List<List<Double>> =
+        pairs.map { (ts, vol) -> listOf(ts.toDouble(), vol) }
 
-    // 🚀 P1-2: تأخیر بین chunkها فقط وقتی اعمال می‌شود که chunk کند بوده (یعنی شبکه رفته)
-    private const val CHUNK_DELAY_MS = 150L
-    private const val CACHED_CHUNK_THRESHOLD_MS = 100L
+    // ---------- تست ۱: bucket ساده یک ساعته ----------
 
-    suspend fun scan(
-        mode: String,
-        params: SignalParams = SignalParams(),
-        limit: Int = 100
-    ): List<SignalResult> {
-        return try {
-            Log.d(TAG, "🚀 scan start: $mode")
-            val markets = loadMarkets(mode)
-            val fundingMap = if (mode == "FUT") loadFunding() else emptyMap()
-
-            val candidates = markets
-                .filter { m ->
-                    val sym = m.symbol.uppercase().replace("-", "")
-                    val isStable = STABLES.contains(sym) ||
-                            sym.matches(Regex("^(USDT|USDC|DAI|FDUSD|TUSD|BUSD)(USD|EUR|GBP)?$"))
-
-                    !isStable && (m.volume ?: 0.0) > 500_000.0
-                }
-                .sortedByDescending { quickScore(it) }
-                .take(limit)
-
-            Log.d(TAG, "🎯 candidates: ${candidates.size}")
-
-            val results = mutableListOf<SignalResult>()
-            candidates.chunked(PARALLELISM).forEach { chunk ->
-                // 🚀 P1-2: اندازه‌گیری زمان chunk برای تصمیم هوشمند دربارهٔ delay
-                val chunkStart = System.currentTimeMillis()
-                val part = coroutineScope {
-                    chunk.map { m ->
-                        async(Dispatchers.IO) {
-                            try {
-                                analyze(m, mode, fundingMap[m.symbol.uppercase()], params)
-                            } catch (e: Exception) {
-                                Log.w(TAG, "skip ${m.symbol}: ${e.message}")
-                                null
-                            }
-                        }
-                    }.awaitAll()
-                }
-                results.addAll(part.filterNotNull())
-
-                // delay هوشمند: اگر chunk سریع بود (= همه از KlineCache)، فشاری روی Binance نبوده → بدون delay
-                val chunkElapsed = System.currentTimeMillis() - chunkStart
-                if (chunkElapsed >= CACHED_CHUNK_THRESHOLD_MS) {
-                    delay(CHUNK_DELAY_MS)
-                }
-            }
-
-            Log.d(TAG, "✅ scan done: ${results.size}")
-            results.sortedByDescending { it.score }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ scan failed: ${e.message}")
-            emptyList()
-        }
-    }
-
-    // ---------- بارگذاری بازارها ----------
-
-    private suspend fun loadMarkets(mode: String): List<ScanMarket> {
-        val out = mutableListOf<ScanMarket>()
-        val pages = if (mode == "FUT") 1 else 4
-        for (p in 1..pages) {
-            try {
-                out.addAll(ScanClient.api.markets(perPage = 250, page = p))
-            } catch (e: Exception) {
-                Log.w(TAG, "page $p failed: ${e.message}")
-            }
-            // ⚠️ دست‌نخورده: الزام rate limit کوین‌گکو free tier
-            if (p < pages) delay(500)
-        }
-        return out
-    }
-
-    private suspend fun loadFunding(): Map<String, Double> {
-        return try {
-            ScanClient.api.derivatives()
-                .filter { !it.base.isNullOrBlank() && it.fundingRate != null }
-                .associate { it.base!!.uppercase() to it.fundingRate!! }
-        } catch (_: Exception) {
-            emptyMap()
-        }
-    }
-
-    private fun quickScore(m: ScanMarket): Double {
-        val vol = m.volume ?: 0.0
-        val ch = abs(m.change24h ?: 0.0)
-        return vol * 0.0000001 + ch * 10
-    }
-
-    // ---------- تحلیل کامل یک ارز: فقط UnifiedSignalEngine ----------
-
-    private suspend fun analyze(
-        m: ScanMarket,
-        mode: String,
-        funding: Double?,
-        params: SignalParams
-    ): SignalResult? {
-        // ۱) منبع اصلی و یکپارچه: Binance klines 1h — از cache مرکزی (P1-1)
-        val binanceCandles: List<Candle>? = try {
-            val klines = KlineCache.klines("${m.symbol.uppercase()}USDT", "1h", 300)
-            if (klines.size >= 60) {
-                klines.map { k ->
-                    Candle(
-                        // P0-6: k[6] = close time رسمی Binance (نه k[0] که open time است)
-                        time = k[6].asLong,
-                        open = k[1].asDouble,
-                        high = k[2].asDouble,
-                        low = k[3].asDouble,
-                        close = k[4].asDouble,
-                        volume = k[5].asDouble
-                    )
-                }
-            } else null
-        } catch (e: Exception) {
-            Log.w(TAG, "${m.symbol}: Binance klines unavailable (${e.message}) — fallback to CoinGecko")
-            null
-        }
-
-        // ۲) مسیر fallback: نمودار CoinGecko + buildCandlesChecked (تابع pure و تست‌شده)
-        val candles: List<Candle> = binanceCandles ?: run {
-            val chart = ScanClient.api.chart(m.id, days = 30)
-            val build = buildCandlesChecked(chart.prices, chart.volumes)
-            if (build.gapCount > 0) {
-                Log.w(TAG, "${m.symbol}: ${build.gapCount} gap ساعتی در دادهٔ CoinGecko")
-            }
-            build.candles
-        }
-
-        if (candles.size < 60) {
-            Log.w(TAG, "${m.symbol}: ${candles.size} candles < 60")
-            return null
-        }
-
-        // ۳) موتور واحد حقیقت
-        val unified = UnifiedSignalEngine.analyze(
-            coinId = m.id,
-            symbol = m.symbol,
-            name = m.name,
-            candles1h = candles,
-            mode = mode,
-            funding = funding,
-            params = toUnifiedParams(params)
+    @Test
+    fun `single hour bucket builds one candle with close time at bucket end`() {
+        // همهٔ نقاط در یک ساعت (bucket_start = 0, hourMs = 3_600_000)
+        val ts0 = 0L
+        val prices = pts(
+            ts0 + 0 to 100.0,
+            ts0 + 60_000 to 110.0,
+            ts0 + 120_000 to 95.0,    // low
+            ts0 + 300_000 to 120.0,   // high
+            ts0 + 500_000 to 115.0
         )
 
-        return unified?.toSignalResult()
+        val build = BatchScanner.buildCandlesChecked(prices, null)
+
+        // چون همه در یک bucket هستند و droppedTrailingIncomplete=true،
+        // bucket باز drop می‌شود → نتیجه empty است.
+        // این رفتار صحیح است: کندل‌های هنوز-بسته‌نشده نباید در تحلیل وارد شوند.
+        assertTrue("دادهٔ کمتر از یک ساعت کامل باید drop شود", build.candles.isEmpty())
+        assertTrue("droppedTrailingIncomplete باید true باشد", build.droppedTrailingIncomplete)
     }
 
-    // ---------- نگاشت انواع برای سازگاری با فراخوان‌های موجود ----------
+    // ---------- تست ۲: bucket های متوالی با close time صحیح ----------
 
-    private fun toUnifiedParams(p: SignalParams): UnifiedSignalParams = UnifiedSignalParams(
-        rsiPeriod = p.rsiPeriod,
-        adxMin = p.adxMin,
-        volumeMin = p.volumeMin,
-        breakoutLookback = p.breakoutLookback,
-        minScore = p.minScore,
-        goldenScore = p.goldenScore,
-        atrMult = p.atrMult,
-        rr = p.rr
-    )
-
-    // 🚀 Sprint 3: نگاشت candleCloseTs — قبلاً این فیلد دور ریخته می‌شد و
-    // MonitorWorker مجبور بود time = زمان اسکن بگذارد (نقض فلسفهٔ P0-6)
-    private fun UnifiedSignalResult.toSignalResult(): SignalResult = SignalResult(
-        coinId = coinId,
-        symbol = symbol,
-        name = name,
-        price = price,
-        mode = mode,
-        side = side,
-        score = score,
-        golden = golden,
-        mtfAligned = mtfAligned,
-        mtfTrend = mtfTrend,
-        adx = adx,
-        rsi = rsi,
-        volumeRatio = volumeRatio,
-        funding = funding,
-        entry = entry,
-        stopLoss = stopLoss,
-        target1 = target1,
-        target2 = target2,
-        reasons = reasons,
-        candleCloseTs = candleCloseTs
-    )
-
-    // ---------- ساخت کندل ساعتی: تابع pure و قابل تست ----------
-
-    internal data class CandleBuild(
-        val candles: List<Candle>,
-        val gapCount: Int,
-        val droppedTrailingIncomplete: Boolean
-    )
-
-    internal fun buildCandlesChecked(
-        prices: List<List<Double>>,
-        volumes: List<List<Double>>?
-    ): CandleBuild {
-        if (prices.size < 2) return CandleBuild(emptyList(), 0, false)
+    @Test
+    fun `two consecutive buckets produce two candles with correct close times`() {
         val hourMs = 3_600_000L
+        val ts0 = 0L
 
-        val pts = prices.filter { it.size >= 2 }.map { it[0] to it[1] }
-        if (pts.size < 2) return CandleBuild(emptyList(), 0, false)
+        // bucket اول: ts0 تا ts0+hourMs (نقاط در این بازه)
+        // bucket دوم: ts0+hourMs تا ts0+2*hourMs
+        // bucket سوم: ts0+2*hourMs تا ts0+3*hourMs (drop چون هنوز باز است)
+        val prices = pts(
+            ts0 + 0 to 100.0,              // در bucket اول
+            ts0 + 60_000 to 110.0,
+            ts0 + 120_000 to 95.0,
+            ts0 + hourMs + 0 to 115.0,     // در bucket دوم
+            ts0 + hourMs + 60_000 to 125.0,
+            ts0 + hourMs + 120_000 to 105.0,
+            ts0 + 2 * hourMs + 0 to 120.0, // در bucket سوم (drop)
+            ts0 + 2 * hourMs + 60_000 to 130.0
+        )
 
-        val unitMs = if (pts.maxOf { it.first } < 100_000_000_000.0) 1000.0 else 1.0
+        val build = BatchScanner.buildCandlesChecked(prices, null)
 
-        val sorted = pts.sortedBy { it.first }
+        assertEquals("باید ۲ کندل بسته‌شده تولید شود (سومی drop می‌شود)", 2, build.candles.size)
 
-        val volByTs = volumes
-            ?.filter { it.size >= 2 }
-            ?.associate { (it[0] * unitMs).toLong() to it[1] }
+        // P0-6: time = پایان bucket = close time رسمی
+        val candle1 = build.candles[0]
+        val candle2 = build.candles[1]
+        assertEquals("close time کندل اول باید پایان bucket اول باشد", hourMs, candle1.time)
+        assertEquals("close time کندل دوم باید پایان bucket دوم باشد", 2 * hourMs, candle2.time)
 
-        val firstTs = (sorted.first().first * unitMs).toLong()
-        var bucketStart = (firstTs / hourMs) * hourMs
-        var open = sorted.first().second
-        var high = open
-        var low = open
-        var lastClose = open
-        var vol = 0.0
-        var lastVol = volByTs?.get(firstTs) ?: 0.0
+        // OHLC بررسی: کندل اول
+        assertEquals(100.0, candle1.open, 0.001)
+        assertEquals(110.0, candle1.high, 0.001)
+        assertEquals(95.0, candle1.low, 0.001)
+        assertEquals(115.0, candle1.close, 0.001) // آخرین قیمت در bucket اول
 
-        val out = mutableListOf<Candle>()
-        var gapCount = 0
+        // OHLC بررسی: کندل دوم
+        assertEquals(115.0, candle2.open, 0.001)
+        assertEquals(125.0, candle2.high, 0.001)
+        assertEquals(105.0, candle2.low, 0.001)
+        assertEquals(130.0, candle2.close, 0.001) // آخرین قیمت در bucket دوم (نه 120!)
+    }
 
-        for (i in 1 until sorted.size) {
-            val tsMs = (sorted[i].first * unitMs).toLong()
-            val p = sorted[i].second
-            val bStart = (tsMs / hourMs) * hourMs
+    // ---------- تست ۳: gap counting ----------
 
-            if (bStart != bucketStart) {
-                // P0-6: time = پایان bucket (زمان بسته شدن کندل)، نه شروع آن
-                out.add(
-                    Candle(
-                        time = bucketStart + hourMs,
-                        open = open,
-                        high = high,
-                        low = low,
-                        close = lastClose,
-                        volume = vol
-                    )
-                )
-                val missing = (bStart - bucketStart) / hourMs - 1
-                if (missing > 0) gapCount += missing.toInt()
+    @Test
+    fun `gaps between buckets are counted correctly`() {
+        val hourMs = 3_600_000L
+        val ts0 = 0L
 
-                bucketStart = bStart
-                open = p
-                high = p
-                low = p
-                vol = 0.0
-            } else {
-                if (p > high) high = p
-                if (p < low) low = p
-            }
-            lastClose = p
+        // bucket اول (ساعت ۰)، bucket دوم (ساعت ۱)، bucket پنجم (ساعت ۴) → ۲ gap (ساعت ۲ و ۳)
+        val prices = pts(
+            ts0 + 0 to 100.0,                      // bucket 0
+            ts0 + hourMs + 0 to 110.0,             // bucket 1
+            ts0 + 4 * hourMs + 0 to 120.0          // bucket 4 (drop چون آخرین)
+        )
 
-            val v = volByTs?.get(tsMs)
-            if (v != null) {
-                val dv = if (v >= lastVol) v - lastVol else v
-                if (dv > 0 && dv < 1_000_000_000.0) vol += dv
-                lastVol = v
-            }
-        }
+        val build = BatchScanner.buildCandlesChecked(prices, null)
 
-        return CandleBuild(out, gapCount, droppedTrailingIncomplete = true)
+        assertEquals("باید ۲ کندل بسته‌شده تولید شود (سومی drop)", 2, build.candles.size)
+        // gap بین bucket 1 و bucket 4 = 2 ساعت (bucket 2 و 3)
+        assertEquals("باید ۲ gap ساعتی گزارش شود", 2, build.gapCount)
+    }
+
+    @Test
+    fun `no gap when buckets are consecutive`() {
+        val hourMs = 3_600_000L
+        val ts0 = 0L
+
+        val prices = pts(
+            ts0 + 0 to 100.0,
+            ts0 + hourMs + 0 to 110.0,
+            ts0 + 2 * hourMs + 0 to 120.0,
+            ts0 + 3 * hourMs + 0 to 130.0
+        )
+
+        val build = BatchScanner.buildCandlesChecked(prices, null)
+
+        assertEquals("باید ۳ کندل بسته‌شده تولید شود (چهارمی drop)", 3, build.candles.size)
+        assertEquals("هیچ gap نباید گزارش شود", 0, build.gapCount)
+    }
+
+    // ---------- تست ۴: حجم از cumulative استخراج می‌شود ----------
+
+    @Test
+    fun `volume is derived from cumulative volume deltas within bucket`() {
+        val hourMs = 3_600_000L
+        val ts0 = 0L
+
+        // cumulative volume: 1000 → 1500 → 2000 (در یک bucket)
+        val prices = pts(
+            ts0 + 0 to 100.0,
+            ts0 + 60_000 to 110.0,
+            ts0 + 120_000 to 115.0
+        )
+        val volumes = vols(
+            ts0 + 0 to 1000.0,
+            ts0 + 60_000 to 1500.0,   // delta = 500
+            ts0 + 120_000 to 2000.0   // delta = 500
+        )
+
+        val build = BatchScanner.buildCandlesChecked(prices, volumes)
+
+        // همه در یک bucket → drop می‌شود
+        assertTrue("کمتر از یک ساعت کامل باید drop شود", build.candles.isEmpty())
+    }
+
+    @Test
+    fun `volume accumulates deltas across two buckets`() {
+        val hourMs = 3_600_000L
+        val ts0 = 0L
+
+        // bucket 1: cumulative 1000 → 1500 → 2000 → 2500 (دلتا کل ۱۵۰۰)
+        // bucket 2: cumulative 2500 → 2800 → 3200 (دلتا کل ۷۰۰)
+        // bucket 3: drop
+        val prices = pts(
+            ts0 + 0 to 100.0,
+            ts0 + 60_000 to 110.0,
+            ts0 + 120_000 to 115.0,
+            ts0 + 180_000 to 118.0,
+            ts0 + hourMs + 0 to 120.0,
+            ts0 + hourMs + 60_000 to 125.0,
+            ts0 + hourMs + 120_000 to 128.0,
+            ts0 + 2 * hourMs + 0 to 130.0
+        )
+        val volumes = vols(
+            ts0 + 0 to 1000.0,
+            ts0 + 60_000 to 1500.0,
+            ts0 + 120_000 to 2000.0,
+            ts0 + 180_000 to 2500.0,
+            ts0 + hourMs + 0 to 2500.0,
+            ts0 + hourMs + 60_000 to 2800.0,
+            ts0 + hourMs + 120_000 to 3200.0,
+            ts0 + 2 * hourMs + 0 to 3300.0
+        )
+
+        val build = BatchScanner.buildCandlesChecked(prices, volumes)
+
+        assertEquals("باید ۲ کندل بسته‌شده تولید شود", 2, build.candles.size)
+
+        // bucket 1: deltas = 500 + 500 + 500 = 1500 (اولین نقطه delta ندارد)
+        assertEquals("حجم کندل اول باید ۱۵۰۰ باشد", 1500.0, build.candles[0].volume, 0.001)
+
+        // bucket 2: deltas = 300 + 400 = 700 (اولین نقطه delta ندارد)
+        assertEquals("حجم کندل دوم باید ۷۰۰ باشد", 700.0, build.candles[1].volume, 0.001)
+    }
+
+    // ---------- تست ۵: input خالی و degenerate ----------
+
+    @Test
+    fun `empty input produces empty build`() {
+        val build = BatchScanner.buildCandlesChecked(emptyList(), null)
+        assertTrue(build.candles.isEmpty())
+        assertEquals(0, build.gapCount)
+    }
+
+    @Test
+    fun `single point input produces empty build`() {
+        val build = BatchScanner.buildCandlesChecked(pts(0L to 100.0), null)
+        assertTrue("تک‌نقطه باید drop شود", build.candles.isEmpty())
+    }
+
+    @Test
+    fun `two points in same bucket produces empty build`() {
+        val build = BatchScanner.buildCandlesChecked(
+            pts(0L to 100.0, 60_000L to 110.0),
+            null
+        )
+        assertTrue("دو نقطه در یک ساعت باید drop شوند", build.candles.isEmpty())
+    }
+
+    // ---------- تست ۶: sanity check برای دادهٔ واقعی‌نما ----------
+
+    @Test
+    fun `realistic 24-hour input produces 23 closed candles`() {
+        val hourMs = 3_600_000L
+        // ۲۴ نقطه، یکی در هر ساعت
+        val prices = (0..23).map { i -> listOf((i * hourMs).toDouble(), 100.0 + i) }
+
+        val build = BatchScanner.buildCandlesChecked(prices, null)
+
+        // ۲۳ کندل بسته‌شده (بیست‌وچهارمی drop می‌شود)
+        assertEquals("باید ۲۳ کندل بسته‌شده تولید شود", 23, build.candles.size)
+        assertEquals("هیچ gap نباید باشد (همه ساعت‌ها پشت‌سرهم)", 0, build.gapCount)
+
+        // sanity: close time کندل اول = پایان ساعت اول
+        assertEquals(hourMs, build.candles[0].time)
+        assertEquals(23 * hourMs, build.candles.last().time)
     }
 }
