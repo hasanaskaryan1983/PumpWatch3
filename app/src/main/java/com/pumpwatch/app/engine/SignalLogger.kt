@@ -10,6 +10,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 // ---------- کلاس سیگنال (با Trailing Stop و هدف شناور) ----------
+// 🟢 P0-6 / 🚀 Sprint 3: فیلد `time` = زمان بسته شدن کندلِ مولد سیگنال (candleCloseTs)،
+// نه زمان اسکن. همهٔ فراخوان‌ها به‌تدریج در Sprint 3 به این معنا مهاجرت می‌کنند.
 data class LoggedSignal(
     val symbol: String,
     val side: String, // "BUY" or "SELL"
@@ -77,10 +79,18 @@ object SignalLogger {
 
     // ✅ ثبت سیگنال — برگشت Boolean (true = ثبت شد، false = تکراری بود)
     // QuickScanner و CoinDetailScreen این رو داخل if(...) استفاده می‌کنن
+    //
+    // 🚀 Sprint 3 (P2-1): سه لایهٔ dedup:
+    //  ۱) سیگنال OPEN هم‌نماد و هم‌جهت → تکراری (جلوگیری از انباشت پوزیشن موازی)
+    //  ۲) همان کندل (time برابر): هرگز دوباره ثبت نمی‌شود، حتی اگر ساعت‌ها گذشته باشد
+    //     → این لایه باگ «اسکن اول >۱ ساعت بعد از close کندل» را می‌بندد:
+    //       قبلاً فقط پنجرهٔ ۱ ساعته بود و سیگنالِ دیر-ثبت‌شده توسط Worker دوباره ثبت می‌شد
+    //  ۳) پنجرهٔ لغزندهٔ ۱ ساعته روی time → تکراری (حالت عمومی)
     fun log(ctx: Context, s: LoggedSignal): Boolean {
         val list = load(ctx).toMutableList()
         val now = System.currentTimeMillis()
         val dup = list.any { it.symbol == s.symbol && it.side == s.side && it.status == "OPEN" } ||
+                (s.time > 0 && list.any { it.symbol == s.symbol && it.side == s.side && it.time == s.time }) ||
                 list.any { it.symbol == s.symbol && it.side == s.side && it.time > 0 && now - it.time < 3_600_000L }
         if (dup) return false
         list.add(0, s)
@@ -106,6 +116,8 @@ object SignalLogger {
     }
 
     // بررسی انقضا (۲۴ ساعت بدون نتیجه)
+    // 🚀 Sprint 3: چون time = زمان بسته شدن کندل است، انقضا یعنی
+    // «۲۴ ساعت از بسته شدن کندلِ مولد سیگنال گذشته و هنوز نتیجه‌ای نداشته»
     suspend fun evaluate(ctx: Context, logs: List<LoggedSignal>): List<LoggedSignal> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         logs.map { s ->
