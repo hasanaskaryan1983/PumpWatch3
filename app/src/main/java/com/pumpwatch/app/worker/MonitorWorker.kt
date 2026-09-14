@@ -10,27 +10,19 @@ import androidx.work.WorkerParameters
 import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.engine.BatchScanner
 import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.ParamsStore
 import com.pumpwatch.app.engine.SignalLogger
-import com.pumpwatch.app.engine.SignalParams
 import java.util.Locale
 
 /**
  * MonitorWorker — نسخهٔ یکپارچه
- * تغییرات:
- * - BatchScanner حالا از UnifiedSignalEngine + Binance klines استفاده می‌کند (همان منبع QuickScanner)
+ * - BatchScanner از UnifiedSignalEngine + Binance klines استفاده می‌کند
  * - گیت واحد Dedup: فقط وقتی SignalLogger.log موفق شود نوتیفیکیشن می‌فرستیم
- *   (این یعنی اگر QuickScanner همان سیگنال را زودتر ثبت کرده باشد، نوتیف تکراری/متناقض نمی‌فرستیم)
  * - برچسب منبع در نوتیفیکیشن: 📡 کشف بازار
  *
- * 🚀 P1-4: KlineCache.prune() در ابتدای هر بار اجرا صدا می‌شود تا entryهای منقضی
- *      (کندل‌های قدیمی‌تر از ۶۰ ثانیه) قبل از scan آزاد شوند.
- *      این باعث می‌شود در استفادهٔ طولانی‌مدت (چندین روز)، سقف ۳۰۰ entry هیچ‌وقت
- *      فعال نشود و eviction LRU بی‌مورد فعال نگردد.
- *
- * 🚀 Sprint 3 (P2-1): timestamp ثبت سیگنال = زمان بسته شدن کندل مولد آن
- *      (candleCloseTs) به جای زمان اجرای Worker. این هم‌راستا با فلسفهٔ P0-6
- *      است که timestamp سیگنال باید به کندلِ تحلیل‌شده مربوط باشد، نه به لحظهٔ
- *      اجرای کد. fallback به زمان اسکن فقط اگر candleCloseTs صفر بود.
+ * 🚀 P1-4: KlineCache.prune() در ابتدای هر اجرا
+ * 🚀 Sprint 3: time = candleCloseTs (نه زمان اسکن)
+ * 🚀 Sprint 4: پارامترهای سیگنال از ParamsStore (بهینه‌شده یا default)
  */
 class MonitorWorker(
     context: Context,
@@ -46,7 +38,7 @@ class MonitorWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            // 🚀 P1-4: خانه‌تکانی دوره‌ای cache — حذف entryهای منقضی قبل از scan
+            // 🚀 P1-4: خانه‌تکانی دوره‌ای cache
             KlineCache.prune()
 
             val modeRaw = inputData.getString(KEY_MODE)
@@ -55,19 +47,20 @@ class MonitorWorker(
                 ?: "SPOT"
             val mode = if (modeRaw == "FUTURES") "FUT" else "SPOT"
 
-            val results = BatchScanner.scan(mode, SignalParams(), limit = 25)
+            // 🚀 Sprint 4: پارامترهای فعال — اگر WalkForwardOptimizer چیزی ذخیره کرده
+            // باشد همان استفاده می‌شود، وگرنه default های SignalParams
+            val signalParams = ParamsStore.load(applicationContext)
+
+            val results = BatchScanner.scan(mode, signalParams, limit = 25)
             val hot = results.filter { it.side != "NONE" && it.score >= MIN_SCORE }.take(3)
 
             hot.forEachIndexed { i, r ->
                 val logSide = if (r.side == "PUMP") "BUY" else "SELL"
 
-                // 🚀 Sprint 3: timestamp = زمان بسته شدن کندل مولد سیگنال.
-                // fallback به System.currentTimeMillis فقط اگر candleCloseTs صفر بود
-                // (برای backward compat با داده‌های legacy یا edge caseهایی که
-                // موتور نتوانسته close time را تعیین کند).
+                // 🚀 Sprint 3: timestamp = زمان بسته شدن کندل مولد سیگنال
                 val signalTs = if (r.candleCloseTs > 0L) r.candleCloseTs else System.currentTimeMillis()
 
-                // گیت واحد dedup با QuickScanner: اگر قبلاً ثبت شده، log=false و نوتیف نمی‌فرستیم
+                // گیت واحد dedup با QuickScanner
                 val logged = SignalLogger.log(
                     applicationContext,
                     LoggedSignal(
