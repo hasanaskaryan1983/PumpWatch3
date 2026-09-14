@@ -43,6 +43,7 @@ import com.pumpwatch.app.data.CoinInfoClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.Derivative
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NewsClient
 import com.pumpwatch.app.data.NewsItem
@@ -432,6 +433,35 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                     if (confScore >= 40 || confScore <= -40) {
                         val side = if (confScore > 0) "BUY" else "SELL"
                         val tgt = if (side == "BUY") analysis.target1 else analysis.target2
+
+                        // 🚀 Sprint 3: استخراج close time کندل فعلی برای LoggedSignal.time
+                        // ترتیب fallback:
+                        //  ۱) Binance KlineCache — آخرین کندلِ بسته‌شده (kl[kl.size - 2][6])
+                        //     (kl.last() ممکن است forming باشد؛ kl قبل از آن قطعاً بسته‌شده است)
+                        //  ۲) CoinGecko chart — آخرین timestamp
+                        //  ۳) زمان اسکن — fallback نهایی
+                        // این صفحه همچنان سیگنال را روی candle forming می‌سازد
+                        // (معماری قدیمی) — اصلاح آن نیاز به بازنویسی computeLayer دارد
+                        // و خارج از scope Sprint 3 است.
+                        var candleCloseTs = 0L
+                        try {
+                            val kl = KlineCache.klines(sym + "USDT", tf, 3)
+                            if (kl.size >= 2) {
+                                candleCloseTs = kl[kl.size - 2][6].asLong
+                            } else if (kl.size == 1) {
+                                candleCloseTs = kl[0][6].asLong
+                            }
+                        } catch (_: Exception) { }
+                        if (candleCloseTs <= 0L) {
+                            try {
+                                val days = when (tf) {
+                                    "15m" -> 1; "1h" -> 2; "4h" -> 8; "12h" -> 20; "1d" -> 60; else -> 1
+                                }
+                                val chart = ApiClient.getCoinChart(coin.id, days = days)
+                                candleCloseTs = chart.prices.lastOrNull()?.get(0)?.toLong() ?: 0L
+                            } catch (_: Exception) { }
+                        }
+
                         SignalLogger.log(
                             context,
                             LoggedSignal(
@@ -441,7 +471,7 @@ fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
                                 entry = price,
                                 stop = analysis.stop,
                                 target = tgt,
-                                time = System.currentTimeMillis()
+                                time = if (candleCloseTs > 0L) candleCloseTs else System.currentTimeMillis()
                             )
                         )
                     }
