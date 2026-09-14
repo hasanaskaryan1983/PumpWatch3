@@ -23,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 private val LG = Color(0xFF00E676)
@@ -32,6 +34,8 @@ private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
 private val LPurple = Color(0xFFCE93D8)
+
+private val candleTimeFmt = SimpleDateFormat("HH:mm", Locale.US)
 
 private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
@@ -47,6 +51,9 @@ private fun fmtPrice(p: Double): String = when {
     p >= 0.01 -> String.format(Locale.US, "%.5f", p)
     else -> String.format(Locale.US, "%.6f", p)
 }
+
+// 🚀 Sprint 4: فرمت زمان بسته شدن کندل برای نمایش در UI
+private fun fmtCandleTime(ts: Long): String = if (ts > 0) candleTimeFmt.format(Date(ts)) else "—"
 
 @Composable
 fun SignalLogScreen() {
@@ -103,7 +110,6 @@ fun SignalLogScreen() {
         else -> logs
     }
 
-    // 🚀 آمار Walk-Forward (مشتق از logs — بدون تغییر داده)
     val closedSignals = logs.filter { it.status in listOf("WIN", "LOSS", "EXP") }
     val wfTotal = closedSignals.size
     val wfWins = closedSignals.count { it.status == "WIN" }
@@ -157,7 +163,6 @@ fun SignalLogScreen() {
             }
         }
 
-        // 🚀 داشبورد پیشرفت Walk-Forward
         Card(
             colors = CardDefaults.cardColors(containerColor = LC),
             shape = RoundedCornerShape(14.dp),
@@ -242,9 +247,6 @@ fun SignalLogScreen() {
         if (filteredLogs.isEmpty()) {
             Text("هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن", color = LGr, modifier = Modifier.padding(24.dp))
         } else {
-            // 🚀 P1-5: weight(1f) استاندارد طلایی Compose برای LazyColumn در Column با fillMaxSize
-            // این LazyColumn را به فضای باقی‌ماندهٔ Column متصل می‌کند و خودش اسکرول می‌کند.
-            // بدون weight، LazyColumn گاهی با خطای اندازه‌گیری بی‌نهایت مواجه می‌شود.
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -272,6 +274,13 @@ fun SignalLogScreen() {
                                     "WIN" -> LG; "LOSS" -> LR; "EXP" -> LY; "OPEN" -> LBlue; else -> LGr
                                 })
                             }
+
+                            // 🚀 Sprint 4: نمایش زمان بسته شدن کندل مولد سیگنال
+                            Text(
+                                "🕐 کندل: ${fmtCandleTime(s.time)}",
+                                fontSize = 10.sp,
+                                color = LGr
+                            )
 
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
                                 Text("ورود: $${fmtPrice(s.entry)}", fontSize = 11.sp, color = LGr)
