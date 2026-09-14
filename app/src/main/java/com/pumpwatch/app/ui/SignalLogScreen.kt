@@ -52,7 +52,6 @@ private fun fmtPrice(p: Double): String = when {
     else -> String.format(Locale.US, "%.6f", p)
 }
 
-// 🚀 Sprint 4: فرمت زمان بسته شدن کندل برای نمایش در UI
 private fun fmtCandleTime(ts: Long): String = if (ts > 0) candleTimeFmt.format(Date(ts)) else "—"
 
 @Composable
@@ -61,13 +60,11 @@ fun SignalLogScreen() {
     val scope = rememberCoroutineScope()
     val prefs = remember { ctx.getSharedPreferences("pumpwatch_prefs", 0) }
     var logs by remember { mutableStateOf<List<LoggedSignal>>(emptyList()) }
-    var stats by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
     var isScanning by remember { mutableStateOf(false) }
     var selectedFilter by remember {
         mutableStateOf(if (prefs.getString("mode", "SPOT") == "FUTURES") "FUT" else "SPOT")
     }
     var lastScores by remember { mutableStateOf("") }
-    var showDetails by remember { mutableStateOf(false) }
 
     fun loadLogs() {
         scope.launch {
@@ -75,11 +72,6 @@ fun SignalLogScreen() {
             val ev = SignalLogger.evaluate(ctx, l)
             SignalLogger.save(ctx, ev)
             logs = ev
-            stats = Triple(
-                ev.count { it.status == "WIN" },
-                ev.count { it.status == "LOSS" },
-                ev.count { it.status == "EXP" }
-            )
         }
     }
 
@@ -95,11 +87,6 @@ fun SignalLogScreen() {
                 val updated = SignalLogger.updateOpenSignals(ctx, currentLogs)
                 logs = updated
                 SignalLogger.save(ctx, updated)
-                stats = Triple(
-                    updated.count { it.status == "WIN" },
-                    updated.count { it.status == "LOSS" },
-                    updated.count { it.status == "EXP" }
-                )
             }
         }
     }
@@ -110,6 +97,7 @@ fun SignalLogScreen() {
         else -> logs
     }
 
+    // 🚀 Sprint 4: همهٔ آمار از یک منبع (closedSignals)
     val closedSignals = logs.filter { it.status in listOf("WIN", "LOSS", "EXP") }
     val wfTotal = closedSignals.size
     val wfWins = closedSignals.count { it.status == "WIN" }
@@ -125,6 +113,9 @@ fun SignalLogScreen() {
     }.let { pnls -> if (pnls.isNotEmpty()) pnls.average() else 0.0 }
     val wfProgressPct = (wfTotal.coerceAtMost(50) * 100.0 / 50.0)
     val wfReady = wfTotal >= 50
+
+    // تعداد سیگنال‌های باز (برای نمایش وضعیت فعال)
+    val openCount = logs.count { it.status == "OPEN" }
 
     Column(
         Modifier.fillMaxSize().padding(16.dp),
@@ -163,18 +154,21 @@ fun SignalLogScreen() {
             }
         }
 
+        // 🚀 Sprint 4: داشبورد واحد و منسجم (ادغام دو داشبورد قبلی)
         Card(
             colors = CardDefaults.cardColors(containerColor = LC),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // سربرگ: شمارنده Walk-Forward
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🚀 پیشرفت Walk-Forward", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LPurple)
+                    Text("🚀 عملکرد استراتژی", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LPurple)
                     Spacer(Modifier.weight(1f))
                     Text("$wfTotal / 50", fontWeight = FontWeight.Black, fontSize = 16.sp, color = if (wfReady) LG else LY)
                 }
 
+                // progress bar
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -189,12 +183,15 @@ fun SignalLogScreen() {
                     )
                 }
 
+                // آمار: برد/باخت/منقضی + باز
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("✅ برد: $wfWins", color = LG, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     Text("❌ باخت: $wfLosses", color = LR, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     Text("⌛ منقضی: $wfExpired", color = LY, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("🔓 باز: $openCount", color = LBlue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
+                // آمار: winrate + expectancy
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         "وین‌ریت: ${String.format(Locale.US, "%.1f%%", wfWinRate)}",
@@ -210,6 +207,14 @@ fun SignalLogScreen() {
                     )
                 }
 
+                // توضیح استراتژی + وضعیت Walk-Forward
+                Text(
+                    "🎯 استراتژی: استاپ دنباله‌رو (Trailing) + هدف شناور. تا وقتی استاپ نخوره، پوزیشن باز می‌مونه.",
+                    fontSize = 9.sp,
+                    color = LBlue,
+                    lineHeight = 14.sp
+                )
+
                 Text(
                     when {
                         wfTotal == 0 -> "💡 هنوز داده‌ای جمع نشده — از اپ استفاده کنید، سیگنال‌ها خودکار ثبت و ارزیابی می‌شن"
@@ -220,21 +225,6 @@ fun SignalLogScreen() {
                     color = if (wfReady) LG else LGr,
                     lineHeight = 14.sp
                 )
-            }
-        }
-
-        stats?.let { st ->
-            Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
-                Text("✅ برد: ${st.first}", color = LG, fontWeight = FontWeight.Bold)
-                Text("❌ باخت: ${st.second}", color = LR, fontWeight = FontWeight.Bold)
-                Text("⌛ منقضی: ${st.third}", color = LY, fontWeight = FontWeight.Bold)
-            }
-            Text("🎯 استراتژی: استاپ دنباله‌رو (Trailing) + هدف شناور. تا وقتی استاپ نخوره، پوزیشن باز می‌مونه!", fontSize = 9.sp, color = LBlue, fontWeight = FontWeight.Bold)
-
-            val t = st.first + st.second
-            if (t > 0) {
-                val wr = st.first * 100.0 / t
-                Text("وین‌ریت زنده: ${String.format(Locale.US, "%.1f%%", wr)}", color = if (wr >= 55) LG else LR, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -275,7 +265,6 @@ fun SignalLogScreen() {
                                 })
                             }
 
-                            // 🚀 Sprint 4: نمایش زمان بسته شدن کندل مولد سیگنال
                             Text(
                                 "🕐 کندل: ${fmtCandleTime(s.time)}",
                                 fontSize = 10.sp,
