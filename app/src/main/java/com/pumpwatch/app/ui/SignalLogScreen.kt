@@ -76,7 +76,6 @@ fun SignalLogScreen() {
         }
     }
 
-    // 🔄 آپدیت خودکار قیمت‌ها هر ۴۵ ثانیه برای سیگنال‌های باز
     LaunchedEffect(Unit) {
         loadLogs()
         lastScores = prefs.getString("last_scores", "") ?: ""
@@ -171,7 +170,6 @@ fun SignalLogScreen() {
                     Text("$wfTotal / 50", fontWeight = FontWeight.Black, fontSize = 16.sp, color = if (wfReady) LG else LY)
                 }
 
-                // نوار پیشرفت (بدون وابستگی به نسخهٔ material3)
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -244,7 +242,13 @@ fun SignalLogScreen() {
         if (filteredLogs.isEmpty()) {
             Text("هنوز سیگنالی ثبت نشده — دکمه «اسکن فوری» رو بزن", color = LGr, modifier = Modifier.padding(24.dp))
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 🚀 P1-5: weight(1f) استاندارد طلایی Compose برای LazyColumn در Column با fillMaxSize
+            // این LazyColumn را به فضای باقی‌ماندهٔ Column متصل می‌کند و خودش اسکرول می‌کند.
+            // بدون weight، LazyColumn گاهی با خطای اندازه‌گیری بی‌نهایت مواجه می‌شود.
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(filteredLogs) { s ->
                     val isLong = s.side == "BUY"
                     val pnl = s.exitPrice?.let { ep ->
