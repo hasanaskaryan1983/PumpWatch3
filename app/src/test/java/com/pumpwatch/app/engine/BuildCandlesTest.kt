@@ -11,6 +11,9 @@ import org.junit.Test
  * نکتهٔ معنایی: close هر کندل = آخرین قیمت داخل همان bucket؛
  * نقطه‌ای که باعث بستن bucket می‌شود، متعلق به bucket بعدی است
  * و قیمت آن، open کندل بعدی می‌شود.
+ *
+ * P0-6: Candle.time = زمان بسته شدن کندل (bucketStart + hourMs)، نه شروع آن.
+ *       این باعث می‌شود UnifiedSignalEngine بتواند candleCloseTs دقیق تولید کند.
  */
 class BuildCandlesTest {
 
@@ -57,8 +60,12 @@ class BuildCandlesTest {
         )
         val r = BatchScanner.buildCandlesChecked(pricesSec, null)
         assertEquals(2, r.candles.size)       // ۲ کندل کامل + سومی ناتمام حذف
-        assertEquals((base.toLong() / HL) * HL, r.candles[0].time)
-        assertEquals(((base + H).toLong() / HL) * HL, r.candles[1].time)
+        
+        // P0-6: time = زمان بسته شدن کندل (bucketStart + hourMs)
+        val bucketStart0 = (base.toLong() / HL) * HL
+        val bucketStart1 = ((base + H).toLong() / HL) * HL
+        assertEquals(bucketStart0 + HL, r.candles[0].time)
+        assertEquals(bucketStart1 + HL, r.candles[1].time)
     }
 
     @Test
