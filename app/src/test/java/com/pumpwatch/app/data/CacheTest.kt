@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * تست‌های واحد برای لایهٔ cache عمومی (TtlCache).
+ * تست‌های واحد برای لایهٔ cache عمومی (TtlCache) و KlineCache.
  *
  * P1-1 acceptance criteria:
  *  - TTL lazy expiry: entry منقضی روی get حذف می‌شود
@@ -19,6 +19,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *  - prune(): حذف فعال entryهای منقضی
  *  - invalidate/clear: رفتار درست حذف
  *  - getOrPut: load یکبار، cache، برگرداندن
+ *
+ * P1-4 acceptance criteria:
+ *  - maxEntries: سقف تعداد با eviction قدیمی‌ترین entry
+ *  - update روی key موجود eviction نمی‌کند
+ *  - KlineCache سقف معقول دارد
  */
 class CacheTest {
 
@@ -43,9 +48,9 @@ class CacheTest {
         val cache = TtlCache<String>(SHORT_TTL)
         cache.put("key1", "value1")
         assertEquals("value1", cache.get("key1"))
-        
+
         Thread.sleep(SHORT_TTL + 50) // صبر بیشتر از TTL
-        
+
         assertNull("entry باید پس از TTL منقضی شود", cache.get("key1"))
     }
 
@@ -53,17 +58,17 @@ class CacheTest {
     fun `getOrPut loads on miss and caches for subsequent calls`() {
         val cache = TtlCache<String>(SHORT_TTL * 10)
         val loadCount = AtomicInteger(0)
-        
+
         val loader: () -> String = {
             loadCount.incrementAndGet()
             "loaded_value"
         }
-        
+
         // اولین بار: loader اجرا می‌شود
         val v1 = cache.getOrPut("key1", loader)
         assertEquals("loaded_value", v1)
         assertEquals(1, loadCount.get())
-        
+
         // دومین بار: از cache خوانده می‌شود (loader اجرا نمی‌شود)
         val v2 = cache.getOrPut("key1", loader)
         assertEquals("loaded_value", v2)
@@ -74,17 +79,17 @@ class CacheTest {
     fun `getOrPut returns null when loader returns null (no cache)`() {
         val cache = TtlCache<String>(SHORT_TTL * 10)
         val loadCount = AtomicInteger(0)
-        
+
         val loader: () -> String? = {
             loadCount.incrementAndGet()
             null
         }
-        
+
         // اولین بار: loader اجرا می‌شود و null برمی‌گرداند
         val v1 = cache.getOrPut("key1", loader)
         assertNull(v1)
         assertEquals(1, loadCount.get())
-        
+
         // دومین بار: چون null cache نشده، loader دوباره اجرا می‌شود
         val v2 = cache.getOrPut("key1", loader)
         assertNull(v2)
@@ -96,7 +101,7 @@ class CacheTest {
         val cache = TtlCache<String>(SHORT_TTL * 10)
         cache.put("key1", "value1")
         assertEquals("value1", cache.get("key1"))
-        
+
         cache.invalidate("key1")
         assertNull(cache.get("key1"))
     }
@@ -108,7 +113,7 @@ class CacheTest {
         cache.put("k2", "v2")
         cache.put("k3", "v3")
         assertEquals(3, cache.size())
-        
+
         cache.clear()
         assertEquals(0, cache.size())
         assertNull(cache.get("k1"))
@@ -118,13 +123,13 @@ class CacheTest {
     fun `prune removes expired entries but keeps fresh ones`() {
         val cache = TtlCache<String>(SHORT_TTL)
         cache.put("old", "value1")
-        
+
         Thread.sleep(SHORT_TTL + 50) // صبر برای انقضای "old"
-        
+
         cache.put("fresh", "value2") // این تازه است
-        
+
         cache.prune()
-        
+
         assertNull("old باید حذف شود", cache.get("old"))
         assertEquals("fresh باید باقی بماند", "value2", cache.get("fresh"))
     }
@@ -147,13 +152,13 @@ class CacheTest {
         val latch = CountDownLatch(threads)
         val loadCount = AtomicInteger(0)
         val results = java.util.concurrent.ConcurrentLinkedQueue<String>()
-        
+
         val loader: () -> String = {
             loadCount.incrementAndGet()
             Thread.sleep(10) // شبیه‌سازی کار طولانی (API call)
             "shared_value"
         }
-        
+
         repeat(threads) {
             pool.submit {
                 try {
@@ -164,17 +169,17 @@ class CacheTest {
                 }
             }
         }
-        
+
         assertTrue(latch.await(5, TimeUnit.SECONDS))
         pool.shutdown()
-        
+
         // همه threadها مقدار یکسان گرفتند
         assertEquals("همه threadها باید مقدار یکسان بگیرند", 1, results.toSet().size)
         assertEquals("shared_value", results.first())
-        
+
         // loader حداقل یکبار اجرا شده (ممکن است چند بار به‌خاطر race)
         assertTrue("loader حداقل یکبار اجرا شده", loadCount.get() >= 1)
-        
+
         // cache فقط یک entry دارد
         assertEquals(1, cache.size())
     }
@@ -185,7 +190,7 @@ class CacheTest {
         val pool = Executors.newFixedThreadPool(8)
         val threads = 100
         val latch = CountDownLatch(threads)
-        
+
         repeat(threads) { i ->
             pool.submit {
                 try {
@@ -195,10 +200,10 @@ class CacheTest {
                 }
             }
         }
-        
+
         assertTrue(latch.await(5, TimeUnit.SECONDS))
         pool.shutdown()
-        
+
         assertEquals(threads, cache.size())
         repeat(threads) { i ->
             assertEquals("value_$i", cache.get("key_$i"))
@@ -209,14 +214,66 @@ class CacheTest {
     fun `size reflects current entries`() {
         val cache = TtlCache<String>(SHORT_TTL * 10)
         assertEquals(0, cache.size())
-        
+
         cache.put("k1", "v1")
         assertEquals(1, cache.size())
-        
+
         cache.put("k2", "v2")
         assertEquals(2, cache.size())
-        
+
         cache.invalidate("k1")
         assertEquals(1, cache.size())
+    }
+
+    // ================= تست‌های P1-4: سقف حافظه و eviction =================
+
+    /**
+     * 🚀 P1-4: وقتی maxEntries پر شد، put باید قدیمی‌ترین entry را حذف کند.
+     * انتظار: size روی maxEntries می‌ماند، قدیمی‌ترین حذف می‌شود، بقیه می‌مانند.
+     */
+    @Test
+    fun `put evicts oldest entry when maxEntries reached`() {
+        val cache = TtlCache<String>(SHORT_TTL * 100, maxEntries = 3)
+        cache.put("a", "1")
+        Thread.sleep(5)
+        cache.put("b", "2")
+        Thread.sleep(5)
+        cache.put("c", "3")
+        assertEquals(3, cache.size())
+
+        // d تازه‌تر از همه است → a قدیمی‌ترین می‌شود و evict می‌شود
+        cache.put("d", "4")
+        assertEquals("size باید روی maxEntries بماند", 3, cache.size())
+        assertNull("قدیمی‌ترین (a) باید evict شده باشد", cache.get("a"))
+        assertEquals("b", cache.get("b"))
+        assertEquals("c", cache.get("c"))
+        assertEquals("d", cache.get("d"))
+    }
+
+    /**
+     * 🚀 P1-4: put روی key موجود eviction نمی‌کند (update است، نه insert).
+     */
+    @Test
+    fun `put updates existing key without triggering eviction`() {
+        val cache = TtlCache<String>(SHORT_TTL * 100, maxEntries = 3)
+        cache.put("a", "1")
+        cache.put("b", "2")
+        cache.put("c", "3")
+
+        cache.put("a", "1-updated")
+        assertEquals("size باید بدون تغییر بماند", 3, cache.size())
+        assertEquals("1-updated", cache.get("a"))
+        assertEquals("b", cache.get("b"))
+        assertEquals("c", cache.get("c"))
+    }
+
+    /**
+     * 🚀 P1-4: KlineCache سقف معقول دارد (نه خیلی کوچک نه خیلی بزرگ).
+     */
+    @Test
+    fun `KlineCache has sensible max size`() {
+        val max = KlineCache.maxSize()
+        assertTrue("KlineCache maxSize باید حداقل ۱۰۰ باشد (کافی برای TOP_SYMBOLS + buffer)", max >= 100)
+        assertTrue("KlineCache maxSize نباید از ۱۰۰۰ بیشتر باشد (جلوگیری از مصرف بی‌رویه حافظه)", max <= 1000)
     }
 }
