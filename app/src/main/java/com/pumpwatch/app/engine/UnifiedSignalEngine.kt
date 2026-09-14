@@ -34,11 +34,29 @@ data class UnifiedSignalResult(
     val stopLoss: Double,
     val target1: Double,
     val target2: Double,
-    val reasons: List<String>
+    val reasons: List<String>,
+    // P0-6: زمان بسته شدن آخرین کندلی که سیگنال بر اساس آن صادر شده (epoch millis).
+    // برای شفافیت در UI/لاگ و جلوگیری از سیگنال‌های «کندل ناتمام».
+    val candleCloseTs: Long = 0L
 )
 
 object UnifiedSignalEngine {
 
+    /**
+     * تحلیل سیگنال قطعی.
+     *
+     * 🟢 P0-6 — سیگنال فقط با کندل بسته:
+     *  - آخرین کندل ورودی (candles1h.last()) همیشه "در حال تشکیل" است
+     *    چون klines آن را برمی‌گرداند قبل از بسته شدن.
+     *  - این تابع به‌طور خودکار آخرین کندل را حذف می‌کند و تحلیل را
+     *    **فقط روی کندل‌های بسته‌شده** انجام می‌دهد.
+     *  - بنابراین سیگنال قطعی فقط زمانی صادر می‌شود که یک کندل کامل بسته شده باشد.
+     *  - `candleCloseTs` در نتیجه = زمان بسته شدن آن کندل؛ اگر صفر بود
+     *    (مثلاً مصرف‌کننده time را پر نکرده)، از System.currentTimeMillis استفاده می‌شود.
+     *
+     * مصرف‌کننده‌ها (QuickScanner، BatchScanner، SpotEngine، TradesScreen) نیازی
+     * به تغییر ندارند — این تابع به‌طور خودکار آخرین ردیف را کنار می‌گذارد.
+     */
     fun analyze(
         coinId: String,
         symbol: String,
@@ -48,23 +66,27 @@ object UnifiedSignalEngine {
         funding: Double? = null,
         params: UnifiedSignalParams = UnifiedSignalParams()
     ): UnifiedSignalResult? {
-        // ✅ اصلاح باگ ۱: حداقل ۶۰ کندل کافی است (قبلاً ۱۰۰ بود و باعث می‌شد
-        // برش‌های no-lookahead در بک‌تست هرگز به ۱۰۰ نرسند → همیشه null → صفر معامله)
-        // همهٔ چک‌های داخلی (مثل closes4h.size >= 60) گارد اندازهٔ خودشان را دارند.
-        if (candles1h.size < 60) return null
+        // P0-6: حذف کندلِ در حال تشکیل — سیگنال قطعی فقط پس از close
+        if (candles1h.size < 61) return null
+        val closed = candles1h.dropLast(1)
+        if (closed.size < 60) return null
 
-        val closes = Indicators.closes(candles1h)
-        val volumes = candles1h.map { it.volume }
-        val price = closes.last()
+        // timestamp بسته شدن آخرین کندل معتبر
+        val lastClosedTime = closed.last().time
+        val candleCloseTs = if (lastClosedTime > 0L) lastClosedTime else System.currentTimeMillis()
+
+        val closes = Indicators.closes(closed)
+        val volumes = closed.map { it.volume }
+        val price = closes.last()  // حالا آخرین close بسته‌شده است (نه کندل forming)
 
         // ۱. لایه تشخیص رژیم بازار (Daily/4H) - الهام گرفته از SpotEngine
-        val c4h = Indicators.aggregate(candles1h, 4)
-        val cD = Indicators.aggregate(candles1h, 24)
+        val c4h = Indicators.aggregate(closed, 4)
+        val cD = Indicators.aggregate(closed, 24)
         val closes4h = Indicators.closes(c4h)
         val closesD = Indicators.closes(cD)
 
-        val t1hUp = Indicators.emaLast(closes, 20) > Indicators.emaLast(closes, 50) && Indicators.supertrend(candles1h).direction > 0
-        val t1hDn = Indicators.emaLast(closes, 20) < Indicators.emaLast(closes, 50) && Indicators.supertrend(candles1h).direction < 0
+        val t1hUp = Indicators.emaLast(closes, 20) > Indicators.emaLast(closes, 50) && Indicators.supertrend(closed).direction > 0
+        val t1hDn = Indicators.emaLast(closes, 20) < Indicators.emaLast(closes, 50) && Indicators.supertrend(closed).direction < 0
 
         val t4hUp = closes4h.size >= 60 && Indicators.emaLast(closes4h, 50) > Indicators.emaLast(closes4h, 200)
         val t4hDn = closes4h.size >= 60 && Indicators.emaLast(closes4h, 50) < Indicators.emaLast(closes4h, 200)
@@ -77,18 +99,18 @@ object UnifiedSignalEngine {
         val mtfAligned = mtfUp || mtfDn
         val mtfTrend = if (mtfUp) "UP" else if (mtfDn) "DOWN" else "MIX"
 
-        // ۲. لایه تشخیص Setup و اندیکاتورها
+        // ۲. لایه تشخیص Setup و اندیکاتورها — همه روی closed
         val rsi = Indicators.rsi(closes, params.rsiPeriod)
-        val adx = Indicators.adx(candles1h)
-        val atr = Indicators.atr(candles1h)
+        val adx = Indicators.adx(closed)
+        val atr = Indicators.atr(closed)
         val volRatio = Indicators.volumeRatio(volumes)
         val macd = Indicators.macd(closes)
         val macdPrev = Indicators.macd(closes.dropLast(1))
-        val st = Indicators.supertrend(candles1h)
+        val st = Indicators.supertrend(closed)
 
         val lookback = params.breakoutLookback
-        val prevHigh = candles1h.dropLast(1).takeLast(lookback).maxOf { it.high }
-        val prevLow = candles1h.dropLast(1).takeLast(lookback).minOf { it.low }
+        val prevHigh = closed.takeLast(lookback).maxOf { it.high }
+        val prevLow = closed.takeLast(lookback).minOf { it.low }
         val breakout = price > prevHigh
         val breakdown = price < prevLow
 
@@ -152,7 +174,7 @@ object UnifiedSignalEngine {
 
         // ۴. مدیریت ریسک و خروجی
         val risk = atr * params.atrMult
-        val entry = price
+        val entry = price  // آخرین close بسته‌شده
         val stopLoss = if (side == "DUMP") price + risk else price - risk
         val target1 = if (side == "DUMP") price - risk * params.rr else price + risk * params.rr
         val target2 = if (side == "DUMP") price - risk * params.rr * 2.0 else price + risk * params.rr * 2.0
@@ -160,7 +182,8 @@ object UnifiedSignalEngine {
         return UnifiedSignalResult(
             coinId, symbol, name, price, mode, side, score, golden,
             mtfAligned, mtfTrend, adx, rsi, volRatio, funding,
-            entry, stopLoss, target1, target2, reasons
+            entry, stopLoss, target1, target2, reasons,
+            candleCloseTs = candleCloseTs
         )
     }
 }
