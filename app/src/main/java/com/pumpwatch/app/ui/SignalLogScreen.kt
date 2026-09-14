@@ -73,13 +73,12 @@ fun SignalLogScreen() {
     var lastScores by remember { mutableStateOf("") }
     var optReport by remember { mutableStateOf<OptReport?>(null) }
 
-    // 🚀 Sprint 5: state قوانین هشدار سفارشی
     var rules by remember { mutableStateOf<List<AlertRule>>(emptyList()) }
     var rulesOpen by remember { mutableStateOf(false) }
     var ruleSymbol by remember { mutableStateOf("") }
     var ruleCondition by remember { mutableStateOf(RuleCondition.PRICE_ABOVE) }
     var ruleThreshold by remember { mutableStateOf("") }
-    var ruleMenuOpen by remember { mutableStateOf(false) }
+    var conditionDialogOpen by remember { mutableStateOf(false) }
     var ruleMsg by remember { mutableStateOf("") }
 
     fun loadLogs() {
@@ -100,7 +99,6 @@ fun SignalLogScreen() {
         reloadRules()
         lastScores = prefs.getString("last_scores", "") ?: ""
 
-        // 🚀 Sprint 4: تریگر بهینه‌سازی Walk-Forward
         try {
             optReport = WalkForwardOptimizer.loadReport(ctx)
             val current = SignalLogger.load(ctx)
@@ -186,7 +184,6 @@ fun SignalLogScreen() {
             }
         }
 
-        // داشبورد واحد عملکرد استراتژی
         Card(
             colors = CardDefaults.cardColors(containerColor = LC),
             shape = RoundedCornerShape(14.dp),
@@ -233,7 +230,7 @@ fun SignalLogScreen() {
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
-                )
+                }
 
                 Text(
                     "🎯 استراتژی: استاپ دنباله‌رو (Trailing) + هدف شناور. تا وقتی استاپ نخوره، پوزیشن باز می‌مونه.",
@@ -255,7 +252,6 @@ fun SignalLogScreen() {
             }
         }
 
-        // کارت گزارش بهینه‌سازی Walk-Forward
         optReport?.let { r ->
             Card(
                 colors = CardDefaults.cardColors(containerColor = LC),
@@ -289,7 +285,6 @@ fun SignalLogScreen() {
             }
         }
 
-        // 🚀 Sprint 5: کارت قوانین هشدار سفارشی (جمع‌شونده)
         Card(
             colors = CardDefaults.cardColors(containerColor = LC),
             shape = RoundedCornerShape(14.dp),
@@ -307,7 +302,6 @@ fun SignalLogScreen() {
                 }
 
                 if (rulesOpen) {
-                    // لیست قوانین موجود
                     if (rules.isEmpty()) {
                         Text("هنوز قانونی نساختی — مثلاً: BTC قیمت بالای X، یا * فاندینگ زیر -0.0003", fontSize = 9.sp, color = LGr)
                     }
@@ -345,9 +339,8 @@ fun SignalLogScreen() {
                         }
                     }
 
-                    HorizontalDivider(color = LGr.copy(alpha = 0.3f))
+                    Divider(color = LGr.copy(alpha = 0.3f), thickness = 1.dp)
 
-                    // فرم افزودن قانون جدید
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextField(
                             value = ruleSymbol,
@@ -357,21 +350,11 @@ fun SignalLogScreen() {
                             shape = RoundedCornerShape(8.dp),
                             singleLine = true
                         )
-                        Box {
-                            Button(
-                                onClick = { ruleMenuOpen = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = LC),
-                                shape = RoundedCornerShape(8.dp)
-                            ) { Text(ruleCondition.label, fontSize = 10.sp) }
-                            DropdownMenu(expanded = ruleMenuOpen, onDismissRequest = { ruleMenuOpen = false }) {
-                                RuleCondition.values().forEach { c ->
-                                    DropdownMenuItem(
-                                        text = { Text(c.label, fontSize = 11.sp) },
-                                        onClick = { ruleCondition = c; ruleMenuOpen = false }
-                                    )
-                                }
-                            }
-                        }
+                        Button(
+                            onClick = { conditionDialogOpen = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = LC),
+                            shape = RoundedCornerShape(8.dp)
+                        ) { Text(ruleCondition.label, fontSize = 10.sp) }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextField(
@@ -485,5 +468,29 @@ fun SignalLogScreen() {
                 }
             }
         }
+    }
+
+    if (conditionDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { conditionDialogOpen = false },
+            title = { Text("شرط قانون را انتخاب کنید", fontSize = 14.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    RuleCondition.values().forEach { c ->
+                        Button(
+                            onClick = {
+                                ruleCondition = c
+                                conditionDialogOpen = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LC),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(c.label, fontSize = 11.sp) }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { conditionDialogOpen = false }) { Text("بستن") }
+            }
+        )
     }
 }
