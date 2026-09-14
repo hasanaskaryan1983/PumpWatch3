@@ -21,11 +21,19 @@ import kotlin.math.abs
  *
  * P0-6: استانداردسازی Candle.time = زمان بسته شدن کندل (نه باز شدن)
  * 🚀 P1-1: کندل‌های Binance از KlineCache (TTL=60s) خوانده می‌شوند
+ * 🚀 P1-2: هم‌روندی ۱۰ + delay هوشمند بین chunkها (فقط وقتی شبکه واقعاً استفاده شده)
  */
 object BatchScanner {
 
     private const val TAG = "BatchScanner"
     private val STABLES = setOf("USDT", "USDC", "DAI", "FDUSD", "TUSD", "BUSD", "TETHER", "USDCOIN")
+
+    // 🚀 P1-2: هم‌روندی — ۱۰ برای Binance ایمن است (limit ~۱۲۰۰ weight/min، klines ≈ ۲ weight)
+    private const val PARALLELISM = 10
+
+    // 🚀 P1-2: تأخیر بین chunkها فقط وقتی اعمال می‌شود که chunk کند بوده (یعنی شبکه رفته)
+    private const val CHUNK_DELAY_MS = 150L
+    private const val CACHED_CHUNK_THRESHOLD_MS = 100L
 
     suspend fun scan(
         mode: String,
@@ -51,7 +59,9 @@ object BatchScanner {
             Log.d(TAG, "🎯 candidates: ${candidates.size}")
 
             val results = mutableListOf<SignalResult>()
-            candidates.chunked(5).forEach { chunk ->
+            candidates.chunked(PARALLELISM).forEach { chunk ->
+                // 🚀 P1-2: اندازه‌گیری زمان chunk برای تصمیم هوشمند دربارهٔ delay
+                val chunkStart = System.currentTimeMillis()
                 val part = coroutineScope {
                     chunk.map { m ->
                         async(Dispatchers.IO) {
@@ -65,7 +75,12 @@ object BatchScanner {
                     }.awaitAll()
                 }
                 results.addAll(part.filterNotNull())
-                delay(300)
+
+                // delay هوشمند: اگر chunk سریع بود (= همه از KlineCache)، فشاری روی Binance نبوده → بدون delay
+                val chunkElapsed = System.currentTimeMillis() - chunkStart
+                if (chunkElapsed >= CACHED_CHUNK_THRESHOLD_MS) {
+                    delay(CHUNK_DELAY_MS)
+                }
             }
 
             Log.d(TAG, "✅ scan done: ${results.size}")
@@ -87,6 +102,7 @@ object BatchScanner {
             } catch (e: Exception) {
                 Log.w(TAG, "page $p failed: ${e.message}")
             }
+            // ⚠️ دست‌نخورده: الزام rate limit کوین‌گکو free tier
             if (p < pages) delay(500)
         }
         return out
