@@ -1,6 +1,8 @@
 package com.pumpwatch.app.ui
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.DataExporter
+import com.pumpwatch.app.engine.DataImporter
 import com.pumpwatch.app.engine.ExportResult
 import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.OptReport
@@ -84,7 +87,6 @@ fun SignalLogScreen() {
     var conditionDialogOpen by remember { mutableStateOf(false) }
     var ruleMsg by remember { mutableStateOf("") }
 
-    // 🚀 Sprint 6: state پشتیبان‌گیری
     var backupOpen by remember { mutableStateOf(false) }
     var backupMsg by remember { mutableStateOf("") }
 
@@ -101,7 +103,6 @@ fun SignalLogScreen() {
         rules = AlertRulesStore.load(ctx)
     }
 
-    // 🚀 Sprint 6: اشتراک‌گذاری خروجی export از طریق chooser اندروید
     fun shareExport(res: ExportResult) {
         try {
             val chooser = Intent.createChooser(
@@ -112,6 +113,29 @@ fun SignalLogScreen() {
             backupMsg = "✅ ${res.signalCount} سیگنال / ${res.walletCount} کیف آمادهٔ اشتراک شد"
         } catch (_: Exception) {
             backupMsg = "❌ اشتراک‌گذاری ممکن نشد"
+        }
+    }
+
+    // 🚀 Sprint 6: فایل‌پیکر SAF برای بازیابی پشتیبان
+    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try {
+                val text = ctx.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()?.use { it.readText() } ?: ""
+                val rep = DataImporter.importJson(ctx, text)
+                backupMsg = if (rep.ok) {
+                    "✅ بازیابی شد: ${rep.signalsAdded} سیگنال + ${rep.walletsAdded} کیف اضافه شد" +
+                            " (${rep.signalsSkipped + rep.walletsSkipped} تکراری رد شد)"
+                } else {
+                    "❌ بازیابی ناموفق: ${rep.error ?: "خطای ناشناخته"}"
+                }
+                if (rep.ok) {
+                    loadLogs()
+                    reloadRules()
+                }
+            } catch (_: Exception) {
+                backupMsg = "❌ خواندن فایل ممکن نشد"
+            }
         }
     }
 
@@ -338,7 +362,7 @@ fun SignalLogScreen() {
                                 Text(
                                     when {
                                         !r.enabled -> "خاموش ⚪"
-                                        AlertRulesStore.inCooldown(r, System.currentTimeMillis()) -> "فعال ✅ ولی در دورهٔ سکوت "
+                                        AlertRulesStore.inCooldown(r, System.currentTimeMillis()) -> "فعال ✅ ولی در دورهٔ سکوت"
                                         else -> "فعال ✅"
                                     },
                                     fontSize = 9.sp,
@@ -409,7 +433,7 @@ fun SignalLogScreen() {
             }
         }
 
-        // 🚀 Sprint 6: کارت پشتیبان‌گیری و انتقال
+        // 💾 پشتیبان‌گیری و انتقال
         Card(
             colors = CardDefaults.cardColors(containerColor = LC),
             shape = RoundedCornerShape(14.dp),
@@ -448,6 +472,13 @@ fun SignalLogScreen() {
                             modifier = Modifier.weight(1f)
                         ) { Text("📤 کامل", fontSize = 10.sp) }
                     }
+                    // 🚀 Sprint 6: دکمهٔ بازیابی از فایل
+                    Button(
+                        onClick = { importPicker.launch(arrayOf("*/*")) },
+                        colors = ButtonDefaults.buttonColors(containerColor = LG),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("📥 بازیابی از فایل پشتیبان", fontSize = 11.sp) }
                     if (backupMsg.isNotEmpty()) Text(backupMsg, fontSize = 9.sp, color = if (backupMsg.startsWith("✅")) LG else LR)
                 }
             }
