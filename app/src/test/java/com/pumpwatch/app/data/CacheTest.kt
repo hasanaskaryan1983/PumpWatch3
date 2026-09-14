@@ -1,7 +1,6 @@
 package com.pumpwatch.app.data
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -15,6 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * P1-1: TTL lazy expiry، thread-safety، prune، invalidate/clear، getOrPut
  * P1-4: maxEntries با eviction، update بدون eviction، KlineCache bounds
+ *
+ * ⚠️ نکتهٔ درس‌گرفته: انتظارها باید «مقدار ذخیره‌شده» باشند، نه رشتهٔ کلید!
  */
 class CacheTest {
 
@@ -151,9 +152,7 @@ class CacheTest {
 
         assertEquals("همه threadها باید مقدار یکسان بگیرند", 1, results.toSet().size)
         assertEquals("shared_value", results.first())
-
         assertTrue("loader حداقل یکبار اجرا شده", loadCount.get() >= 1)
-
         assertEquals(1, cache.size())
     }
 
@@ -202,7 +201,7 @@ class CacheTest {
 
     /**
      * 🚀 P1-4: وقتی maxEntries پر شد، put باید قدیمی‌ترین entry را حذف کند.
-     * LinkedHashMap + @Synchronized → deterministic eviction.
+     * توجه: انتظارها «مقدار ذخیره‌شده» هستند: a→"1"، b→"2"، c→"3"، d→"4"
      */
     @Test
     fun `put evicts oldest entry when maxEntries reached`() {
@@ -215,14 +214,13 @@ class CacheTest {
         cache.put("d", "4")
         assertEquals("size باید روی maxEntries بماند", 3, cache.size())
         assertNull("قدیمی‌ترین (a) باید evict شده باشد", cache.get("a"))
-        assertEquals("b", cache.get("b"))
-        assertEquals("c", cache.get("c"))
-        assertEquals("d", cache.get("d"))
+        assertEquals("2", cache.get("b"))
+        assertEquals("3", cache.get("c"))
+        assertEquals("4", cache.get("d"))
     }
 
     /**
-     * 🚀 P1-4: put روی key موجود eviction نمی‌کند (update است، نه insert).
-     * entry به انتهای order می‌رود (LRU-like).
+     * 🚀 P1-4: put روی key موجود eviction نمی‌کند و آن را به انتهای order می‌برد (LRU).
      */
     @Test
     fun `put updates existing key without triggering eviction`() {
@@ -234,16 +232,16 @@ class CacheTest {
         cache.put("a", "1-updated")
         assertEquals("size باید بدون تغییر بماند", 3, cache.size())
         assertEquals("1-updated", cache.get("a"))
-        assertEquals("b", cache.get("b"))
-        assertEquals("c", cache.get("c"))
+        assertEquals("2", cache.get("b"))
+        assertEquals("3", cache.get("c"))
 
-        // حالا یک entry جدید اضافه کنیم: b باید evict شود (چون a تازه‌تر شد)
+        // حالا entry جدید: قدیمی‌ترین در order فعلی = b (چون a تازه‌تر شده)
         cache.put("d", "4")
         assertEquals(3, cache.size())
-        assertNull("b باید evict شود چون a به‌روز شد و c و d تازه‌ترند", cache.get("b"))
+        assertNull("b باید evict شود (قدیمی‌ترین در order فعلی)", cache.get("b"))
         assertEquals("1-updated", cache.get("a"))
-        assertEquals("c", cache.get("c"))
-        assertEquals("d", cache.get("d"))
+        assertEquals("3", cache.get("c"))
+        assertEquals("4", cache.get("d"))
     }
 
     /**
