@@ -1,5 +1,6 @@
 package com.pumpwatch.app.ui
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
+import com.pumpwatch.app.engine.DataExporter
+import com.pumpwatch.app.engine.ExportResult
 import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.OptReport
 import com.pumpwatch.app.engine.QuickScanner
@@ -81,6 +84,10 @@ fun SignalLogScreen() {
     var conditionDialogOpen by remember { mutableStateOf(false) }
     var ruleMsg by remember { mutableStateOf("") }
 
+    // 🚀 Sprint 6: state پشتیبان‌گیری
+    var backupOpen by remember { mutableStateOf(false) }
+    var backupMsg by remember { mutableStateOf("") }
+
     fun loadLogs() {
         scope.launch {
             val l = SignalLogger.load(ctx)
@@ -92,6 +99,20 @@ fun SignalLogScreen() {
 
     fun reloadRules() {
         rules = AlertRulesStore.load(ctx)
+    }
+
+    // 🚀 Sprint 6: اشتراک‌گذاری خروجی export از طریق chooser اندروید
+    fun shareExport(res: ExportResult) {
+        try {
+            val chooser = Intent.createChooser(
+                DataExporter.buildShareIntent(res),
+                "اشتراک پشتیبان PumpWatch"
+            )
+            ctx.startActivity(chooser)
+            backupMsg = "✅ ${res.signalCount} سیگنال / ${res.walletCount} کیف آمادهٔ اشتراک شد"
+        } catch (_: Exception) {
+            backupMsg = "❌ اشتراک‌گذاری ممکن نشد"
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -317,7 +338,7 @@ fun SignalLogScreen() {
                                 Text(
                                     when {
                                         !r.enabled -> "خاموش ⚪"
-                                        AlertRulesStore.inCooldown(r, System.currentTimeMillis()) -> "فعال ✅ ولی در دورهٔ سکوت ⏳"
+                                        AlertRulesStore.inCooldown(r, System.currentTimeMillis()) -> "فعال ✅ ولی در دورهٔ سکوت "
                                         else -> "فعال ✅"
                                     },
                                     fontSize = 9.sp,
@@ -384,6 +405,50 @@ fun SignalLogScreen() {
                         ) { Text("➕ افزودن", fontSize = 10.sp) }
                     }
                     if (ruleMsg.isNotEmpty()) Text(ruleMsg, fontSize = 9.sp, color = if (ruleMsg.startsWith("✅")) LG else LR)
+                }
+            }
+        }
+
+        // 🚀 Sprint 6: کارت پشتیبان‌گیری و انتقال
+        Card(
+            colors = CardDefaults.cardColors(containerColor = LC),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("💾 پشتیبان‌گیری و انتقال", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LBlue)
+                    Spacer(Modifier.weight(1f))
+                    Button(
+                        onClick = { backupOpen = !backupOpen },
+                        colors = ButtonDefaults.buttonColors(containerColor = LC),
+                        shape = RoundedCornerShape(6.dp)
+                    ) { Text(if (backupOpen) "▾ بستن" else "▸ باز کردن", fontSize = 10.sp) }
+                }
+
+                if (backupOpen) {
+                    Text("خروجی JSON خوانا از طریق منوی اشتراک اندروید (تلگرام، جیمیل، درایو و...)", fontSize = 9.sp, color = LGr)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            onClick = { shareExport(DataExporter.exportSignals(ctx)) },
+                            colors = ButtonDefaults.buttonColors(containerColor = LC),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("📤 سیگنال‌ها", fontSize = 10.sp) }
+                        Button(
+                            onClick = { shareExport(DataExporter.exportWallets(ctx)) },
+                            colors = ButtonDefaults.buttonColors(containerColor = LC),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("📤 کیف‌ها", fontSize = 10.sp) }
+                        Button(
+                            onClick = { shareExport(DataExporter.exportAll(ctx)) },
+                            colors = ButtonDefaults.buttonColors(containerColor = LBlue),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("📤 کامل", fontSize = 10.sp) }
+                    }
+                    if (backupMsg.isNotEmpty()) Text(backupMsg, fontSize = 9.sp, color = if (backupMsg.startsWith("✅")) LG else LR)
                 }
             }
         }
