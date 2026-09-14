@@ -202,15 +202,13 @@ class CacheTest {
 
     /**
      * 🚀 P1-4: وقتی maxEntries پر شد، put باید قدیمی‌ترین entry را حذف کند.
-     * Thread.sleep(20) برای اطمینان از nanoTime متفاوت بین putها.
+     * LinkedHashMap + @Synchronized → deterministic eviction.
      */
     @Test
     fun `put evicts oldest entry when maxEntries reached`() {
         val cache = TtlCache<String>(SHORT_TTL * 100, maxEntries = 3)
         cache.put("a", "1")
-        Thread.sleep(20)
         cache.put("b", "2")
-        Thread.sleep(20)
         cache.put("c", "3")
         assertEquals(3, cache.size())
 
@@ -224,22 +222,28 @@ class CacheTest {
 
     /**
      * 🚀 P1-4: put روی key موجود eviction نمی‌کند (update است، نه insert).
+     * entry به انتهای order می‌رود (LRU-like).
      */
     @Test
     fun `put updates existing key without triggering eviction`() {
         val cache = TtlCache<String>(SHORT_TTL * 100, maxEntries = 3)
         cache.put("a", "1")
-        Thread.sleep(20)
         cache.put("b", "2")
-        Thread.sleep(20)
         cache.put("c", "3")
-        Thread.sleep(20)
 
         cache.put("a", "1-updated")
         assertEquals("size باید بدون تغییر بماند", 3, cache.size())
         assertEquals("1-updated", cache.get("a"))
         assertEquals("b", cache.get("b"))
         assertEquals("c", cache.get("c"))
+
+        // حالا یک entry جدید اضافه کنیم: b باید evict شود (چون a تازه‌تر شد)
+        cache.put("d", "4")
+        assertEquals(3, cache.size())
+        assertNull("b باید evict شود چون a به‌روز شد و c و d تازه‌ترند", cache.get("b"))
+        assertEquals("1-updated", cache.get("a"))
+        assertEquals("c", cache.get("c"))
+        assertEquals("d", cache.get("d"))
     }
 
     /**
