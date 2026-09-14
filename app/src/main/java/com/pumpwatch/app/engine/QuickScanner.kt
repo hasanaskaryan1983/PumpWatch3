@@ -13,6 +13,9 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.BinanceFutures
 import com.pumpwatch.app.ui.PaperState
 import com.pumpwatch.app.ui.PaperTrade
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.min
 
 data class ScanReport(
@@ -29,6 +32,9 @@ object QuickScanner {
         "TIA", "ORDI", "RUNE", "FET", "GRT", "AAVE", "MKR", "SNX", "CRV", "LDO",
         "PEPE", "WIF", "BONK", "FLOKI", "TON", "JUP", "PYTH", "WLD", "RENDER", "TAO"
     )
+
+    // P0-6: فرمت نمایش زمان بسته شدن کندل (HH:mm) برای Notification و لاگ
+    private val closeTimeFmt = SimpleDateFormat("HH:mm", Locale.US)
 
     suspend fun scan(ctx: Context, symbols: List<String>, mode: String): ScanReport {
         return if (mode == "FUTURES") scanFutures(ctx, symbols) else scanSpot(ctx, symbols)
@@ -76,8 +82,17 @@ object QuickScanner {
                     continue
                 }
                 
-                val candles = klines.mapIndexed { index, k -> 
-                    Candle(time = 0L, open = k[1].asDouble, high = k[2].asDouble, low = k[3].asDouble, close = k[4].asDouble, volume = k[5].asDouble)
+                // P0-6: پر کردن Candle.time از k[6] (close time رسمی Binance)
+                // این باعث می‌شود UnifiedSignalEngine بتواند candleCloseTs دقیق تولید کند.
+                val candles = klines.map { k -> 
+                    Candle(
+                        time = k[6].asLong,
+                        open = k[1].asDouble,
+                        high = k[2].asDouble,
+                        low = k[3].asDouble,
+                        close = k[4].asDouble,
+                        volume = k[5].asDouble
+                    )
                 }
 
                 val funding = try { BinanceFutures.api.premiumIndex("${symbol}USDT").lastFundingRate?.toDoubleOrNull() } catch (_: Exception) { null }
@@ -89,14 +104,20 @@ object QuickScanner {
                 )
 
                 if (signal != null && signal.side != "NONE") {
-                    lines.add("$symbol | ${signal.side} | Score: ${signal.score} | ${signal.reasons.firstOrNull() ?: "Setup فعال"}")
+                    // P0-6: نمایش زمان بسته شدن کندل در لاگ
+                    val closeText = if (signal.candleCloseTs > 0L) {
+                        closeTimeFmt.format(Date(signal.candleCloseTs))
+                    } else "?"
+                    lines.add("$symbol | ${signal.side} | Score: ${signal.score} | $closeText | ${signal.reasons.firstOrNull() ?: "Setup فعال"}")
                     
+                    // P0-6: لاگ با timestamp بسته شدن کندل (نه زمان اسکن)
                     val logged = SignalLogger.log(
                         ctx,
                         LoggedSignal(
                             symbol = symbol, side = signal.side, score = signal.score,
                             entry = signal.entry, stop = signal.stopLoss, target = signal.target1,
-                            time = System.currentTimeMillis(), mode = "FUT"
+                            time = if (signal.candleCloseTs > 0L) signal.candleCloseTs else System.currentTimeMillis(),
+                            mode = "FUT"
                         )
                     )
                     
@@ -108,7 +129,7 @@ object QuickScanner {
                     }
 
                     if (signal.golden) {
-                        sendNotification(ctx, symbol, signal.score, signal.side, signal.price, "FUT", signal.reasons)
+                        sendNotification(ctx, symbol, signal.score, signal.side, signal.price, "FUT", signal.reasons, signal.candleCloseTs)
                     }
                 } else {
                     lines.add("$symbol | NONE")
@@ -132,8 +153,16 @@ object QuickScanner {
                     continue
                 }
                 
-                val candles = klines.mapIndexed { index, k -> 
-                    Candle(time = 0L, open = k[1].asDouble, high = k[2].asDouble, low = k[3].asDouble, close = k[4].asDouble, volume = k[5].asDouble)
+                // P0-6: پر کردن Candle.time از k[6] (close time رسمی Binance)
+                val candles = klines.map { k -> 
+                    Candle(
+                        time = k[6].asLong,
+                        open = k[1].asDouble,
+                        high = k[2].asDouble,
+                        low = k[3].asDouble,
+                        close = k[4].asDouble,
+                        volume = k[5].asDouble
+                    )
                 }
 
                 val signal = UnifiedSignalEngine.analyze(
@@ -143,14 +172,20 @@ object QuickScanner {
                 )
 
                 if (signal != null && signal.side != "NONE") {
-                    lines.add("$symbol | ${signal.side} | Score: ${signal.score} | ${signal.reasons.firstOrNull() ?: "Setup فعال"}")
+                    // P0-6: نمایش زمان بسته شدن کندل در لاگ
+                    val closeText = if (signal.candleCloseTs > 0L) {
+                        closeTimeFmt.format(Date(signal.candleCloseTs))
+                    } else "?"
+                    lines.add("$symbol | ${signal.side} | Score: ${signal.score} | $closeText | ${signal.reasons.firstOrNull() ?: "Setup فعال"}")
                     
+                    // P0-6: لاگ با timestamp بسته شدن کندل
                     val logged = SignalLogger.log(
                         ctx,
                         LoggedSignal(
                             symbol = symbol, side = signal.side, score = signal.score,
                             entry = signal.entry, stop = signal.stopLoss, target = signal.target1,
-                            time = System.currentTimeMillis(), mode = "SPOT"
+                            time = if (signal.candleCloseTs > 0L) signal.candleCloseTs else System.currentTimeMillis(),
+                            mode = "SPOT"
                         )
                     )
                     
@@ -160,7 +195,7 @@ object QuickScanner {
                     }
 
                     if (signal.golden) {
-                        sendNotification(ctx, symbol, signal.score, signal.side, signal.price, "SPOT", signal.reasons)
+                        sendNotification(ctx, symbol, signal.score, signal.side, signal.price, "SPOT", signal.reasons, signal.candleCloseTs)
                     }
                 } else {
                     lines.add("$symbol | NONE")
@@ -174,7 +209,7 @@ object QuickScanner {
 
     private fun sendNotification(
         ctx: Context, symbol: String, score: Int, side: String, price: Double,
-        mode: String, reasons: List<String>
+        mode: String, reasons: List<String>, candleCloseTs: Long = 0L
     ) {
         val channelId = "signal_alerts"
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -199,12 +234,18 @@ object QuickScanner {
         val action = if (side == "PUMP") "خرید قوی" else "فروش قوی"
         val modeText = if (mode == "FUT") "⚡ فیوچرز" else " اسپات"
 
+        // P0-6: زمان بسته شدن کندل در Notification
+        val closeText = if (candleCloseTs > 0L) {
+            "کندل: ${closeTimeFmt.format(Date(candleCloseTs))}\n"
+        } else ""
+
         val notification = NotificationCompat.Builder(ctx, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("$emoji $action: $symbol $modeText")
             .setContentText("امتیاز: $score/100 | قیمت: $$price")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
+                    closeText +
                     "امتیاز: $score/100\n" +
                     reasons.joinToString("\n") + "\nقیمت: $$price"
                 )
