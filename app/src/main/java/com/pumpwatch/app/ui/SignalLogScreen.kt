@@ -16,9 +16,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.engine.AlertRule
+import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.OptReport
 import com.pumpwatch.app.engine.QuickScanner
+import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.engine.WalkForwardOptimizer
 import kotlinx.coroutines.Dispatchers
@@ -68,8 +71,16 @@ fun SignalLogScreen() {
         mutableStateOf(if (prefs.getString("mode", "SPOT") == "FUTURES") "FUT" else "SPOT")
     }
     var lastScores by remember { mutableStateOf("") }
-    // 🚀 Sprint 4: گزارش آخرین بهینه‌سازی Walk-Forward
     var optReport by remember { mutableStateOf<OptReport?>(null) }
+
+    // 🚀 Sprint 5: state قوانین هشدار سفارشی
+    var rules by remember { mutableStateOf<List<AlertRule>>(emptyList()) }
+    var rulesOpen by remember { mutableStateOf(false) }
+    var ruleSymbol by remember { mutableStateOf("") }
+    var ruleCondition by remember { mutableStateOf(RuleCondition.PRICE_ABOVE) }
+    var ruleThreshold by remember { mutableStateOf("") }
+    var ruleMenuOpen by remember { mutableStateOf(false) }
+    var ruleMsg by remember { mutableStateOf("") }
 
     fun loadLogs() {
         scope.launch {
@@ -80,12 +91,16 @@ fun SignalLogScreen() {
         }
     }
 
+    fun reloadRules() {
+        rules = AlertRulesStore.load(ctx)
+    }
+
     LaunchedEffect(Unit) {
         loadLogs()
+        reloadRules()
         lastScores = prefs.getString("last_scores", "") ?: ""
 
         // 🚀 Sprint 4: تریگر بهینه‌سازی Walk-Forward
-        // شرط‌ها: ≥۵۰ سیگنال بسته + (گزارش نیست یا قدیمی‌تر از ۲۴ ساعت)
         try {
             optReport = WalkForwardOptimizer.loadReport(ctx)
             val current = SignalLogger.load(ctx)
@@ -218,7 +233,7 @@ fun SignalLogScreen() {
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     )
-                }
+                )
 
                 Text(
                     "🎯 استراتژی: استاپ دنباله‌رو (Trailing) + هدف شناور. تا وقتی استاپ نخوره، پوزیشن باز می‌مونه.",
@@ -240,7 +255,7 @@ fun SignalLogScreen() {
             }
         }
 
-        // 🚀 Sprint 4: کارت گزارش بهینه‌سازی Walk-Forward
+        // کارت گزارش بهینه‌سازی Walk-Forward
         optReport?.let { r ->
             Card(
                 colors = CardDefaults.cardColors(containerColor = LC),
@@ -270,6 +285,122 @@ fun SignalLogScreen() {
                         "OUT (${r.outSampleSize} سیگنال): وین‌ریت ${String.format(Locale.US, "%.1f%%", r.outWinRate)} | Expectancy ${String.format(Locale.US, "%+.2f%%", r.outExpectancy)}",
                         fontSize = 10.sp, color = LGr
                     )
+                }
+            }
+        }
+
+        // 🚀 Sprint 5: کارت قوانین هشدار سفارشی (جمع‌شونده)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = LC),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🔔 قوانین هشدار سفارشی (${rules.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LY)
+                    Spacer(Modifier.weight(1f))
+                    Button(
+                        onClick = { rulesOpen = !rulesOpen },
+                        colors = ButtonDefaults.buttonColors(containerColor = LC),
+                        shape = RoundedCornerShape(6.dp)
+                    ) { Text(if (rulesOpen) "▾ بستن" else "▸ باز کردن", fontSize = 10.sp) }
+                }
+
+                if (rulesOpen) {
+                    // لیست قوانین موجود
+                    if (rules.isEmpty()) {
+                        Text("هنوز قانونی نساختی — مثلاً: BTC قیمت بالای X، یا * فاندینگ زیر -0.0003", fontSize = 9.sp, color = LGr)
+                    }
+                    rules.forEach { r ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "${r.symbol} • ${r.condition.label} ${fmtPrice(r.threshold)}",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (r.enabled) LG else LGr
+                                )
+                                Text(
+                                    when {
+                                        !r.enabled -> "خاموش ⚪"
+                                        AlertRulesStore.inCooldown(r, System.currentTimeMillis()) -> "فعال ✅ ولی در دورهٔ سکوت ⏳"
+                                        else -> "فعال ✅"
+                                    },
+                                    fontSize = 9.sp,
+                                    color = LGr
+                                )
+                            }
+                            Switch(checked = r.enabled, onCheckedChange = {
+                                AlertRulesStore.toggle(ctx, r.id)
+                                reloadRules()
+                            })
+                            Button(
+                                onClick = {
+                                    AlertRulesStore.delete(ctx, r.id)
+                                    reloadRules()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = LC),
+                                shape = RoundedCornerShape(6.dp)
+                            ) { Text("🗑", fontSize = 10.sp) }
+                        }
+                    }
+
+                    HorizontalDivider(color = LGr.copy(alpha = 0.3f))
+
+                    // فرم افزودن قانون جدید
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextField(
+                            value = ruleSymbol,
+                            onValueChange = { ruleSymbol = it },
+                            placeholder = { Text("نماد یا * (همه)", fontSize = 10.sp) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            singleLine = true
+                        )
+                        Box {
+                            Button(
+                                onClick = { ruleMenuOpen = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = LC),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text(ruleCondition.label, fontSize = 10.sp) }
+                            DropdownMenu(expanded = ruleMenuOpen, onDismissRequest = { ruleMenuOpen = false }) {
+                                RuleCondition.values().forEach { c ->
+                                    DropdownMenuItem(
+                                        text = { Text(c.label, fontSize = 11.sp) },
+                                        onClick = { ruleCondition = c; ruleMenuOpen = false }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextField(
+                            value = ruleThreshold,
+                            onValueChange = { ruleThreshold = it },
+                            placeholder = { Text("آستانه (عدد)", fontSize = 10.sp) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                val thr = ruleThreshold.trim().toDoubleOrNull()
+                                if (thr == null) {
+                                    ruleMsg = "❌ آستانه باید عدد باشد"
+                                } else {
+                                    val sym = ruleSymbol.trim().uppercase(Locale.US).ifEmpty { "*" }
+                                    AlertRulesStore.add(ctx, sym, ruleCondition, thr)
+                                    reloadRules()
+                                    ruleSymbol = ""
+                                    ruleThreshold = ""
+                                    ruleMsg = "✅ قانون اضافه شد"
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = LY),
+                            shape = RoundedCornerShape(8.dp)
+                        ) { Text("➕ افزودن", fontSize = 10.sp) }
+                    }
+                    if (ruleMsg.isNotEmpty()) Text(ruleMsg, fontSize = 9.sp, color = if (ruleMsg.startsWith("✅")) LG else LR)
                 }
             }
         }
