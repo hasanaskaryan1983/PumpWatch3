@@ -10,7 +10,6 @@ import com.google.gson.JsonArray
  *  - put روی key موجود ابتدا remove می‌کند تا entry به انتهای order برود (LRU-like)
  *  - eviction با `keys.firstOrNull()` ساده و deterministic است
  *  - @Synchronized thread-safety کامل (کمی سربار، ولی قابل‌قبول برای cache)
- *  - ConcurrentHashMap به‌خاطر size() تقریبی برای eviction مناسب نیست
  */
 class TtlCache<V>(
     private val ttlMillis: Long,
@@ -33,10 +32,8 @@ class TtlCache<V>(
 
     @Synchronized
     fun put(key: String, value: V) {
-        // Remove first: if updating existing key, this moves it to the end (most recent)
         map.remove(key)
         map[key] = Entry(value, System.currentTimeMillis())
-        // Evict oldest entries if over cap
         while (map.size > maxEntries) {
             val oldest = map.keys.firstOrNull() ?: break
             map.remove(oldest)
@@ -95,6 +92,11 @@ object KlineCache {
     }
 
     fun clear() = cache.clear()
+
+    // 🚀 P1-4: خانه‌تکانی دوره‌ای — حذف entryهای منقضی قبل از پر شدن سقف.
+    // توسط MonitorWorker در ابتدای هر اجرا صدا زده می‌شود.
+    fun prune() = cache.prune()
+
     fun size(): Int = cache.size()
     fun maxSize(): Int = MAX_ENTRIES
 }
