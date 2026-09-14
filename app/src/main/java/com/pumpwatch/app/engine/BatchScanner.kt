@@ -22,6 +22,7 @@ import kotlin.math.abs
  * P0-6: استانداردسازی Candle.time = زمان بسته شدن کندل (نه باز شدن)
  * 🚀 P1-1: کندل‌های Binance از KlineCache (TTL=60s) خوانده می‌شوند
  * 🚀 P1-2: هم‌روندی ۱۰ + delay هوشمند بین chunkها (فقط وقتی شبکه واقعاً استفاده شده)
+ * 🚀 Sprint 3: candleCloseTs از UnifiedSignalResult به SignalResult نگاشت می‌شود
  */
 object BatchScanner {
 
@@ -195,6 +196,8 @@ object BatchScanner {
         rr = p.rr
     )
 
+    // 🚀 Sprint 3: نگاشت candleCloseTs — قبلاً این فیلد دور ریخته می‌شد و
+    // MonitorWorker مجبور بود time = زمان اسکن بگذارد (نقض فلسفهٔ P0-6)
     private fun UnifiedSignalResult.toSignalResult(): SignalResult = SignalResult(
         coinId = coinId,
         symbol = symbol,
@@ -214,7 +217,8 @@ object BatchScanner {
         stopLoss = stopLoss,
         target1 = target1,
         target2 = target2,
-        reasons = reasons
+        reasons = reasons,
+        candleCloseTs = candleCloseTs
     )
 
     // ---------- ساخت کندل ساعتی: تابع pure و قابل تست ----------
