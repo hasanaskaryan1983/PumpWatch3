@@ -17,8 +17,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.OptReport
 import com.pumpwatch.app.engine.QuickScanner
 import com.pumpwatch.app.engine.SignalLogger
+import com.pumpwatch.app.engine.WalkForwardOptimizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -36,6 +38,7 @@ private val LBlue = Color(0xFF40C4FF)
 private val LPurple = Color(0xFFCE93D8)
 
 private val candleTimeFmt = SimpleDateFormat("HH:mm", Locale.US)
+private val reportDateFmt = SimpleDateFormat("MM/dd HH:mm", Locale.US)
 
 private fun statusEmoji(s: String) = when (s) {
     "WIN" -> "✅"
@@ -65,6 +68,8 @@ fun SignalLogScreen() {
         mutableStateOf(if (prefs.getString("mode", "SPOT") == "FUTURES") "FUT" else "SPOT")
     }
     var lastScores by remember { mutableStateOf("") }
+    // 🚀 Sprint 4: گزارش آخرین بهینه‌سازی Walk-Forward
+    var optReport by remember { mutableStateOf<OptReport?>(null) }
 
     fun loadLogs() {
         scope.launch {
@@ -78,6 +83,20 @@ fun SignalLogScreen() {
     LaunchedEffect(Unit) {
         loadLogs()
         lastScores = prefs.getString("last_scores", "") ?: ""
+
+        // 🚀 Sprint 4: تریگر بهینه‌سازی Walk-Forward
+        // شرط‌ها: ≥۵۰ سیگنال بسته + (گزارش نیست یا قدیمی‌تر از ۲۴ ساعت)
+        try {
+            optReport = WalkForwardOptimizer.loadReport(ctx)
+            val current = SignalLogger.load(ctx)
+            val closedCount = current.count { it.status in listOf("WIN", "LOSS", "EXP") }
+            val now = System.currentTimeMillis()
+            val stale = optReport == null || now - (optReport?.ts ?: 0L) > 24 * 3_600_000L
+            if (closedCount >= 50 && stale) {
+                val rep = WalkForwardOptimizer.runIfNeeded(ctx)
+                if (rep != null) optReport = rep
+            }
+        } catch (_: Exception) { }
 
         while (true) {
             delay(45_000L)
@@ -97,7 +116,6 @@ fun SignalLogScreen() {
         else -> logs
     }
 
-    // 🚀 Sprint 4: همهٔ آمار از یک منبع (closedSignals)
     val closedSignals = logs.filter { it.status in listOf("WIN", "LOSS", "EXP") }
     val wfTotal = closedSignals.size
     val wfWins = closedSignals.count { it.status == "WIN" }
@@ -114,7 +132,6 @@ fun SignalLogScreen() {
     val wfProgressPct = (wfTotal.coerceAtMost(50) * 100.0 / 50.0)
     val wfReady = wfTotal >= 50
 
-    // تعداد سیگنال‌های باز (برای نمایش وضعیت فعال)
     val openCount = logs.count { it.status == "OPEN" }
 
     Column(
@@ -154,21 +171,19 @@ fun SignalLogScreen() {
             }
         }
 
-        // 🚀 Sprint 4: داشبورد واحد و منسجم (ادغام دو داشبورد قبلی)
+        // داشبورد واحد عملکرد استراتژی
         Card(
             colors = CardDefaults.cardColors(containerColor = LC),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // سربرگ: شمارنده Walk-Forward
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("🚀 عملکرد استراتژی", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = LPurple)
                     Spacer(Modifier.weight(1f))
                     Text("$wfTotal / 50", fontWeight = FontWeight.Black, fontSize = 16.sp, color = if (wfReady) LG else LY)
                 }
 
-                // progress bar
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -183,7 +198,6 @@ fun SignalLogScreen() {
                     )
                 }
 
-                // آمار: برد/باخت/منقضی + باز
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("✅ برد: $wfWins", color = LG, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     Text("❌ باخت: $wfLosses", color = LR, fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -191,7 +205,6 @@ fun SignalLogScreen() {
                     Text("🔓 باز: $openCount", color = LBlue, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
 
-                // آمار: winrate + expectancy
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         "وین‌ریت: ${String.format(Locale.US, "%.1f%%", wfWinRate)}",
@@ -207,7 +220,6 @@ fun SignalLogScreen() {
                     )
                 }
 
-                // توضیح استراتژی + وضعیت Walk-Forward
                 Text(
                     "🎯 استراتژی: استاپ دنباله‌رو (Trailing) + هدف شناور. تا وقتی استاپ نخوره، پوزیشن باز می‌مونه.",
                     fontSize = 9.sp,
@@ -225,6 +237,40 @@ fun SignalLogScreen() {
                     color = if (wfReady) LG else LGr,
                     lineHeight = 14.sp
                 )
+            }
+        }
+
+        // 🚀 Sprint 4: کارت گزارش بهینه‌سازی Walk-Forward
+        optReport?.let { r ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = LC),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🧠 بهینه‌سازی Walk-Forward", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LPurple)
+                        Spacer(Modifier.weight(1f))
+                        Text(reportDateFmt.format(Date(r.ts)), fontSize = 9.sp, color = LGr)
+                    }
+                    Text(
+                        if (r.applied)
+                            "✅ آستانهٔ فعال: ${r.chosenMinScore} (قبلی: ${r.previousMinScore}) — بر اساس دادهٔ واقعی اعمال شد"
+                        else
+                            "📊 بررسی شد: آستانهٔ فعلی (${r.previousMinScore}) از کاندیداها بهتر بود — تغییری لازم نبود",
+                        fontSize = 11.sp,
+                        color = if (r.applied) LG else LGr,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "IN (${r.inSampleSize} سیگنال): وین‌ریت ${String.format(Locale.US, "%.1f%%", r.inWinRate)} | Expectancy ${String.format(Locale.US, "%+.2f%%", r.inExpectancy)}",
+                        fontSize = 10.sp, color = LGr
+                    )
+                    Text(
+                        "OUT (${r.outSampleSize} سیگنال): وین‌ریت ${String.format(Locale.US, "%.1f%%", r.outWinRate)} | Expectancy ${String.format(Locale.US, "%+.2f%%", r.outExpectancy)}",
+                        fontSize = 10.sp, color = LGr
+                    )
+                }
             }
         }
 
