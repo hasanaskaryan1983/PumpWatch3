@@ -35,6 +35,11 @@ import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.Blockscout
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.solanaTyped
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -47,6 +52,11 @@ private val FGold = Color(0xFFFFC107)
 private val FGray = Color(0xFF8B949E)
 private val FCard = Color(0xFF1A2230)
 private val FG2 = Gson()
+
+// 🚀 P1-3: هم‌روندی اسکن کیف‌های مورد پسند
+private const val FAV_WALLET_PARALLELISM = 3   // چند کیف هم‌زمان (هر کیف خودش چند زنجیره می‌زند)
+private const val FAV_TOKEN_PARALLELISM = 5    // چند توکن هم‌زمان داخل هر زنجیره/کیف
+private const val FAV_CHUNK_DELAY_MS = 200L    // فاصله بین chunkها برای پرهیز از 429
 
 data class FavWallet(
     val addr: String,
@@ -83,6 +93,9 @@ private data class HoldingsSummary(
     val pricedCount: Int,
     val unpricedCount: Int
 )
+
+// 🚀 P1-3: نتیجهٔ جزئی هر توکن برای جمع‌آوری thread-safe بعد از awaitAll
+private data class FavTokenAgg(val sym: String, val amt: Double, val px: Double?)
 
 object FavStore {
     val favs = mutableStateOf(mutableListOf<FavWallet>())
@@ -151,6 +164,7 @@ object FavStore {
 }
 
 // P0-3: اسکن موجودی با تمایز بین قیمت شناخته‌شده و نامشخص + حذف take(10)
+// 🚀 P1-3: زنجیره‌ها (EVM) و توکن‌ها (Solana) موازی شدند؛ جمع‌بندی نهایی sequential و thread-safe
 private suspend fun scanHoldings(addr: String): HoldingsSummary {
     val balances = mutableMapOf<String, Double>()
     var total = 0.0
@@ -158,26 +172,37 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
     var unpriced = 0
     try {
         if (addr.startsWith("0x") && addr.length == 42) {
-            for ((gt, host) in FAV_EVM) {
-                try {
-                    val toks = Blockscout.api(host).tokenList("account", "tokenlist", addr).result ?: continue
-                    // P0-3: حذف take(10) — همه توکن‌های دارای موجودی بررسی می‌شوند
-                    toks.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.forEach { t ->
-                        val dec = t.decimals?.toDoubleOrNull() ?: 18.0
-                        val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
-                        val sym = t.symbol ?: "?"
-                        val c = t.contractAddress ?: return@forEach
-                        // P0-3: nullable (نه 0.0)
-                        val px = try { GeckoPrice.api.tokenInfo(gt, c).data?.attributes?.price_usd?.toDoubleOrNull() } catch (_: Exception) { null }
-                        balances[sym] = (balances[sym] ?: 0.0) + amt
-                        if (px != null && px > 0) {
-                            total += amt * px
-                            priced++
-                        } else {
-                            unpriced++
-                        }
+            // 🚀 P1-3: هر ۷ زنجیرهٔ EVM هم‌زمان اسکن می‌شود؛ خطای هر زنجیره محبوس
+            val parts = coroutineScope {
+                FAV_EVM.map { (gt, host) ->
+                    async(Dispatchers.IO) {
+                        val out = mutableListOf<FavTokenAgg>()
+                        try {
+                            val toks = Blockscout.api(host).tokenList("account", "tokenlist", addr).result
+                                ?: return@async out
+                            // P0-3: حذف take(10) — همه توکن‌های دارای موجودی بررسی می‌شوند
+                            toks.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.forEach { t ->
+                                val dec = t.decimals?.toDoubleOrNull() ?: 18.0
+                                val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
+                                val sym = t.symbol ?: "?"
+                                val c = t.contractAddress ?: return@forEach
+                                // P0-3: nullable (نه 0.0)
+                                val px = try { GeckoPrice.api.tokenInfo(gt, c).data?.attributes?.price_usd?.toDoubleOrNull() } catch (_: Exception) { null }
+                                out.add(FavTokenAgg(sym, amt, px))
+                            }
+                        } catch (_: Exception) { }
+                        out
                     }
-                } catch (_: Exception) { }
+                }.awaitAll()
+            }
+            for (part in parts) for (a in part) {
+                balances[a.sym] = (balances[a.sym] ?: 0.0) + a.amt
+                if (a.px != null && a.px > 0) {
+                    total += a.amt * a.px
+                    priced++
+                } else {
+                    unpriced++
+                }
             }
         } else if (addr.length in 32..44) {
             val res = solanaTyped(mapOf(
@@ -185,18 +210,31 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
                 "method" to "getTokenAccountsByOwner",
                 "params" to listOf(addr, mapOf("programId" to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), mapOf("encoding" to "jsonParsed"))
             ))
-            res?.result?.value?.forEach { a ->
-                val inf = a.account?.data?.parsed?.info ?: return@forEach
+            val raw = res?.result?.value?.mapNotNull { a ->
+                val inf = a.account?.data?.parsed?.info ?: return@mapNotNull null
                 val amt = inf.tokenAmount?.uiAmountString?.toDoubleOrNull() ?: 0.0
-                if (amt <= 0) return@forEach
-                val mint = inf.mint ?: return@forEach
-                val t = try { GeckoPrice.api.tokenInfo("solana", mint).data?.attributes } catch (_: Exception) { null }
-                val sym = t?.symbol ?: mint.take(6)
-                // P0-3: nullable (نه 0.0)
-                val px = t?.price_usd?.toDoubleOrNull()
-                balances[sym] = (balances[sym] ?: 0.0) + amt
-                if (px != null && px > 0) {
-                    total += amt * px
+                if (amt <= 0) return@mapNotNull null
+                val mint = inf.mint ?: return@mapNotNull null
+                mint to amt
+            } ?: emptyList()
+
+            // 🚀 P1-3: قیمت توکن‌های Solana به‌صورت موازی (۵ هم‌زمان + delay بین chunkها)
+            val parts = coroutineScope {
+                raw.chunked(FAV_TOKEN_PARALLELISM).flatMap { chunk ->
+                    val part = chunk.map { (mint, amt) ->
+                        async(Dispatchers.IO) {
+                            val t = try { GeckoPrice.api.tokenInfo("solana", mint).data?.attributes } catch (_: Exception) { null }
+                            FavTokenAgg(t?.symbol ?: mint.take(6), amt, t?.price_usd?.toDoubleOrNull())
+                        }
+                    }.awaitAll()
+                    delay(FAV_CHUNK_DELAY_MS)
+                    part
+                }
+            }
+            for (a in parts) {
+                balances[a.sym] = (balances[a.sym] ?: 0.0) + a.amt
+                if (a.px != null && a.px > 0) {
+                    total += a.amt * a.px
                     priced++
                 } else {
                     unpriced++
@@ -207,14 +245,31 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
     return HoldingsSummary(balances, total, priced, unpriced)
 }
 
+// 🚀 P1-3: کیف‌های ستاره‌دار ۳تا۳تا موازی اسکن می‌شوند؛
+// اعمال تغییرات (snap/alerts/save) بعداً sequential انجام می‌شود تا ترتیب هشدارها و thread-safety حفظ شود.
 suspend fun scanStarred(ctx: Context, force: Boolean = false): Int {
     FavStore.load(ctx)
     val now = System.currentTimeMillis()
     if (!force && now - FavStore.lastScanTs < 6L * 3600 * 1000) return 0
     var newAlerts = 0
-    for (w in FavStore.favs.value.filter { it.starred }) {
+    val starred = FavStore.favs.value.filter { it.starred }
+
+    val summaries = coroutineScope {
+        starred.chunked(FAV_WALLET_PARALLELISM).flatMap { chunk ->
+            val part = chunk.map { w ->
+                async(Dispatchers.IO) {
+                    val s = try { scanHoldings(w.addr) } catch (_: Exception) { null }
+                    w to s
+                }
+            }.awaitAll()
+            delay(FAV_CHUNK_DELAY_MS)
+            part
+        }
+    }
+
+    for ((w, summaryOpt) in summaries) {
         try {
-            val summary = scanHoldings(w.addr)
+            val summary = summaryOpt ?: continue
             val holds = summary.balances
             for ((sym, amt) in holds) {
                 val old = w.snap[sym]
