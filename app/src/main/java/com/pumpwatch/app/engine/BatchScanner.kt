@@ -6,7 +6,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.data.ScanMarket
 import kotlin.math.abs
@@ -20,7 +20,7 @@ import kotlin.math.abs
  * - خروجی همچنان List<SignalResult> است تا همهٔ فراخوان‌ها (MonitorWorker, PicksStore) سالم بمانند
  *
  * P0-6: استانداردسازی Candle.time = زمان بسته شدن کندل (نه باز شدن)
- *       تا UnifiedSignalEngine بتواند candleCloseTs دقیق تولید کند.
+ * 🚀 P1-1: کندل‌های Binance از KlineCache (TTL=60s) خوانده می‌شوند
  */
 object BatchScanner {
 
@@ -116,9 +116,9 @@ object BatchScanner {
         funding: Double?,
         params: SignalParams
     ): SignalResult? {
-        // ۱) منبع اصلی و یکپارچه: Binance klines 1h (همان منبع QuickScanner)
+        // ۱) منبع اصلی و یکپارچه: Binance klines 1h — از cache مرکزی (P1-1)
         val binanceCandles: List<Candle>? = try {
-            val klines = BinanceClient.api.klines("${m.symbol.uppercase()}USDT", "1h", 300)
+            val klines = KlineCache.klines("${m.symbol.uppercase()}USDT", "1h", 300)
             if (klines.size >= 60) {
                 klines.map { k ->
                     Candle(
