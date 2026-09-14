@@ -676,12 +676,22 @@ fun TradesScreen() {
     }
 }
 
+/**
+ * 🟢 P0-6: امتیازدهی یک ارز برای معاملهٔ خودکار — فقط با کندل‌های بسته‌شده.
+ *
+ * چرا dropLast(1): klines از Binance همیشه آخرین ردیف = کندلِ در حال تشکیل را برمی‌گرداند.
+ * امتیازدهی روی این کندل ناقص باعث می‌شد معامله‌ها وسط روز بر اساس سیگنال موقتی باز شوند.
+ * با حذف آخرین ردیف، EMA/RSI/MACD/OBV/weekly همه روی کندل‌های روزانهٔ کامل محاسبه می‌شوند.
+ * این تابع اندیکاتورهای محلی خود را دارد (نه UnifiedSignalEngine) چون در سطح اجماع استفاده می‌شود.
+ */
 private suspend fun evalCoin(symbol: String): Pair<Int, Double> = withContext(Dispatchers.IO) {
     try {
         val kl = BinanceClient.api.klines("${symbol.uppercase(Locale.US)}USDT", "1d", 300)
-        if (kl.size < 210) return@withContext 0 to 12.0
-        val closes = kl.map { it[4].asDouble }
-        val vols = kl.map { it[5].asDouble }
+        // P0-6: حذف آخرین کندل (در حال تشکیل) — امتیاز فقط پس از close روزانه
+        val closedKl = kl.dropLast(1)
+        if (closedKl.size < 200) return@withContext 0 to 12.0
+        val closes = closedKl.map { it[4].asDouble }
+        val vols = closedKl.map { it[5].asDouble }
         val weekly = closes.chunked(7).map { it.last() }
 
         val price = closes.last()
