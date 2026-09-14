@@ -4,22 +4,23 @@ import com.google.gson.JsonArray
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 🚀 Sprint 2 (P1-1): لایهٔ cache عمومی با TTL.
+ * 🚀 Sprint 2 (P1-1 + P1-4): لایهٔ cache عمومی با TTL و سقف تعداد.
  *
- * - thread-safe با ConcurrentHashMap (بدون نیاز به lock دستی)
+ * - thread-safe با ConcurrentHashMap
  * - هر entry پس از ttlMillis منقضی می‌شود (تنبل: هنگام get بررسی می‌شود)
- * - prune() برای پاک‌سازی دوره‌ای و جلوگیری از رشد بی‌پایانهٔ حافظه
- *
- * نکتهٔ شناخته‌شده: در getOrPut اگر دو thread هم‌زمان key یکسان بخواهند،
- * هر دو load می‌کنند (race بی‌ضرر برای مصرف ما؛ نتیجه یکسان است).
+ * - P1-4: اگر تعداد entryها از maxEntries تجاوز کند، قدیمی‌ترین entry
+ *   حذف می‌شود (LRU-like eviction) تا حافظه از کنترل خارج نشود
+ * - prune() برای پاک‌سازی دوره‌ای بر اساس زمان
  */
-class TtlCache<V>(private val ttlMillis: Long) {
+class TtlCache<V>(
+    private val ttlMillis: Long,
+    private val maxEntries: Int = Int.MAX_VALUE
+) {
 
     private class Entry<V>(val value: V, val storedAt: Long)
 
     private val map = ConcurrentHashMap<String, Entry<V>>()
 
-    /** مقدار تازه برمی‌گرداند یا null اگر نبود/منقضی شده بود. */
     fun get(key: String): V? {
         val e = map[key] ?: return null
         if (System.currentTimeMillis() - e.storedAt >= ttlMillis) {
@@ -30,10 +31,29 @@ class TtlCache<V>(private val ttlMillis: Long) {
     }
 
     fun put(key: String, value: V) {
+        // P1-4: اگر سقف فعال است و پر شده، قدیمی‌ترین entry را حذف کن
+        if (maxEntries < Int.MAX_VALUE && map.size >= maxEntries && !map.containsKey(key)) {
+            evictOldest()
+        }
         map[key] = Entry(value, System.currentTimeMillis())
     }
 
-    /** اگر cache تازه بود همان را می‌دهد؛ وگرنه load، cache و برگردان. */
+    /**
+     * حذف قدیمی‌ترین entry بر اساس storedAt (LRU-like).
+     * O(n) است ولی فقط هنگام پر شدن سقف فراخوانی می‌شود.
+     */
+    private fun evictOldest() {
+        var oldestKey: String? = null
+        var oldestTs = Long.MAX_VALUE
+        for ((k, e) in map) {
+            if (e.storedAt < oldestTs) {
+                oldestTs = e.storedAt
+                oldestKey = k
+            }
+        }
+        oldestKey?.let { map.remove(it) }
+    }
+
     fun getOrPut(key: String, loader: () -> V?): V? {
         get(key)?.let { return it }
         val value = loader() ?: return null
@@ -41,33 +61,30 @@ class TtlCache<V>(private val ttlMillis: Long) {
         return value
     }
 
-    fun invalidate(key: String) {
-        map.remove(key)
-    }
+    fun invalidate(key: String) { map.remove(key) }
+    fun clear() { map.clear() }
 
-    fun clear() {
-        map.clear()
-    }
-
-    /** حذف entryهای منقضی (برای صدا زدن دوره‌ای از Worker یا صفحه‌ها). */
     fun prune() {
         val now = System.currentTimeMillis()
         map.entries.removeIf { now - it.value.storedAt >= ttlMillis }
     }
 
     fun size(): Int = map.size
+    fun maxSize(): Int = maxEntries
 }
 
 /**
- * کندل‌های Binance با cache شصت‌ثانیه‌ای.
+ * کندل‌های Binance با cache شصت‌ثانیه‌ای و سقف ۳۰۰ entry.
  *
- * چرا ۶۰ ثانیه: کندلِ تایم‌فریم‌های ≥۱ دقیقه فقط با tick/close عوض می‌شود؛
- * اسکن‌های پشت‌سرهم (Worker هر چند دقیقه، UI هر بار باز شدن) نیازی به
- * call تکراری ندارند. این یعنی حذف ~۹۰٪ callهای تکراری klines.
+ * چرا ۳۰۰: TOP_SYMBOLS=۵۰ + چندین تایم‌فریم در TradesScreen + buffer برای
+ * BatchScanner که تا ۱۰۰ ارز را با ۱h/۱d می‌خواند. در بک‌تست طولانی،
+ * قدیمی‌ترین entryها خودکار evict می‌شوند تا حافظه از کنترل خارج نشود.
  */
 object KlineCache {
     private const val TTL_MS = 60_000L
-    private val cache = TtlCache<List<JsonArray>>(TTL_MS)
+    // 🚀 P1-4: سقف ۳۰۰ entry — جلوگیری از رشد بی‌پایان حافظه در اسکن‌های مکرر
+    private const val MAX_ENTRIES = 300
+    private val cache = TtlCache<List<JsonArray>>(TTL_MS, MAX_ENTRIES)
 
     suspend fun klines(symbol: String, interval: String, limit: Int): List<JsonArray> {
         val key = "$symbol|$interval|$limit"
@@ -82,6 +99,6 @@ object KlineCache {
     }
 
     fun clear() = cache.clear()
-
     fun size(): Int = cache.size()
+    fun maxSize(): Int = MAX_ENTRIES
 }
