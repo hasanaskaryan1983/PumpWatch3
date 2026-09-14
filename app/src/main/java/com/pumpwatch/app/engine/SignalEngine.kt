@@ -15,6 +15,10 @@ data class SignalParams(
     val rr: Double = 1.5
 )
 
+// 🚀 Sprint 3: field `candleCloseTs` اضافه شد.
+// زمان بسته شدن کندلی که این سیگنال از آن مشتق شده است.
+// مقدار default=0 برای backward compat با داده‌های قدیمی و موتورهای legacy.
+// این field از SignalEngine.analyze و از BatchScanner.toSignalResult پر می‌شود.
 data class SignalResult(
     val coinId: String,
     val symbol: String,
@@ -34,7 +38,8 @@ data class SignalResult(
     val stopLoss: Double,
     val target1: Double,
     val target2: Double,
-    val reasons: List<String>
+    val reasons: List<String>,
+    val candleCloseTs: Long = 0L
 )
 
 object SignalEngine {
@@ -53,6 +58,11 @@ object SignalEngine {
         val closes = Indicators.closes(candles1h)
         val volumes = candles1h.map { it.volume }
         val price = closes.last()
+
+        // 🚀 Sprint 3: استخراج candleCloseTs از آخرین کندل (اگر time > 0 باشد).
+        // در موتورهای P0-6-compliant فراخوانی‌کننده آخرین کندل forming را drop می‌کند،
+        // پس candles1h.last() کندلِ بسته‌شده است و time آن = close time رسمی.
+        val candleCloseTs = candles1h.lastOrNull()?.takeIf { it.time > 0 }?.time ?: 0L
 
         // ۱. لایه تشخیص رژیم بازار (Daily/4H)
         val c4h = Indicators.aggregate(candles1h, 4)
@@ -156,7 +166,7 @@ object SignalEngine {
         return SignalResult(
             coinId, symbol, name, price, mode, side, score, golden,
             mtfAligned, mtfTrend, adx, rsi, volRatio, funding,
-            entry, stopLoss, target1, target2, reasons
+            entry, stopLoss, target1, target2, reasons, candleCloseTs
         )
     }
 }
