@@ -41,16 +41,20 @@ object QuickScanner {
     // P0-6: فرمت نمایش زمان بسته شدن کندل (HH:mm) برای Notification و لاگ
     private val closeTimeFmt = SimpleDateFormat("HH:mm", Locale.US)
 
-    // 🚀 P1-2: تعداد هم‌روندی — ۵ برای Binance ایمن است (limit ~۱۲۰۰ weight/min)
+    // 🚀 P1-2: هم‌روندی ۵ برای Binance ایمن
     private const val PARALLELISM = 5
     private const val CHUNK_DELAY_MS = 200L
 
-    // 🚀 P1-4: آستانهٔ تشخیص «chunk شبکه‌ای» — اگر chunk سریع‌تر از این تمام شد
-    // یعنی از KlineCache آمده و delay لازم نیست
+    // 🚀 P1-4: آستانهٔ تشخیص «chunk شبکه‌ای»
     private const val CACHED_CHUNK_THRESHOLD_MS = 100L
 
+    /**
+     * 🚀 Sprint 4: پارامترها یک‌بار از ParamsStore خوانده می‌شوند و به هر دو
+     * مسیر FUT/SPOT thread می‌شوند — جایگزین UnifiedSignalParams(minScore=70) hardcoded
+     */
     suspend fun scan(ctx: Context, symbols: List<String>, mode: String): ScanReport {
-        return if (mode == "FUTURES") scanFutures(ctx, symbols) else scanSpot(ctx, symbols)
+        val params = ParamsStore.toUnified(ParamsStore.load(ctx))
+        return if (mode == "FUTURES") scanFutures(ctx, symbols, params) else scanSpot(ctx, symbols, params)
     }
 
     private fun openPaperTrade(
@@ -83,22 +87,11 @@ object QuickScanner {
         } catch (_: Exception) { }
     }
 
-    /**
-     * 🚀 P1-2 + P1-4: اسکن موازی با delay هوشمند.
-     *
-     * - نمادها chunkهای ۵تایی می‌شوند و هم‌زمان روی Dispatchers.IO اجرا می‌شوند
-     * - P1-4: زمان هر chunk اندازه‌گیری می‌شود؛ فقط اگر chunk کند بوده
-     *   (≥۱۰۰ms = call شبکه واقعی) delay اعمال می‌شود؛ chunkهای cache‌ای بدون صبر رد می‌شوند
-     * - side-effectها (لاگ/اعلان/معامله کاغذی) بعداً sequential اجرا می‌شوند (thread-safety)
-     *
-     * منطق P0-6 (Candle.time=k[6]، candleCloseTs) و P1-1 (KlineCache) دست‌نخورده.
-     */
-    private suspend fun scanFutures(ctx: Context, symbols: List<String>): ScanReport {
+    private suspend fun scanFutures(ctx: Context, symbols: List<String>, params: UnifiedSignalParams): ScanReport {
         data class ScanLine(val text: String, val signal: UnifiedSignalResult?)
 
         val allLines = coroutineScope {
             symbols.chunked(PARALLELISM).flatMap { chunk ->
-                // 🚀 P1-4: اندازه‌گیری زمان chunk برای تصمیم هوشمند دربارهٔ delay
                 val chunkStart = System.currentTimeMillis()
                 val deferreds = chunk.map { symbol ->
                     async(Dispatchers.IO) {
@@ -126,7 +119,7 @@ object QuickScanner {
                             val signal = UnifiedSignalEngine.analyze(
                                 coinId = symbol, symbol = symbol, name = symbol,
                                 candles1h = candles, mode = "FUT", funding = funding,
-                                params = UnifiedSignalParams(minScore = 70)
+                                params = params
                             )
 
                             ScanLine(
@@ -154,7 +147,6 @@ object QuickScanner {
             }
         }
 
-        // مرحلهٔ دوم: side-effects در thread فراخواننده (بدون race روی SharedPreferences)
         val lines = mutableListOf<String>()
         var signalCount = 0
         for (line in allLines) {
@@ -188,10 +180,7 @@ object QuickScanner {
         return ScanReport(lines, signalCount)
     }
 
-    /**
-     * 🚀 P1-2 + P1-4: نسخهٔ parallel و هوشمند scanSpot — همان الگوی scanFutures.
-     */
-    private suspend fun scanSpot(ctx: Context, symbols: List<String>): ScanReport {
+    private suspend fun scanSpot(ctx: Context, symbols: List<String>, params: UnifiedSignalParams): ScanReport {
         data class ScanLine(val text: String, val signal: UnifiedSignalResult?)
 
         val allLines = coroutineScope {
@@ -219,7 +208,7 @@ object QuickScanner {
                             val signal = UnifiedSignalEngine.analyze(
                                 coinId = symbol, symbol = symbol, name = symbol,
                                 candles1h = candles, mode = "SPOT", funding = null,
-                                params = UnifiedSignalParams(minScore = 70)
+                                params = params
                             )
 
                             ScanLine(
