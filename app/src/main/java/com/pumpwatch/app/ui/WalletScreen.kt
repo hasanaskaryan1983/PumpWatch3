@@ -11,8 +11,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +47,7 @@ import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GtTrade
+import androidx.compose.material3.FilterChipDefaults
 import com.pumpwatch.app.data.SolanaRpc
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.solanaTyped
@@ -259,12 +263,7 @@ fun WalletScreen() {
 
                             val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
 
-                            // 🚀 P1-3: اسکن موازی همهٔ زنجیره‌های EVM.
-                            // هر زنجیره به‌صورت مستقل:
-                            //  - tokenList می‌گیرد
-                            //  - تا ۵۰ توکن دارای موجودی را با قیمت پر می‌کند (tokenInfo موازی chunked(5))
-                            //  - firstBuyTs هر توکن را موازی chunked(5) می‌گیرد
-                            // خطای هر زنجیره محبوس است و بقیه را متوقف نمی‌کند.
+                            // 🚀 P1-3: اسکن موازی همهٔ زنجیره‌های EVM
                             data class HostResult(val holdings: List<WalletHolding>, val cfg: ChainCfg?)
                             val hostResults = coroutineScope {
                                 hosts.map { h ->
@@ -274,7 +273,6 @@ fun WalletScreen() {
                                             val tokens = bs.tokenList("account", "tokenlist", addr).result
                                                 ?: return@async HostResult(emptyList(), null)
 
-                                            // مرحله ۱: ساخت WalletHolding با قیمت — موازی روی توکن‌ها
                                             val list = tokens.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }
                                                 .take(50)
                                                 .chunked(WALLET_PARALLELISM)
@@ -297,7 +295,6 @@ fun WalletScreen() {
                                                     part
                                                 }.toMutableList()
 
-                                            // مرحله ۲: پر کردن firstBuyTs برای همهٔ توکن‌های این زنجیره — موازی
                                             if (list.isNotEmpty()) {
                                                 list.chunked(WALLET_PARALLELISM).forEach { chunk ->
                                                     chunk.map { hd ->
@@ -597,37 +594,43 @@ fun WalletScreen() {
                     Text(String.format(Locale.US, "$%,.2f", total), fontSize = 20.sp, fontWeight = FontWeight.Black, color = VGreen)
                 }
             }
-            holdings.forEach { h ->
-                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
-                                if (h.price != null && h.price > 0) {
-                                    Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
-                                } else {
-                                    Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                            Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
-                        }
-                        if (h.firstBuyTs != null) {
-                            Text(
-                                "🕐 اولین خرید: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت خرید: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
-                                fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold
-                            )
-                        }
-                        if (h.contract != null) {
+            // 🚀 P1-5: رندر تنبل — فقط کارت‌های قابل‌دیدن compose می‌شوند (تا ۵۰ holding)
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
+            ) {
+                items(holdings) { h ->
+                    Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("کانترکت: ${h.contract}", fontSize = 8.sp, color = VGray, modifier = Modifier.weight(1f))
-                                Button(onClick = {
-                                    try {
-                                        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("contract", h.contract))
-                                        info = "📋 کانترکت کپی شد — توی CoinGecko پیست کن تا اشتباهی نخری"
-                                    } catch (_: Exception) { }
-                                }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) {
-                                    Text("📋 کپی", fontSize = 9.sp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
+                                    if (h.price != null && h.price > 0) {
+                                        Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
+                                    } else {
+                                        Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
+                            }
+                            if (h.firstBuyTs != null) {
+                                Text(
+                                    "🕐 اولین خرید: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت خرید: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
+                                    fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (h.contract != null) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("کانترکت: ${h.contract}", fontSize = 8.sp, color = VGray, modifier = Modifier.weight(1f))
+                                    Button(onClick = {
+                                        try {
+                                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("contract", h.contract))
+                                            info = "📋 کانترکت کپی شد — توی CoinGecko پیست کن تا اشتباهی نخری"
+                                        } catch (_: Exception) { }
+                                    }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) {
+                                        Text("📋 کپی", fontSize = 9.sp)
+                                    }
                                 }
                             }
                         }
@@ -638,22 +641,29 @@ fun WalletScreen() {
 
         if (txs.isNotEmpty()) {
             Text("📜 تاریخچه معاملات:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            txs.forEach { t ->
-                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
-                        Spacer(Modifier.width(6.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("${if (t.incoming) "خرید/ورود" else "فروش/خروج"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            if (t.priceUsd != null && t.priceUsd!! > 0) {
-                                Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
-                                Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * t.priceUsd!!)}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
-                            } else {
-                                Text("قیمت اون روز: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
-                                Text("ارزش: ❓", fontSize = 10.sp, color = VGray)
+            // 🚀 P1-5: رندر تنبل — تا ۱۰۰ ردیف تراکنش بدون compose حریص
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)
+            ) {
+                items(txs) { t ->
+                    Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
+                            Spacer(Modifier.width(6.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("${if (t.incoming) "خرید/ورود" else "فروش/خروج"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
+                                if (t.priceUsd != null && t.priceUsd!! > 0) {
+                                    Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
+                                    Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * t.priceUsd!!)}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
+                                } else {
+                                    Text("قیمت اون روز: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                                    Text("ارزش: ❓", fontSize = 10.sp, color = VGray)
+                                }
                             }
                         }
                     }
