@@ -39,17 +39,12 @@ class TtlCache<V>(
     }
 
     fun put(key: String, value: V) {
-        // P1-4: اگر سقف فعال است و پر شده و key جدید است، قدیمی‌ترین entry را حذف کن
         if (maxEntries < Int.MAX_VALUE && map.size >= maxEntries && !map.containsKey(key)) {
             evictOldest()
         }
         map[key] = Entry(value, System.currentTimeMillis(), System.nanoTime())
     }
 
-    /**
-     * حذف قدیمی‌ترین entry بر اساس storedAtNano (LRU-like).
-     * از nanoTime استفاده می‌کنیم چون millis precision کافی ندارد.
-     */
     private fun evictOldest() {
         var oldestKey: String? = null
         var oldestNano = Long.MAX_VALUE
