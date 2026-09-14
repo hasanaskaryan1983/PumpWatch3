@@ -48,6 +48,10 @@ import com.pumpwatch.app.data.SolanaRpc
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.solanaTyped
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -63,6 +67,10 @@ private val VGray = Color(0xFF8B949E)
 private val VPurple = Color(0xFFCE93D8)
 private val VOrange = Color(0xFFFFA726)
 private val VCard = Color(0xFF1A2230)
+
+// 🚀 P1-3: هم‌روندی اسکن موجودی کیف — ۵ هم‌زمان برای پرهیز از 429 روی GeckoTerminal/Solana RPC
+private const val WALLET_PARALLELISM = 5
+private const val WALLET_CHUNK_DELAY_MS = 200L
 
 private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?, val kind: String)
 
@@ -195,30 +203,40 @@ fun WalletScreen() {
                                 if (amt <= 0.0) null else Triple(mint, amt, a.pubkey ?: "")
                             } ?: emptyList()
 
-                            val list = mutableListOf<WalletHolding>()
-                            // P0-3: حذف take(15) — همهٔ توکن‌ها را بررسی کن (تا ۵۰)
-                            for ((mint, amt, acc) in raw.take(50)) {
-                                try {
-                                    val t = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
-                                    val px = t?.price_usd?.toDoubleOrNull()  // P0-3: nullable (نه 0.0)
-                                    val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * (px ?: 0.0), contract = mint)
-                                    try {
-                                        if (acc.isNotEmpty()) {
-                                            val sg = solanaRaw(mapOf(
-                                                "jsonrpc" to "2.0", "id" to 1,
-                                                "method" to "getSignaturesForAddress",
-                                                "params" to listOf(acc, mapOf("limit" to 1000))
-                                            ))
-                                            val oldest = sg?.result?.asJsonArray?.lastOrNull()?.asJsonObject
-                                            val fts = (oldest?.get("blockTime")?.asLong ?: 0L) * 1000
-                                            if (fts > 0) h.firstBuyTs = fts
+                            // 🚀 P1-3: tokenInfo + firstBuy به‌صورت موازی (۵ هم‌زمان + delay بین chunkها)
+                            // خطای هر توکن در خودش محبوس می‌شود و بقیهٔ توکن‌ها می‌مانند.
+                            val list = coroutineScope {
+                                raw.take(50).chunked(WALLET_PARALLELISM).flatMap { chunk ->
+                                    val part = chunk.map { (mint, amt, acc) ->
+                                        async(Dispatchers.IO) {
+                                            try {
+                                                val t = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
+                                                val px = t?.price_usd?.toDoubleOrNull()  // P0-3: nullable (نه 0.0)
+                                                val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * (px ?: 0.0), contract = mint)
+                                                try {
+                                                    if (acc.isNotEmpty()) {
+                                                        val sg = solanaRaw(mapOf(
+                                                            "jsonrpc" to "2.0", "id" to 1,
+                                                            "method" to "getSignaturesForAddress",
+                                                            "params" to listOf(acc, mapOf("limit" to 1000))
+                                                        ))
+                                                        val oldest = sg?.result?.asJsonArray?.lastOrNull()?.asJsonObject
+                                                        val fts = (oldest?.get("blockTime")?.asLong ?: 0L) * 1000
+                                                        if (fts > 0) h.firstBuyTs = fts
+                                                    }
+                                                } catch (_: Exception) { }
+                                                h
+                                            } catch (_: Exception) { null }
                                         }
-                                    } catch (_: Exception) { }
-                                    list.add(h)
-                                } catch (_: Exception) { }
+                                    }.awaitAll().filterNotNull()
+                                    delay(WALLET_CHUNK_DELAY_MS)
+                                    part
+                                }.toMutableList()
                             }
 
                             // P0-3: حذف take(6) — همهٔ توکن‌ها قیمت تاریخی می‌گیرند
+                            // ⚠️ P1-3: این حلقه عمداً sequential می‌ماند:
+                            //    chart تاریخی CoinGecko rate limit سخت‌گیرانه دارد (free tier)
                             try {
                                 val coinsH = ApiClient.getTop1000Coins()
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -280,6 +298,7 @@ fun WalletScreen() {
                             }
 
                             // P0-3: حذف take(6) — همهٔ توکن‌ها قیمت تاریخی می‌گیرند
+                            // ⚠️ P1-3: sequential می‌ماند (rate limit کوین‌گکو)
                             try {
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                                 for (hd in allHold) {
@@ -310,6 +329,7 @@ fun WalletScreen() {
                                 } ?: emptyList()
 
                                 // P0-3: حذف take(3) — همهٔ symbolها قیمت می‌گیرند
+                                // ⚠️ P1-3: sequential می‌ماند (rate limit کوین‌گکو)
                                 try {
                                     for (sym in rawTxs.map { it.symbol }.distinct()) {
                                         val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
