@@ -9,8 +9,8 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
 import com.pumpwatch.app.MainActivity
-import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.BinanceFutures
+import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.ui.PaperState
 import com.pumpwatch.app.ui.PaperTrade
 import java.text.SimpleDateFormat
@@ -76,14 +76,14 @@ object QuickScanner {
 
         for (symbol in symbols) {
             try {
-                val klines = BinanceClient.api.klines("${symbol}USDT", "1h", 100)
+                // P1-1: خواندن کندل از cache مرکزی (TTL=60s) — حذف callهای تکراری
+                val klines = KlineCache.klines("${symbol}USDT", "1h", 100)
                 if (klines.size < 100) {
                     lines.add("$symbol: کندل کم (${klines.size})")
                     continue
                 }
                 
                 // P0-6: پر کردن Candle.time از k[6] (close time رسمی Binance)
-                // این باعث می‌شود UnifiedSignalEngine بتواند candleCloseTs دقیق تولید کند.
                 val candles = klines.map { k -> 
                     Candle(
                         time = k[6].asLong,
@@ -147,7 +147,8 @@ object QuickScanner {
 
         for (symbol in symbols) {
             try {
-                val klines = BinanceClient.api.klines("${symbol}USDT", "1d", 300)
+                // P1-1: خواندن کندل از cache مرکزی (TTL=60s)
+                val klines = KlineCache.klines("${symbol}USDT", "1d", 300)
                 if (klines.size < 100) {
                     lines.add("$symbol: تاریخچه کم (${klines.size})")
                     continue
