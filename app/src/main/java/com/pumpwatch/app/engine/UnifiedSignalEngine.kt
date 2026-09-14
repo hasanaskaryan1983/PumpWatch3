@@ -20,8 +20,8 @@ data class UnifiedSignalResult(
     val symbol: String,
     val name: String,
     val price: Double,
-    val mode: String, // "SPOT" or "FUT"
-    val side: String, // "PUMP", "DUMP", "NONE"
+    val mode: String,
+    val side: String,
     val score: Int,
     val golden: Boolean,
     val mtfAligned: Boolean,
@@ -35,27 +35,18 @@ data class UnifiedSignalResult(
     val target1: Double,
     val target2: Double,
     val reasons: List<String>,
-    // P0-6: زمان بسته شدن آخرین کندلی که سیگنال بر اساس آن صادر شده (epoch millis).
-    // برای شفافیت در UI/لاگ و جلوگیری از سیگنال‌های «کندل ناتمام».
     val candleCloseTs: Long = 0L
 )
 
 object UnifiedSignalEngine {
 
     /**
-     * تحلیل سیگنال قطعی.
-     *
      * 🟢 P0-6 — سیگنال فقط با کندل بسته:
      *  - آخرین کندل ورودی (candles1h.last()) همیشه "در حال تشکیل" است
      *    چون klines آن را برمی‌گرداند قبل از بسته شدن.
      *  - این تابع به‌طور خودکار آخرین کندل را حذف می‌کند و تحلیل را
-     *    **فقط روی کندل‌های بسته‌شده** انجام می‌دهد.
-     *  - بنابراین سیگنال قطعی فقط زمانی صادر می‌شود که یک کندل کامل بسته شده باشد.
-     *  - `candleCloseTs` در نتیجه = زمان بسته شدن آن کندل؛ اگر صفر بود
-     *    (مثلاً مصرف‌کننده time را پر نکرده)، از System.currentTimeMillis استفاده می‌شود.
-     *
-     * مصرف‌کننده‌ها (QuickScanner، BatchScanner، SpotEngine، TradesScreen) نیازی
-     * به تغییر ندارند — این تابع به‌طور خودکار آخرین ردیف را کنار می‌گذارد.
+     *    فقط روی کندل‌های بسته‌شده انجام می‌دهد.
+     *  - candleCloseTs = زمان بسته شدن آخرین کندل معتبر (epoch millis)
      */
     fun analyze(
         coinId: String,
@@ -67,6 +58,7 @@ object UnifiedSignalEngine {
         params: UnifiedSignalParams = UnifiedSignalParams()
     ): UnifiedSignalResult? {
         // P0-6: حذف کندلِ در حال تشکیل — سیگنال قطعی فقط پس از close
+        // حداقل ۶۱ ورودی لازم: ۶۰ بسته + ۱ forming
         if (candles1h.size < 61) return null
         val closed = candles1h.dropLast(1)
         if (closed.size < 60) return null
@@ -77,9 +69,9 @@ object UnifiedSignalEngine {
 
         val closes = Indicators.closes(closed)
         val volumes = closed.map { it.volume }
-        val price = closes.last()  // حالا آخرین close بسته‌شده است (نه کندل forming)
+        val price = closes.last()  // آخرین close بسته‌شده (نه کندل forming)
 
-        // ۱. لایه تشخیص رژیم بازار (Daily/4H) - الهام گرفته از SpotEngine
+        // ۱. لایه تشخیص رژیم بازار (Daily/4H)
         val c4h = Indicators.aggregate(closed, 4)
         val cD = Indicators.aggregate(closed, 24)
         val closes4h = Indicators.closes(c4h)
@@ -108,13 +100,29 @@ object UnifiedSignalEngine {
         val macdPrev = Indicators.macd(closes.dropLast(1))
         val st = Indicators.supertrend(closed)
 
+        // P0-6 fix: breakout/breakdown باید نسبت به کندل‌های **قبل از آخرین** بسته محاسبه شود.
+        // price = close آخرین کندل بسته؛ prevHigh/prevLow = بدون آخرین کندل بسته (مثل قبل از P0-6).
+        // بدون این dropLast(1)، high خود کندل سیگنال هم در lookback بود → breakout هرگز true نمی‌شد.
         val lookback = params.breakoutLookback
-        val prevHigh = closed.takeLast(lookback).maxOf { it.high }
-        val prevLow = closed.takeLast(lookback).minOf { it.low }
+        val priorCandles = closed.dropLast(1)
+        val prevHigh = if (priorCandles.size >= lookback) {
+            priorCandles.takeLast(lookback).maxOf { it.high }
+        } else if (priorCandles.isNotEmpty()) {
+            priorCandles.maxOf { it.high }
+        } else {
+            price
+        }
+        val prevLow = if (priorCandles.size >= lookback) {
+            priorCandles.takeLast(lookback).minOf { it.low }
+        } else if (priorCandles.isNotEmpty()) {
+            priorCandles.minOf { it.low }
+        } else {
+            price
+        }
         val breakout = price > prevHigh
         val breakdown = price < prevLow
 
-        // ۳. لایه امتیازدهی ساختاریافته (مطابق گزارش PDF)
+        // ۳. لایه امتیازدهی ساختاریافته
         var score = 0
         val reasons = mutableListOf<String>()
 
@@ -174,7 +182,7 @@ object UnifiedSignalEngine {
 
         // ۴. مدیریت ریسک و خروجی
         val risk = atr * params.atrMult
-        val entry = price  // آخرین close بسته‌شده
+        val entry = price
         val stopLoss = if (side == "DUMP") price + risk else price - risk
         val target1 = if (side == "DUMP") price - risk * params.rr else price + risk * params.rr
         val target2 = if (side == "DUMP") price - risk * params.rr * 2.0 else price + risk * params.rr * 2.0
