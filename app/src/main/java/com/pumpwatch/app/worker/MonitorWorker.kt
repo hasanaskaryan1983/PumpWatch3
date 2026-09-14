@@ -26,6 +26,11 @@ import java.util.Locale
  *      (کندل‌های قدیمی‌تر از ۶۰ ثانیه) قبل از scan آزاد شوند.
  *      این باعث می‌شود در استفادهٔ طولانی‌مدت (چندین روز)، سقف ۳۰۰ entry هیچ‌وقت
  *      فعال نشود و eviction LRU بی‌مورد فعال نگردد.
+ *
+ * 🚀 Sprint 3 (P2-1): timestamp ثبت سیگنال = زمان بسته شدن کندل مولد آن
+ *      (candleCloseTs) به جای زمان اجرای Worker. این هم‌راستا با فلسفهٔ P0-6
+ *      است که timestamp سیگنال باید به کندلِ تحلیل‌شده مربوط باشد، نه به لحظهٔ
+ *      اجرای کد. fallback به زمان اسکن فقط اگر candleCloseTs صفر بود.
  */
 class MonitorWorker(
     context: Context,
@@ -42,8 +47,6 @@ class MonitorWorker(
     override suspend fun doWork(): Result {
         return try {
             // 🚀 P1-4: خانه‌تکانی دوره‌ای cache — حذف entryهای منقضی قبل از scan
-            // این سربار ناچیزی دارد (حذف چند entry از LinkedHashMap) ولی از
-            // پر شدن بی‌مورد سقف ۳۰۰ در استفادهٔ چندروزه جلوگیری می‌کند.
             KlineCache.prune()
 
             val modeRaw = inputData.getString(KEY_MODE)
@@ -58,6 +61,12 @@ class MonitorWorker(
             hot.forEachIndexed { i, r ->
                 val logSide = if (r.side == "PUMP") "BUY" else "SELL"
 
+                // 🚀 Sprint 3: timestamp = زمان بسته شدن کندل مولد سیگنال.
+                // fallback به System.currentTimeMillis فقط اگر candleCloseTs صفر بود
+                // (برای backward compat با داده‌های legacy یا edge caseهایی که
+                // موتور نتوانسته close time را تعیین کند).
+                val signalTs = if (r.candleCloseTs > 0L) r.candleCloseTs else System.currentTimeMillis()
+
                 // گیت واحد dedup با QuickScanner: اگر قبلاً ثبت شده، log=false و نوتیف نمی‌فرستیم
                 val logged = SignalLogger.log(
                     applicationContext,
@@ -68,7 +77,7 @@ class MonitorWorker(
                         entry = r.entry,
                         stop = r.stopLoss,
                         target = r.target1,
-                        time = System.currentTimeMillis(),
+                        time = signalTs,
                         mode = mode
                     )
                 )
