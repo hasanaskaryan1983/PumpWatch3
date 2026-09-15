@@ -68,11 +68,12 @@ private val EVM_HOSTS = listOf(
     ChainLite("Arbitrum 🔷", "https://arbitrum.blockscout.com/"),
     ChainLite("Optimism 🔴", "https://optimism.blockscout.com/"),
     ChainLite("Polygon 🟣", "https://polygon.blockscout.com/"),
-    ChainLite("Gnosis 🦉", "https://gnosis.blockscout.com/"),
+    ChainLite("Gnosis ", "https://gnosis.blockscout.com/"),
     ChainLite("Robinhood 🪽", "https://robinhoodchain.blockscout.com/")
 )
 
-private data class HistTx(
+// 🚀 Sprint 7: internal برای تست واحد
+internal data class HistTx(
     val ts: Long,
     val dateText: String,
     val chain: String,
@@ -91,7 +92,7 @@ private fun kindOf(a: String): String = when {
 }
 
 // 🚀 Sprint 7 (P0-3 invariant):
-// تراکنش با priceUsd=null هرگز به‌بهانهٔ «زیر ۱۰ دلار» حذف نمی‌شود.
+// تراکنش با priceUsd=null هرگز به‌بهانه «زیر ۱۰ دلار» حذف نمی‌شود.
 // نگه داشته می‌شود و در UI به‌صورت «❓ قیمت نامشخص» نمایش داده می‌شود.
 internal fun filterAndSummarize(res: List<HistTx>, totalRead: Int): Pair<List<HistTx>, String> {
     if (totalRead == 0) return emptyList<HistTx>() to ""
@@ -101,7 +102,7 @@ internal fun filterAndSummarize(res: List<HistTx>, totalRead: Int): Pair<List<Hi
     val unknownCount = filtered.count { it.priceUsd == null }
     val pricedCount = filtered.size - unknownCount
     val summary = buildString {
-        append("✅ $pricedCount تراکنش بالای ۱۰$")
+        append("✅ $pricedCount تراکنش بالای ۱$")
         if (unknownCount > 0) append(" + $unknownCount تراکنش با قیمت نامشخص")
         append(" (از $totalRead تراکنش خونده‌شده)")
     }
@@ -246,7 +247,7 @@ fun WalletHistorySection() {
                                             val mine = sols.firstOrNull { it.first == addr }
                                             if (mine != null && abs(mine.third) > 1e-9) {
                                                 val cp = sols.filter { it.first != addr && it.third * mine.third < 0 }.maxByOrNull { abs(it.third) }
-                                                res.add(HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana 🟣", "SOL", mine.third, mine.third > 0, cp?.first ?: ""))
+                                                res.add(HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana ", "SOL", mine.third, mine.third > 0, cp?.first ?: ""))
                                             }
                                         }
                                     }
@@ -319,14 +320,14 @@ fun WalletHistorySection() {
                         if (solPx != null && solPx > 0) res.forEach { if (it.symbol == "SOL" && it.priceUsd == null) it.priceUsd = solPx }
                     } catch (_: Exception) { }
 
-                    // 🚀 Sprint 7: منطق فیلتر و summary در تابع pure و تست‌پذیر
+                    //  Sprint 7: منطق فیلتر و summary در تابع pure و تست‌پذیر
                     val (filtered, sum) = filterAndSummarize(res, res.size)
                     summary = sum
                     filtered
                 }
                 list = out
             } catch (t: Throwable) {
-                err = "⚠️ خطا: ${t.message}"
+                err = "️ خطا: ${t.message}"
             }
             loading = false
         }
@@ -352,7 +353,7 @@ fun WalletHistorySection() {
                     colors = ButtonDefaults.buttonColors(containerColor = XBlue),
                     shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
                     if (loading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
-                    Text(" 📜 بخون تاریخچه رو", fontSize = 12.sp)
+                    Text("  بخون تاریخچه رو", fontSize = 12.sp)
                 }
                 if (summary.isNotEmpty()) Text(summary, fontSize = 10.sp, color = XGreen)
                 if (err != null) Text(err ?: "", fontSize = 10.sp, color = XRed)
@@ -363,7 +364,7 @@ fun WalletHistorySection() {
             Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
+                        Text(if (t.incoming) "🟢" else "", fontSize = 14.sp)
                         Spacer(Modifier.width(6.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text("${if (t.incoming) "دریافت" else "ارسال"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
