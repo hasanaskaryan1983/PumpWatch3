@@ -62,6 +62,8 @@ private val XCard = Color(0xFF1A2230)
 
 private data class ChainLite(val label: String, val host: String)
 
+// 🚀 Sprint 7 (W3): سه زنجیرهٔ پرمصرف میم‌کوینی اضافه شدند
+// (قبلاً کیف BSC در موتور ۵ بی‌صدا خالی برمی‌گشت)
 private val EVM_HOSTS = listOf(
     ChainLite("Ethereum ⚪", "https://eth.blockscout.com/"),
     ChainLite("Base 🔵", "https://base.blockscout.com/"),
@@ -69,7 +71,10 @@ private val EVM_HOSTS = listOf(
     ChainLite("Optimism 🔴", "https://optimism.blockscout.com/"),
     ChainLite("Polygon 🟣", "https://polygon.blockscout.com/"),
     ChainLite("Gnosis 🦉", "https://gnosis.blockscout.com/"),
-    ChainLite("Robinhood 🪽", "https://robinhoodchain.blockscout.com/")
+    ChainLite("Robinhood 🪽", "https://robinhoodchain.blockscout.com/"),
+    ChainLite("BSC 🟡", "https://bsc.blockscout.com/"),
+    ChainLite("Avalanche 🔺", "https://avalanche.blockscout.com/"),
+    ChainLite("Sei 🌊", "https://sei.blockscout.com/")
 )
 
 internal data class HistTx(
@@ -324,7 +329,7 @@ fun WalletHistorySection() {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📜 موتور ۵: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
+                Text("📜 موتور : تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
                 Text("فقط تراکنش‌های بالای ۱۰ دلار + تراکنش‌های با قیمت نامشخص • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
                     placeholder = { Text("آدرس کیف... (Solana یا 0x)", fontSize = 11.sp) },
