@@ -41,6 +41,10 @@ import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.solanaRaw
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -86,6 +90,24 @@ private fun kindOf(a: String): String = when {
     else -> "solana"
 }
 
+// 🚀 Sprint 7 (P0-3 invariant):
+// تراکنش با priceUsd=null هرگز به‌بهانهٔ «زیر ۱۰ دلار» حذف نمی‌شود.
+// نگه داشته می‌شود و در UI به‌صورت «❓ قیمت نامشخص» نمایش داده می‌شود.
+internal fun filterAndSummarize(res: List<HistTx>, totalRead: Int): Pair<List<HistTx>, String> {
+    if (totalRead == 0) return emptyList<HistTx>() to ""
+    val filtered = res.filter {
+        it.priceUsd == null || abs(it.amount) * it.priceUsd!! >= 10.0
+    }
+    val unknownCount = filtered.count { it.priceUsd == null }
+    val pricedCount = filtered.size - unknownCount
+    val summary = buildString {
+        append("✅ $pricedCount تراکنش بالای ۱۰$")
+        if (unknownCount > 0) append(" + $unknownCount تراکنش با قیمت نامشخص")
+        append(" (از $totalRead تراکنش خونده‌شده)")
+    }
+    return filtered.sortedByDescending { it.ts }.take(60) to summary
+}
+
 @Composable
 fun WalletHistorySection() {
     val context = LocalContext.current
@@ -115,10 +137,12 @@ fun WalletHistorySection() {
                         "ton" -> summary = "⚠️ تاریخچه TON به‌زودی اضافه می‌شه"
                         "sui" -> summary = "⚠️ تاریخچه SUI به‌زودی اضافه می‌شه"
                         "evm" -> {
+                            // 🚀 Sprint 7: عمق واقعی روی EVM (قبلاً هاردکد take(20) بود)
+                            val evmDepth = depth.coerceAtMost(100)
                             for (h in EVM_HOSTS) {
                                 try {
                                     val txs = Blockscout.api(h.host).tokenTx("account", "tokentx", addr, "desc").result ?: continue
-                                    txs.take(20).forEach { t ->
+                                    txs.take(evmDepth).forEach { t ->
                                         val sym = t.tokenSymbol ?: "?"
                                         if (fs.isNotEmpty() && !sym.equals(fs, true)) return@forEach
                                         val ts = (t.timeStamp?.toLongOrNull() ?: return@forEach) * 1000
@@ -229,55 +253,76 @@ fun WalletHistorySection() {
                                 } catch (_: Exception) { }
                             }
 
-                            // P0-3: حذف take(6) — همهٔ mintها قیمت می‌گیرند، price nullable
-                            for ((short, mint) in mintByShort.entries) {
-                                try {
-                                    val at = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
-                                    val s2 = at?.symbol
-                                    val px = at?.price_usd?.toDoubleOrNull()  // P0-3: nullable (نه 0.0)
-                                    res.forEach {
-                                        if (it.chain == "Solana 🟣" && it.symbol == short) {
-                                            if (!s2.isNullOrEmpty()) it.symbol = s2
-                                            if (it.priceUsd == null && px != null && px > 0) it.priceUsd = px
+                            // 🚀 Sprint 7 (P1-4): قیمت‌گیری Solana tokenInfo به‌صورت موازی
+                            // PARALLELISM=5 + chunk delay برای جلوگیری از rate-limit
+                            // (قبلاً ترتیبی بود و O(n²) با res.forEach داخل loop)
+                            val tokenPar = 5
+                            val tokenChunkDelay = 200L
+                            val tokenEntries = mintByShort.entries.toList()
+                            coroutineScope {
+                                tokenEntries.chunked(tokenPar).forEach { chunk ->
+                                    val part = chunk.map { (short, mint) ->
+                                        async(Dispatchers.IO) {
+                                            try {
+                                                val at = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
+                                                Triple(short, at?.symbol, at?.price_usd?.toDoubleOrNull()?.takeIf { it > 0 })
+                                            } catch (_: Exception) { null }
+                                        }
+                                    }.awaitAll().filterNotNull()
+                                    for ((short, s2, px) in part) {
+                                        res.forEach {
+                                            if (it.chain == "Solana 🟣" && it.symbol == short) {
+                                                if (!s2.isNullOrEmpty()) it.symbol = s2
+                                                if (it.priceUsd == null && px != null) it.priceUsd = px
+                                            }
                                         }
                                     }
-                                } catch (_: Exception) { }
+                                    if (tokenEntries.size > tokenPar) delay(tokenChunkDelay)
+                                }
                             }
                         }
                     }
 
+                    // 🚀 Sprint 7 (P1-4): قیمت‌گیری CoinGecko chart موازی
+                    // PARALLELISM=3 + delay طولانی‌تر (CG free tier حساس‌تر است)
                     try {
                         val coins = ApiClient.getTop1000Coins()
                         val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                        // P0-3: حذف take(6) — همهٔ symbolها قیمت تاریخی می‌گیرند
-                        for (sym in res.map { it.symbol }.distinct()) {
-                            val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
-                            try {
-                                val chart = ApiClient.getCoinChart(coin.id, days = 365)
-                                val byDay = chart.prices.associate { p -> sdfDay.format(Date(p[0].toLong())) to p[1] }
-                                res.forEach { t ->
-                                    if (t.symbol.equals(sym, true)) t.priceUsd = byDay[sdfDay.format(Date(t.ts))]
+                        val chartPar = 3
+                        val chartChunkDelay = 500L
+                        val distinctSyms = res.map { it.symbol }.distinct()
+
+                        coroutineScope {
+                            distinctSyms.chunked(chartPar).forEach { chunk ->
+                                val part = chunk.map { sym ->
+                                    async(Dispatchers.IO) {
+                                        val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: return@async null
+                                        try {
+                                            val chart = ApiClient.getCoinChart(coin.id, days = 365)
+                                            val byDay = chart.prices.associate { p -> sdfDay.format(Date(p[0].toLong())) to p[1] }
+                                            Triple(sym, byDay, null as Double?)
+                                        } catch (_: Exception) { null }
+                                    }
+                                }.awaitAll().filterNotNull()
+
+                                for ((sym, byDay, _) in part) {
+                                    res.forEach { t ->
+                                        if (t.symbol.equals(sym, true)) t.priceUsd = byDay[sdfDay.format(Date(t.ts))]
+                                    }
                                 }
-                            } catch (_: Exception) { }
+                                if (distinctSyms.size > chartPar) delay(chartChunkDelay)
+                            }
                         }
-                        // P0-3: SOL price nullable (نه 0.0)
+
+                        // SOL price
                         val solPx = coins.firstOrNull { it.symbol.equals("SOL", true) }?.current_price
                         if (solPx != null && solPx > 0) res.forEach { if (it.symbol == "SOL" && it.priceUsd == null) it.priceUsd = solPx }
                     } catch (_: Exception) { }
 
-                    val totalRead = res.size
-                    // P0-3: تراکنش بدون price حذف نمی‌شود، نگه داشته می‌شود
-                    val filtered = res.filter {
-                        it.priceUsd == null || abs(it.amount) * it.priceUsd!! >= 10.0
-                    }
-                    if (totalRead > 0) {
-                        val unknownCount = filtered.count { it.priceUsd == null }
-                        val pricedCount = filtered.size - unknownCount
-                        summary = "✅ $pricedCount تراکنش بالای ۱۰$" +
-                            if (unknownCount > 0) " + $unknownCount تراکنش با قیمت نامشخص"
-                            else "" + " (از $totalRead تراکنش خونده‌شده)"
-                    }
-                    filtered.sortedByDescending { it.ts }.take(60)
+                    // 🚀 Sprint 7: منطق فیلتر و summary در تابع pure و تست‌پذیر
+                    val (filtered, sum) = filterAndSummarize(res, res.size)
+                    summary = sum
+                    filtered
                 }
                 list = out
             } catch (t: Throwable) {
@@ -327,11 +372,11 @@ fun WalletHistorySection() {
                         Column(horizontalAlignment = Alignment.End) {
                             Text(String.format(Locale.US, "%s%.4f", if (t.incoming) "+" else "-", t.amount), fontSize = 12.sp, fontWeight = FontWeight.Black,
                                 color = if (t.incoming) XGreen else XRed)
-                            // P0-3: نمایش قیمت نامشخص به جای حذف/صفر
+                            // 🚀 Sprint 7 (P0-3): نمایش قیمت نامشخص به‌جای حذف بی‌صدا
                             if (t.priceUsd != null && t.priceUsd!! > 0) {
                                 Text("ارزش اون روز: ${String.format(Locale.US, "$%,.2f", t.amount * t.priceUsd!!)}", fontSize = 9.sp, color = XGold)
                             } else {
-                                Text("ارزش اون روز: ❓ نامشخص", fontSize = 9.sp, color = XGray, fontWeight = FontWeight.Bold)
+                                Text("ارزش اون روز: ❓ قیمت نامشخص", fontSize = 9.sp, color = XGray, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
