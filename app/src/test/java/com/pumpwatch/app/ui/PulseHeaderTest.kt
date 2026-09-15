@@ -6,10 +6,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * تست‌های واحد برای نمایش صادقانهٔ دامیننس (P0-4 invariant).
+ * تست‌های واحد برای نمایش صادقانهٔ دامیننس (P0-4 invariant)
+ * + تفکیک «در حال بارگذاری» از «ناموجود» (Sprint 8 / F1).
  *
  * اصل: هرگز عدد جعلی 0.0 نمایش داده نمی‌شود —
- * یا دادهٔ تازه، یا کش با برچسب صریح، یا «ناموجود».
+ * یا دادهٔ تازه، یا کش با برچسب صریح، یا «ناموجود»،
+ * و تا قبل از اولین پاسخ API فقط «...» خنثی.
  */
 class PulseHeaderTest {
 
@@ -46,5 +48,26 @@ class PulseHeaderTest {
     @Test
     fun `capChange both null shows unavailable`() {
         assertEquals("⚠️ ناموجود", capChangeText(null, null))
+    }
+
+    // ================= Sprint 8 / F1 =================
+
+    @Test
+    fun `while loading with no cache shows neutral dots not scary warning — F1`() {
+        val t = pendingGate(false, null, null, dominanceText(null, null))
+        assertEquals("...", t)
+        assertFalse(t.contains("⚠️"))
+    }
+
+    @Test
+    fun `while loading with cache shows cached immediately — F1`() {
+        val t = pendingGate(false, null, 51.2, dominanceText(null, 51.2))
+        assertTrue(t.contains("(cached)"))
+    }
+
+    @Test
+    fun `after load failure still shows honest unavailable — F1`() {
+        val t = pendingGate(true, null, null, dominanceText(null, null))
+        assertEquals("⚠️ ناموجود", t)
     }
 }
