@@ -85,8 +85,13 @@ internal fun capChangeText(fresh: Double?, cached: Double?): String = when {
     else -> "⚠️ ناموجود"
 }
 
+// 🚀 Sprint 8 (F1): تا قبل از اولین پاسخ API، «...» خنثی نشان بده
+// نه «⚠️ ناموجود» — چون داده در راه است، نه اینکه شکست خورده باشد
+internal fun pendingGate(loaded: Boolean, fresh: Double?, cached: Double?, actual: String): String =
+    if (!loaded && fresh == null && cached == null) "..." else actual
+
 @Composable
-private fun FngGauge(value: Int?, label: String, lastKnown: Int?) {
+private fun FngGauge(value: Int?, label: String, lastKnown: Int?, loading: Boolean) {
     val displayValue = value ?: lastKnown
     val isCached = value == null && lastKnown != null
     val color = fngColor(displayValue)
@@ -115,6 +120,7 @@ private fun FngGauge(value: Int?, label: String, lastKnown: Int?) {
                 when {
                     displayValue != null && displayValue >= 0 -> "$displayValue"
                     isCached -> "⚠️"
+                    loading -> "..."
                     else -> "--"
                 },
                 fontWeight = FontWeight.Black,
@@ -141,7 +147,6 @@ fun MarketPulseHeader() {
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
 
-    // State ها nullable هستند تا خطا از موفق متمایز شود
     var fng by remember { mutableStateOf<Int?>(null) }
     var fngLabel by remember { mutableStateOf("") }
     var btcDom by remember { mutableStateOf<Double?>(null) }
@@ -149,8 +154,9 @@ fun MarketPulseHeader() {
     var capChange by remember { mutableStateOf<Double?>(null) }
     var trending by remember { mutableStateOf<List<TrendingItem>>(emptyList()) }
     var refreshing by remember { mutableStateOf(false) }
+    // 🚀 Sprint 8 (F1): آیا اولین fetch تمام شده؟ (برای تفکیک loading از failed)
+    var loaded by remember { mutableStateOf(false) }
 
-    // Last known values برای fallback
     var lastFng by remember {
         mutableStateOf(prefs.getInt("last_fng", -1).takeIf { it >= 0 })
     }
@@ -164,7 +170,6 @@ fun MarketPulseHeader() {
         mutableStateOf(prefs.getFloat("last_cap_change", Float.NaN).takeIf { !it.isNaN() }?.toDouble())
     }
 
-    // 🚀 Sprint 7 (W4): بارگذاری به تابع مستقل تبدیل شد تا دکمهٔ 🔄 بتواند دوباره صدایش کند
     fun load() {
         scope.launch {
             refreshing = true
@@ -192,7 +197,6 @@ fun MarketPulseHeader() {
                         btcDom = it.marketCapPercentage?.get("btc")
                         ethDom = it.marketCapPercentage?.get("eth")
                         capChange = it.capChange24h
-                        // Save to prefs for fallback
                         prefs.edit()
                             .putFloat("last_btc_dom", btcDom?.toFloat() ?: Float.NaN)
                             .putFloat("last_eth_dom", ethDom?.toFloat() ?: Float.NaN)
@@ -206,6 +210,7 @@ fun MarketPulseHeader() {
                 }
             } catch (_: Exception) { }
             refreshing = false
+            loaded = true
         }
     }
 
@@ -223,16 +228,14 @@ fun MarketPulseHeader() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("📡 نبض بازار", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(Modifier.width(6.dp))
-                // 🚀 Sprint 7 (W4): تلاش مجدد دستی — اگر fetch اولیه شکست خورد، کاربر گیر نمی‌کند
                 Text(
                     if (refreshing) "⏳" else "🔄",
                     fontSize = 13.sp,
                     modifier = Modifier.clickable(enabled = !refreshing) { load() }
                 )
                 Spacer(Modifier.weight(1f))
-                // P0-4: نمایش capChange با fallback صادق
                 Text(
-                    capChangeText(capChange, lastCapChange),
+                    pendingGate(loaded, capChange, lastCapChange, capChangeText(capChange, lastCapChange)),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = when {
@@ -247,31 +250,29 @@ fun MarketPulseHeader() {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                FngGauge(fng, fngLabel, lastFng)
+                FngGauge(fng, fngLabel, lastFng, !loaded)
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // P0-4: BTC Dominance با fallback صادق
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("دامیننس BTC:", fontSize = 11.sp, color = HGray)
                         Text(
-                            dominanceText(btcDom, lastBtcDom),
+                            pendingGate(loaded, btcDom, lastBtcDom, dominanceText(btcDom, lastBtcDom)),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (btcDom != null) HOrange else HGray
                         )
                     }
-                    // P0-4: ETH Dominance با fallback صادق
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("دامیننس ETH:", fontSize = 11.sp, color = HGray)
                         Text(
-                            dominanceText(ethDom, lastEthDom),
+                            pendingGate(loaded, ethDom, lastEthDom, dominanceText(ethDom, lastEthDom)),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (ethDom != null) HCyan else HGray
                         )
                     }
                     Text(
-                        when {
+                        if (!loaded && fng == null && lastFng == null) "..." else when {
                             fng in 0..25 -> "💡 بازار ترسیده — معمولاً فرصت خرید برای جسورها"
                             fng != null && fng!! >= 75 -> "💡 بازار حریصه — احتیاط، اصلاح نزدیکه"
                             fng != null -> "💡 بازار متعادله — منتظر سیگنال بمون"
