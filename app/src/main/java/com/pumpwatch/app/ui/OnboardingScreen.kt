@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -141,22 +140,23 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
-                Spacer(Modifier.height(64.dp))
+                // 🚀 Sprint 8 (F2): فضای بالای تصویر کمتر شد تا خود تصویر بزرگ‌تر شود
+                Spacer(Modifier.height(28.dp))
 
                 // ============ کارت تصویر ============
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f), // فضای باقیمانده به تصویر
+                        .weight(1f), // تمام فضای عمودی باقیمانده مال تصویر
                     contentAlignment = Alignment.Center
                 ) {
                     val cardShape = RoundedCornerShape(28.dp)
 
                     // درخشش پشت کارت (هاله accent)
+                    // 🚀 Sprint 8 (F2): fillMaxSize به‌جای aspectRatio افقی — هاله هم‌اندازهٔ کارت جدید
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1.30f)
+                            .fillMaxSize()
                             .blur(38.dp)
                             .alpha(0.55f)
                             .graphicsLayer { translationY = floatY * 1.6f }
@@ -164,10 +164,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
                     )
 
                     // خود کارت: تیلت سه‌بعدی + پارالاکس داخلی + زوم نفس‌کش
+                    // 🚀 Sprint 8 (F2): کارت کل فضای عمودی را پر می‌کند تا تصویر ۹:۱۶ له نشود
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1.30f)
+                            .fillMaxSize()
                             .graphicsLayer {
                                 translationY = floatY
                                 // تیلت سه‌بعدی نسبت به موقعیت سوایپ
@@ -473,7 +473,7 @@ private fun DetectiveStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
         val w = size.width
         val h = size.height
-        val flick = ((sin(story * 30f * PI.toFloat()) + 1f) / 2f).coerceIn(0f, 1f)
+        val flick = ((sin(story * 30f * PI.toFloat()) + 1f) / 2f).coerceAtLeast(0f)
         val drop = if (sin(story * 7f * PI.toFloat()) > 0.96f) 0.3f else 1f
         drawCircle(
             brush = Brush.radialGradient(
