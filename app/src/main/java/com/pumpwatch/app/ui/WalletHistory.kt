@@ -39,8 +39,10 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.Blockscout
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.SuiClient
 import com.pumpwatch.app.data.TonClient
 import com.pumpwatch.app.data.solanaRaw
+import com.pumpwatch.app.data.suiAmount
 import com.pumpwatch.app.data.tonAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -133,13 +135,111 @@ fun WalletHistorySection() {
                     val res = mutableListOf<HistTx>()
                     val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US)
                     val mintByShort = mutableMapOf<String, String>()
+                    val suiMintBySym = mutableMapOf<String, String>()
                     val fs = filterSym.trim()
 
                     when (kindOf(addr)) {
-                        "sui" -> summary = "⚠️ تاریخچه SUI به‌زودی اضافه می‌شه"
-                        // 🚀 Sprint 8 (T2): تاریخچهٔ واقعی TON از TonAPI v2
-                        // هم TonTransfer (خام) و هم JettonTransfer (توکن) پشتیبانی می‌شوند
+                        // 🚀 Sprint 8 (S3): تاریخچهٔ واقعی SUI از RPC رسمی
+                        // queryTransactionBlocks + showBalanceChanges = دقیق‌ترین دید ورود/خروج
                         // P0-3 invariant: تراکنش با قیمت نامشخص حذف نمی‌شود
+                        "sui" -> {
+                            val suiDepth = depth.coerceAtMost(100)
+                            val tb = SuiClient.txBlocks(addr, suiDepth)
+                            val dataArr = tb?.getAsJsonObject("result")?.getAsJsonArray("data")
+                            if (tb == null) {
+                                summary = "⚠️ اتصال به SUI RPC ناموفق بود — دوباره تلاش کن"
+                            } else if (dataArr == null || dataArr.size() == 0) {
+                                summary = "😴 این کیف SUI هیچ تراکنشی نداره"
+                            } else {
+                                // پاس ۱: جمع‌آوری coinType های یکتا + گرفتن متادیتا (کش)
+                                val coinTypes = mutableSetOf<String>()
+                                for (el in dataArr) {
+                                    val bc = el.asJsonObject.getAsJsonArray("balanceChanges") ?: continue
+                                    for (b in bc) {
+                                        val ct = b.asJsonObject.get("coinType")?.asString ?: continue
+                                        if (ct != "0x2::sui::SUI") coinTypes.add(ct)
+                                    }
+                                }
+                                val metaCache = mutableMapOf<String, Pair<String, Int>>()
+                                coroutineScope {
+                                    coinTypes.toList().chunked(2).forEach { chunk ->
+                                        val part = chunk.map { ct ->
+                                            async(Dispatchers.IO) {
+                                                try {
+                                                    val md = SuiClient.coinMetadata(ct)?.getAsJsonObject("result")
+                                                    val sym = md?.get("symbol")?.asString ?: ct.take(8)
+                                                    val dec = (md?.get("decimals")?.asInt ?: 9).coerceIn(0, 18)
+                                                    ct to (sym to dec)
+                                                } catch (_: Exception) { ct to (ct.take(8) to 9) }
+                                            }
+                                        }.awaitAll()
+                                        for ((ct, sd) in part) metaCache[ct] = sd
+                                        if (coinTypes.size > 2) delay(500L)
+                                    }
+                                }
+
+                                // پاس ۲: ساخت تراکنش‌ها از balanceChanges
+                                for (el in dataArr) {
+                                    val obj = el.asJsonObject
+                                    val ts = obj.get("timestampMs")?.asString?.toLongOrNull() ?: continue
+                                    val bc = obj.getAsJsonArray("balanceChanges") ?: continue
+                                    val changes = mutableListOf<Triple<String, String, Double>>()
+                                    for (b in bc) {
+                                        val o = b.asJsonObject
+                                        val ct = o.get("coinType")?.asString ?: continue
+                                        val raw = o.get("amount")?.asString ?: continue
+                                        val ownerEl = o.get("owner")
+                                        val owner = if (ownerEl != null && ownerEl.isJsonObject)
+                                            ownerEl.asJsonObject.get("AddressOwner")?.asString ?: "" else ""
+                                        if (owner.isEmpty()) continue
+                                        val scaled: Double = if (ct == "0x2::sui::SUI") {
+                                            suiAmount(raw) ?: continue
+                                        } else {
+                                            val dec = (metaCache[ct]?.second ?: 9)
+                                            var v = raw.toDoubleOrNull() ?: continue
+                                            var k = dec
+                                            while (k > 0) { v /= 10.0; k-- }
+                                            v
+                                        }
+                                        changes.add(Triple(owner, ct, scaled))
+                                    }
+                                    for (c in changes) {
+                                        if (c.first != addr) continue
+                                        val sym = if (c.second == "0x2::sui::SUI") "SUI" else (metaCache[c.second]?.first ?: c.second.take(8))
+                                        if (fs.isNotEmpty() && !sym.equals(fs, true)) continue
+                                        val cp = changes.filter { it.second == c.second && it.first != addr && it.third * c.third < 0 }
+                                            .maxByOrNull { abs(it.third) }
+                                        if (c.second != "0x2::sui::SUI") suiMintBySym[sym] = c.second
+                                        res.add(HistTx(ts, sdf.format(Date(ts)), "SUI 💧", sym, c.third, c.third > 0, cp?.first ?: ""))
+                                    }
+                                }
+
+                                // قیمت توکن‌های لیست‌نشدهٔ SUI از GeckoTerminal (parallelism=2 + 1s)
+                                val entries = suiMintBySym.entries.toList()
+                                coroutineScope {
+                                    entries.chunked(2).forEach { chunk ->
+                                        val part = chunk.map { (sym, ct) ->
+                                            async(Dispatchers.IO) {
+                                                try {
+                                                    val pools = GeckoTerminal.api.searchPools(ct).data
+                                                    val sol = pools?.firstOrNull {
+                                                        it.relationships?.network?.data?.id == "sui" &&
+                                                        it.relationships?.base_token?.data?.id?.contains(ct, true) == true
+                                                    }
+                                                    sym to (sol?.attributes?.priceUsd?.toDoubleOrNull()?.takeIf { it > 0 })
+                                                } catch (_: Exception) { sym to null }
+                                            }
+                                        }.awaitAll()
+                                        for ((sym, px) in part) {
+                                            if (px != null) res.forEach {
+                                                if (it.chain == "SUI 💧" && it.symbol == sym && it.priceUsd == null) it.priceUsd = px
+                                            }
+                                        }
+                                        if (entries.size > 2) delay(1000L)
+                                    }
+                                }
+                            }
+                        }
                         "ton" -> {
                             val tonDepth = depth.coerceAtMost(100)
                             try {
@@ -148,7 +248,7 @@ fun WalletHistorySection() {
                                 if (events.isEmpty()) {
                                     summary = "😴 این کیف TON هیچ تراکنشی نداره"
                                 } else {
-                                    val jettonMints = mutableMapOf<String, Triple<String, String, Int>>() // mint -> (symbol, name, decimals)
+                                    val jettonMints = mutableMapOf<String, Triple<String, String, Int>>()
 
                                     for (e in events) {
                                         val ts = (e.timestamp ?: 0L) * 1000
@@ -185,13 +285,10 @@ fun WalletHistorySection() {
                                                     }
                                                     res.add(HistTx(ts, sdf.format(Date(ts)), "TON 🔵", sym, amt, inc, other))
                                                 }
-                                                // بقیهٔ انواع (ContractDeploy, NftTransfer و...) فعلاً رد می‌شوند
                                             }
                                         }
                                     }
 
-                                    // 🚀 Sprint 8 (T2): قیمت TON خام + Jetton ها
-                                    // TON price: از CoinGecko top1000
                                     try {
                                         val coins = ApiClient.getTop1000Coins()
                                         val tonPx = coins.firstOrNull { it.symbol.equals("TON", true) }?.current_price
@@ -200,8 +297,6 @@ fun WalletHistorySection() {
                                         }
                                     } catch (_: Exception) { }
 
-                                    // Jetton prices: جستجو در GeckoTerminal برای هر mint یکتا
-                                    // parallelism=2 + delay 1s بین chunk ها (tonapi/Gecko rate limit)
                                     val mints = jettonMints.keys.toList()
                                     coroutineScope {
                                         mints.chunked(2).forEach { chunk ->
@@ -430,7 +525,7 @@ fun WalletHistorySection() {
                 Text("📜 موتور : تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
                 Text("فقط تراکنش‌های بالای ۱۰ دلار + تراکنش‌های با قیمت نامشخص • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
-                    placeholder = { Text("آدرس کیف... (Solana یا 0x یا TON)", fontSize = 11.sp) },
+                    placeholder = { Text("آدرس کیف... (Solana / 0x / TON / SUI)", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
                 TextField(value = filterSym, onValueChange = { filterSym = it },
                     placeholder = { Text("فیلتر توکن (اختیاری)... مثلاً USELESS", fontSize = 11.sp) },
