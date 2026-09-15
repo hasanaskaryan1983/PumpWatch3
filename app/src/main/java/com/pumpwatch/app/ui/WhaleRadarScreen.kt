@@ -147,7 +147,7 @@ private data class AnalysisData(
     val flows: List<FlowRow>,
     val changePct: Double,
     val poolName: String?,
-    val source: String = "DEX"  // "BINANCE_AGG" or "DEX" or provider name
+    val source: String = "DEX"
 )
 
 private data class WhalePick(
@@ -240,9 +240,6 @@ private fun tfNameOf(k: String): String = when (k) {
     else -> "هفتگی"
 }
 
-/**
- * P0-2: برچسب شفاف منبع واقعی داده — هم نام‌های قدیم و هم جدید را می‌شناسد.
- */
 private fun sourceLabel(source: String): Pair<String, Color> = when (source) {
     "BINANCE_AGG", "BINANCE" -> "🐳 واقعی: Binance aggTrades" to WGreen
     "BYBIT" -> "🐳 واقعی: Bybit trades" to WGreen
@@ -252,8 +249,6 @@ private fun sourceLabel(source: String): Pair<String, Color> = when (source) {
     else -> "⚠️ تخمین از DEX (حجم استخر)" to WGold
 }
 
-// 🚀 Sprint 7 (H1): برچسب‌ها با شرط‌های واقعی هم‌خوان شدند
-// (قبلاً: «نقدینگی ≥ ۱۰K» ولی شرط 100_000 بود؛ «حجم ≥ ۵K» ولی شرط 50_000)
 private fun trustChecks(l: WhalePick): List<Pair<String, Boolean>> {
     val r1 = ratio(l.buysH1, l.sellsH1)
     return listOf(
@@ -489,7 +484,6 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
             }
 
             Text(verdictText(rSel), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = verdictColor(rSel))
-            // 🚀 Sprint 7 (H2): برچسب صادقانه — این‌ها معیارهای آن‌چین‌اند، نه ممیزی امنیتی
             Text("🛡️ اعتماد آن‌چین: $passed از ${checks.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue)
             Text(marketPosText(l.rank, l.marketCap), fontSize = 10.sp, color = WGray)
 
@@ -576,6 +570,9 @@ fun WhaleRadarScreen() {
     var bFlows by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
     var loadingList by remember { mutableStateOf(true) }
     var lastUpdate by remember { mutableStateOf("") }
+    // 🚀 Sprint 8 (U1): راهنمای بازشو برای دو بخش اصلی
+    var showGuideLeader by remember { mutableStateOf(false) }
+    var showGuideMeme by remember { mutableStateOf(false) }
 
     fun analyze(symbol: String, tf: String) {
         scope.launch {
@@ -620,9 +617,8 @@ fun WhaleRadarScreen() {
 
                 var poolName: String? = null
                 val flows = mutableListOf<FlowRow>()
-                var source = "DEX"  // default fallback
+                var source = "DEX"
 
-                // تلاش برای دادهٔ واقعی از زنجیرهٔ صرافی‌ها (Commit ۳ آن را فعال می‌کند)
                 try {
                     val whaleResult = withContext(Dispatchers.IO) {
                         WhaleFlowEngine.analyze(
@@ -634,7 +630,6 @@ fun WhaleRadarScreen() {
                     if (whaleResult != null && whaleResult.whaleTrades > 0) {
                         source = whaleResult.source
                         flows.add(FlowRow("۱ ساعته (${whaleResult.source})", whaleResult.whaleBuyNotional, whaleResult.whaleSellNotional))
-                        // برای ۶ و ۲۴ ساعته، از DEX fallback استفاده می‌کنیم
                         val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
                         if (pool != null) {
                             poolName = pool.attributes?.name
@@ -650,11 +645,9 @@ fun WhaleRadarScreen() {
                             flows.add(FlowRow("۲۴ ساعته (DEX)", f24.first, f24.second))
                         }
                     } else {
-                        // fallback کامل به DEX
                         throw Exception("no whale data")
                     }
                 } catch (_: Exception) {
-                    // fallback به DEX
                     try {
                         val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
                         if (pool != null) {
@@ -742,7 +735,6 @@ fun WhaleRadarScreen() {
                 val trend = trendDeferred.await()
                 val news = newsDeferred.await()
                 val markets = marketsDeferred.await()
-                // 🚀 Sprint 7: حذف fetch تکراری trendingPools (قبلاً دقیقاً همین یک بار دیگر هم fetch می‌شد)
                 val allTrending = trend
 
                 fun marketOf(sym: String): CoinMarket? = markets.firstOrNull { it.symbol.equals(sym, true) }
@@ -904,8 +896,6 @@ fun WhaleRadarScreen() {
                                             Text("${String.format(Locale.US, "%.0f", r * 100)}٪", fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (r >= 0.5) WGreen else WRed)
                                         }
                                     }
-                                    // 🚀 Sprint 7 (H2): بنر فقط با ردیف واقعی ۲۴س + نام ارز
-                                    // (قبلاً flows.last() می‌توانست ردیف ۱س باشد و بدون نام ارز گیج‌کننده شود)
                                     val f24 = an.flows.firstOrNull { it.label.contains("۲۴") }
                                     if (f24 != null) {
                                         Text(
@@ -929,9 +919,18 @@ fun WhaleRadarScreen() {
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("👑 مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰۰ CoinGecko + DEX‌ها) — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    // 🚀 Sprint 8 (U1): دکمهٔ راهنمای بازشو
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("👑 مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰۰ CoinGecko + DEX‌ها) — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { showGuideLeader = !showGuideLeader }) { Text("؟ 📖", fontSize = 11.sp) }
+                    }
+                    if (showGuideLeader) {
+                        Text(
+                            "📖 راهنما: «حجم ۱س ≥ X» یعنی مجموع خرید+فروش استخر در ۱ ساعت اخیر حداقل X دلار باشد. GeckoTerminal دادهٔ تک‌معامله نمی‌دهد، پس این آستانه روی حجم کل استخر است نه اندازهٔ هر معامله. فقط استخرهایی می‌آیند که خرید ۱س‌شان از فروش بیشتر باشد. اعداد هر کارت مربوط به تایم‌فریم انتخابی خودِ همان کارت است؛ بنر «تحلیل دلخواه» بالا جداست و جریان ۲۴ساعت همان ارز را می‌گوید.",
+                            fontSize = 10.sp, color = WBlue, lineHeight = 16.sp
+                        )
+                    }
 
-                    // 🚀 Sprint 7 (H1): برچسب صادقانهٔ آستانه + رفع برچسب تکراری «۵۰ هزار» روی چیپ ۵۰۰K
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("حجم ۱س ≥ ۵۰K", fontSize = 10.sp) })
                         FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 }, label = { Text("حجم ۱س ≥ ۱۰۰K", fontSize = 10.sp) })
@@ -959,9 +958,20 @@ fun WhaleRadarScreen() {
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("🚀 شکار میم‌کوین‌های ترند DEX (تمام شبکه‌ها — بدون محدودیت رتبه)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    // 🚀 Sprint 8 (U1): دکمهٔ راهنمای بازشو
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🚀 شکار میم‌کوین‌های ترند DEX (تمام شبکه‌ها — بدون محدودیت رتبه)", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { showGuideMeme = !showGuideMeme }) { Text("؟ 📖", fontSize = 11.sp) }
+                    }
                     Text("Solana • BSC • Base • Ethereum • TON + ${ALL_CHAINS.size - 5} شبکه دیگر", fontSize = 9.sp, color = WBlue)
-                    Text("فیلترهای امنیتی: نقدینگی ≥ ۵۰K • فشار خرید ≥ ۵۵٪ • سن ≥ ۱ ساعت • FDV سالم", fontSize = 9.sp, color = WGray)
+                    // 🚀 Sprint 8 (U1): برچسب صادقانه — این‌ها فیلتر امنیتی نیستند
+                    Text("فیلترهای نقدینگی و جریان: نقدینگی ≥ ۵۰K • فشار خرید ≥ ۵۵٪ • سن ≥ ۱ ساعت • FDV سالم", fontSize = 9.sp, color = WGray)
+                    if (showGuideMeme) {
+                        Text(
+                            "📖 راهنما: این لیست از استخرهای ترند/جدید همهٔ شبکه‌های DEX می‌آید. فیلترها فقط نقدینگی و جریان خرید/فروش را می‌سنجند — نه امنیت قرارداد هوشمند. قبل از هر خرید: کانترکت را کپی کن و در GoPlus/CoinGecko بررسی کن. میم‌کوین = ریسک بسیار بالا.",
+                            fontSize = 10.sp, color = WBlue, lineHeight = 16.sp
+                        )
+                    }
                 }
             }
 
