@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -89,7 +90,7 @@ private fun FngGauge(value: Int?, label: String, lastKnown: Int?) {
     val displayValue = value ?: lastKnown
     val isCached = value == null && lastKnown != null
     val color = fngColor(displayValue)
-    
+
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
             Canvas(modifier = Modifier.size(72.dp)) {
@@ -139,7 +140,7 @@ fun MarketPulseHeader() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
-    
+
     // State ها nullable هستند تا خطا از موفق متمایز شود
     var fng by remember { mutableStateOf<Int?>(null) }
     var fngLabel by remember { mutableStateOf("") }
@@ -148,22 +149,22 @@ fun MarketPulseHeader() {
     var capChange by remember { mutableStateOf<Double?>(null) }
     var trending by remember { mutableStateOf<List<TrendingItem>>(emptyList()) }
     var refreshing by remember { mutableStateOf(false) }
-    
+
     // Last known values برای fallback
-    var lastFng by remember { 
-        mutableStateOf(prefs.getInt("last_fng", -1).takeIf { it >= 0 }) 
+    var lastFng by remember {
+        mutableStateOf(prefs.getInt("last_fng", -1).takeIf { it >= 0 })
     }
-    var lastBtcDom by remember { 
-        mutableStateOf(prefs.getFloat("last_btc_dom", Float.NaN).takeIf { !it.isNaN() }?.toDouble()) 
+    var lastBtcDom by remember {
+        mutableStateOf(prefs.getFloat("last_btc_dom", Float.NaN).takeIf { !it.isNaN() }?.toDouble())
     }
-    var lastEthDom by remember { 
-        mutableStateOf(prefs.getFloat("last_eth_dom", Float.NaN).takeIf { !it.isNaN() }?.toDouble()) 
+    var lastEthDom by remember {
+        mutableStateOf(prefs.getFloat("last_eth_dom", Float.NaN).takeIf { !it.isNaN() }?.toDouble())
     }
-    var lastCapChange by remember { 
-        mutableStateOf(prefs.getFloat("last_cap_change", Float.NaN).takeIf { !it.isNaN() }?.toDouble()) 
+    var lastCapChange by remember {
+        mutableStateOf(prefs.getFloat("last_cap_change", Float.NaN).takeIf { !it.isNaN() }?.toDouble())
     }
 
-    // 🚀 Sprint 7 (W4): بارگذاری به تابع مستقل تبدیل شد تا دکمهٔ  بتواند دوباره صدایش کند
+    // 🚀 Sprint 7 (W4): بارگذاری به تابع مستقل تبدیل شد تا دکمهٔ 🔄 بتواند دوباره صدایش کند
     fun load() {
         scope.launch {
             refreshing = true
@@ -182,7 +183,7 @@ fun MarketPulseHeader() {
                     f.await()?.data?.firstOrNull()?.let {
                         fng = it.value?.toIntOrNull()
                         fngLabel = translateFng(it.classification)
-                        fng?.let { v -> 
+                        fng?.let { v ->
                             prefs.edit().putInt("last_fng", v).apply()
                             lastFng = v
                         }
@@ -254,8 +255,8 @@ fun MarketPulseHeader() {
                         Text("دامیننس BTC:", fontSize = 11.sp, color = HGray)
                         Text(
                             dominanceText(btcDom, lastBtcDom),
-                            fontSize = 12.sp, 
-                            fontWeight = FontWeight.Bold, 
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
                             color = if (btcDom != null) HOrange else HGray
                         )
                     }
@@ -264,8 +265,8 @@ fun MarketPulseHeader() {
                         Text("دامیننس ETH:", fontSize = 11.sp, color = HGray)
                         Text(
                             dominanceText(ethDom, lastEthDom),
-                            fontSize = 12.sp, 
-                            fontWeight = FontWeight.Bold, 
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
                             color = if (ethDom != null) HCyan else HGray
                         )
                     }
@@ -277,9 +278,9 @@ fun MarketPulseHeader() {
                             lastFng in 0..25 -> "💡 بازار ترسیده (cached) — معمولاً فرصت خرید"
                             lastFng != null && lastFng!! >= 75 -> "💡 بازار حریص (cached) — احتیاط"
                             lastFng != null -> "💡 بازار متعادله (cached)"
-                            else -> "⚠️ داده Fear & Greed در دسترس نیست"
+                            else -> "⚠️ دادهٔ Fear & Greed در دسترس نیست"
                         },
-                        fontSize = 10.sp, 
+                        fontSize = 10.sp,
                         color = if (fng != null) HGray else HGray.copy(alpha = 0.7f)
                     )
                 }
