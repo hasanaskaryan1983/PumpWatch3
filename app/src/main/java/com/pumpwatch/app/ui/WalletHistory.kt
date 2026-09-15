@@ -39,7 +39,9 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.Blockscout
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.TonClient
 import com.pumpwatch.app.data.solanaRaw
+import com.pumpwatch.app.data.tonAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -62,8 +64,6 @@ private val XCard = Color(0xFF1A2230)
 
 private data class ChainLite(val label: String, val host: String)
 
-// 🚀 Sprint 7 (W3): سه زنجیرهٔ پرمصرف میم‌کوینی اضافه شدند
-// (قبلاً کیف BSC در موتور ۵ بی‌صدا خالی برمی‌گشت)
 private val EVM_HOSTS = listOf(
     ChainLite("Ethereum ⚪", "https://eth.blockscout.com/"),
     ChainLite("Base 🔵", "https://base.blockscout.com/"),
@@ -136,8 +136,106 @@ fun WalletHistorySection() {
                     val fs = filterSym.trim()
 
                     when (kindOf(addr)) {
-                        "ton" -> summary = "⚠️ تاریخچه TON به‌زودی اضافه می‌شه"
                         "sui" -> summary = "⚠️ تاریخچه SUI به‌زودی اضافه می‌شه"
+                        // 🚀 Sprint 8 (T2): تاریخچهٔ واقعی TON از TonAPI v2
+                        // هم TonTransfer (خام) و هم JettonTransfer (توکن) پشتیبانی می‌شوند
+                        // P0-3 invariant: تراکنش با قیمت نامشخص حذف نمی‌شود
+                        "ton" -> {
+                            val tonDepth = depth.coerceAtMost(100)
+                            try {
+                                val ev = TonClient.api.events(addr, limit = tonDepth)
+                                val events = ev.events ?: emptyList()
+                                if (events.isEmpty()) {
+                                    summary = "😴 این کیف TON هیچ تراکنشی نداره"
+                                } else {
+                                    val jettonMints = mutableMapOf<String, Triple<String, String, Int>>() // mint -> (symbol, name, decimals)
+
+                                    for (e in events) {
+                                        val ts = (e.timestamp ?: 0L) * 1000
+                                        if (ts <= 0L) continue
+                                        val actions = e.actions ?: continue
+                                        for (act in actions) {
+                                            when (act.type) {
+                                                "TonTransfer" -> {
+                                                    val t = act.TonTransfer ?: continue
+                                                    val amt = tonAmount(t.amount, 9) ?: continue
+                                                    val sender = t.sender?.address ?: continue
+                                                    val receiver = t.receiver?.address ?: continue
+                                                    if (sender != addr && receiver != addr) continue
+                                                    val inc = receiver == addr
+                                                    val other = if (inc) sender else receiver
+                                                    if (fs.isNotEmpty() && !"TON".contains(fs, true)) continue
+                                                    res.add(HistTx(ts, sdf.format(Date(ts)), "TON 🔵", "TON", amt, inc, other))
+                                                }
+                                                "JettonTransfer" -> {
+                                                    val j = act.JettonTransfer ?: continue
+                                                    val meta = j.jetton ?: continue
+                                                    val mint = meta.address ?: continue
+                                                    val dec = meta.decimals ?: 9
+                                                    val amt = tonAmount(j.amount, dec) ?: continue
+                                                    val sender = j.sender?.address ?: ""
+                                                    val receiver = j.receiver?.address ?: ""
+                                                    if (sender != addr && receiver != addr) continue
+                                                    val inc = receiver == addr
+                                                    val other = if (inc) sender else receiver
+                                                    val sym = meta.symbol ?: mint.take(6)
+                                                    if (fs.isNotEmpty() && !sym.equals(fs, true)) continue
+                                                    if (!jettonMints.containsKey(mint)) {
+                                                        jettonMints[mint] = Triple(sym, meta.name ?: "", dec)
+                                                    }
+                                                    res.add(HistTx(ts, sdf.format(Date(ts)), "TON 🔵", sym, amt, inc, other))
+                                                }
+                                                // بقیهٔ انواع (ContractDeploy, NftTransfer و...) فعلاً رد می‌شوند
+                                            }
+                                        }
+                                    }
+
+                                    // 🚀 Sprint 8 (T2): قیمت TON خام + Jetton ها
+                                    // TON price: از CoinGecko top1000
+                                    try {
+                                        val coins = ApiClient.getTop1000Coins()
+                                        val tonPx = coins.firstOrNull { it.symbol.equals("TON", true) }?.current_price
+                                        if (tonPx != null && tonPx > 0) {
+                                            res.forEach { if (it.symbol == "TON" && it.priceUsd == null) it.priceUsd = tonPx }
+                                        }
+                                    } catch (_: Exception) { }
+
+                                    // Jetton prices: جستجو در GeckoTerminal برای هر mint یکتا
+                                    // parallelism=2 + delay 1s بین chunk ها (tonapi/Gecko rate limit)
+                                    val mints = jettonMints.keys.toList()
+                                    coroutineScope {
+                                        mints.chunked(2).forEach { chunk ->
+                                            val part = chunk.map { mint ->
+                                                async(Dispatchers.IO) {
+                                                    try {
+                                                        val pools = GeckoTerminal.api.searchPools(mint).data
+                                                        val sol = pools?.firstOrNull {
+                                                            it.relationships?.network?.data?.id == "ton" &&
+                                                            it.relationships?.base_token?.data?.id?.contains(mint, true) == true
+                                                        }
+                                                        val px = sol?.attributes?.priceUsd?.toDoubleOrNull()
+                                                        Pair(mint, px)
+                                                    } catch (_: Exception) { mint to null }
+                                                }
+                                            }.awaitAll()
+                                            for ((mint, px) in part) {
+                                                if (px != null && px > 0) {
+                                                    res.forEach { t ->
+                                                        if (t.chain == "TON 🔵" && jettonMints.containsKey(mint) &&
+                                                            t.symbol == jettonMints[mint]?.first) {
+                                                            if (t.priceUsd == null) t.priceUsd = px
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if (mints.size > 2) delay(1000L)
+                                        }
+                                    }
+                                }
+                            } catch (t: Throwable) {
+                                summary = "⚠️ خطا در خواندن TON: ${t.message?.take(80) ?: "نامشخص"}"
+                            }
+                        }
                         "evm" -> {
                             val evmDepth = depth.coerceAtMost(100)
                             for (h in EVM_HOSTS) {
@@ -332,7 +430,7 @@ fun WalletHistorySection() {
                 Text("📜 موتور : تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
                 Text("فقط تراکنش‌های بالای ۱۰ دلار + تراکنش‌های با قیمت نامشخص • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
-                    placeholder = { Text("آدرس کیف... (Solana یا 0x)", fontSize = 11.sp) },
+                    placeholder = { Text("آدرس کیف... (Solana یا 0x یا TON)", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
                 TextField(value = filterSym, onValueChange = { filterSym = it },
                     placeholder = { Text("فیلتر توکن (اختیاری)... مثلاً USELESS", fontSize = 11.sp) },
