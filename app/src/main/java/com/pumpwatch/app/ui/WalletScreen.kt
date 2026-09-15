@@ -49,9 +49,11 @@ import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GtTrade
 import androidx.compose.material3.FilterChipDefaults
 import com.pumpwatch.app.data.SolanaRpc
+import com.pumpwatch.app.data.SuiClient
 import com.pumpwatch.app.data.TonClient
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.solanaTyped
+import com.pumpwatch.app.data.suiAmount
 import com.pumpwatch.app.data.tonAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -192,7 +194,57 @@ fun WalletScreen() {
                 withContext(Dispatchers.IO) {
                     val kind = if (cfg.kind == "auto") detectKind(addr) else cfg.kind
                     when (kind) {
-                        "sui" -> info = "⚠️ بررسی کیف SUI به‌زودی اضافه می‌شه"
+                        // 🚀 Sprint 8 (S2): موجودی واقعی SUI از RPC رسمی
+                        // getAllBalances → برای هر کوین: متادیتا (symbol/decimals) با parallelism=2
+                        // P0-3: قیمت نامشخص → «❓ نامشخص»، هرگز عدد جعلی نه
+                        "sui" -> {
+                            val bal = SuiClient.balances(addr)
+                            val arr = bal?.getAsJsonArray("result")
+                            if (arr == null) {
+                                info = "⚠️ اتصال به SUI RPC ناموفق بود — دوباره تلاش کن"
+                            } else {
+                                val coinsS = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
+                                val pairs = mutableListOf<Pair<String, String>>()
+                                for (el in arr) {
+                                    val o = el.asJsonObject
+                                    val ct = o.get("coinType")?.asString ?: continue
+                                    val rb = o.get("balance")?.asString ?: continue
+                                    if ((rb.toLongOrNull() ?: 0L) > 0) pairs.add(ct to rb)
+                                }
+                                val held = mutableListOf<WalletHolding>()
+                                coroutineScope {
+                                    pairs.chunked(2).forEach { chunk ->
+                                        val part = chunk.map { (ct, rb) ->
+                                            async(Dispatchers.IO) {
+                                                try {
+                                                    if (ct == "0x2::sui::SUI") {
+                                                        val amt = suiAmount(rb) ?: return@async null
+                                                        WalletHolding("SUI", "Sui", amt, null, 0.0)
+                                                    } else {
+                                                        val md = SuiClient.coinMetadata(ct)?.getAsJsonObject("result")
+                                                        val sym = md?.get("symbol")?.asString ?: ct.take(8)
+                                                        var d = (md?.get("decimals")?.asInt ?: 9).coerceIn(0, 18)
+                                                        var amt = rb.toDoubleOrNull() ?: return@async null
+                                                        while (d > 0) { amt /= 10.0; d-- }
+                                                        WalletHolding(sym, "", amt, null, 0.0, contract = ct)
+                                                    }
+                                                } catch (_: Exception) { null }
+                                            }
+                                        }.awaitAll().filterNotNull()
+                                        for (h in part) if (h.amount > 0.0) held.add(h)
+                                        if (pairs.size > 2) delay(500L)
+                                    }
+                                }
+                                val suiPx = coinsS.firstOrNull { it.symbol.equals("SUI", true) }?.current_price
+                                val finalList = held.map { h ->
+                                    if (h.symbol == "SUI" && suiPx != null && suiPx > 0) h.copy(price = suiPx, value = h.amount * suiPx) else h
+                                }
+                                holdings = finalList.sortedByDescending { it.value }
+                                total = finalList.sumOf { it.value }
+                                txs = emptyList()
+                                info = if (finalList.isEmpty()) "😴 این کیف SUI خالیه" else "✅ SUI: ${finalList.size} کوین پیدا شد"
+                            }
+                        }
                         // 🚀 Sprint 8 (T3): موجودی واقعی TON از TonAPI v2
                         // دو درخواست: account (TON خام) + jettons (توکن‌ها)
                         // P0-3: قیمت نامشخص → «❓ نامشخص»، هرگز عدد جعلی نه
@@ -634,7 +686,7 @@ fun WalletScreen() {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                    Text("🔍 موتور : بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
                     Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین خرید. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                 }
                 TextField(value = address, onValueChange = { address = it },
