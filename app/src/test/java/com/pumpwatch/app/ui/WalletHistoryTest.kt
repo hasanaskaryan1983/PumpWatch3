@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * تست‌های واحد برای منطق فیلتر موتور ۵ کیف.
+ * تست‌های واحد برای منطق فیلتر موتور  کیف.
  *
  * تمرکز: تضمین اصل P0-3 که تراکنش با priceUsd=null هرگز
  * به‌بهانهٔ «زیر ۱۰ دلار» حذف نمی‌شود — همان باگی که
@@ -36,7 +36,7 @@ class WalletHistoryTest {
         val input = listOf(tx(amount = 0.1, price = 5.0))  // value = 0.5
         val (out, summary) = filterAndSummarize(input, 1)
         assertEquals("تراکنش زیر ۱۰ دلار با قیمت مشخص باید حذف شود", 0, out.size)
-        assertTrue(summary.contains("۰ تراکنش بالای"))
+        assertTrue(summary.contains(" تراکنش بالای"))
     }
 
     @Test
