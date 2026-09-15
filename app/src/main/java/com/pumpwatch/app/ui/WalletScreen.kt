@@ -49,8 +49,10 @@ import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GtTrade
 import androidx.compose.material3.FilterChipDefaults
 import com.pumpwatch.app.data.SolanaRpc
+import com.pumpwatch.app.data.TonClient
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.solanaTyped
+import com.pumpwatch.app.data.tonAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -191,7 +193,67 @@ fun WalletScreen() {
                     val kind = if (cfg.kind == "auto") detectKind(addr) else cfg.kind
                     when (kind) {
                         "sui" -> info = "⚠️ بررسی کیف SUI به‌زودی اضافه می‌شه"
-                        "ton" -> info = "⚠️ بررسی کیف TON به‌زودی اضافه می‌شه"
+                        // 🚀 Sprint 8 (T3): موجودی واقعی TON از TonAPI v2
+                        // دو درخواست: account (TON خام) + jettons (توکن‌ها)
+                        // P0-3: قیمت نامشخص → «❓ نامشخص»، هرگز عدد جعلی نه
+                        "ton" -> {
+                            val acc = try { TonClient.api.account(addr) } catch (_: Exception) { null }
+                            val jets = try { TonClient.api.jettons(addr) } catch (_: Exception) { null }
+                            if (acc == null && jets == null) {
+                                info = "⚠️ اتصال به TonAPI ناموفق بود — دوباره تلاش کن"
+                            } else {
+                                val coinsT = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
+                                val tonPx = coinsT.firstOrNull { it.symbol.equals("TON", true) }?.current_price
+                                val list = mutableListOf<WalletHolding>()
+
+                                val tonBal = tonAmount(acc?.balance?.toString(), 9) ?: 0.0
+                                if (tonBal > 0.0) {
+                                    list.add(WalletHolding("TON", "Toncoin", tonBal, tonPx, tonBal * (tonPx ?: 0.0)))
+                                }
+
+                                for (jb in (jets?.jettons ?: emptyList())) {
+                                    val meta = jb.jetton ?: continue
+                                    val mint = meta.address ?: continue
+                                    val dec = meta.decimals ?: 9
+                                    val amt = tonAmount(jb.balance, dec) ?: continue
+                                    if (amt <= 0.0) continue
+                                    list.add(WalletHolding(meta.symbol ?: mint.take(6), meta.name ?: "", amt, null, 0.0, contract = mint))
+                                }
+
+                                // قیمت Jetton ها از GeckoTerminal — parallelism=2 + delay 1s
+                                val priceMap = mutableMapOf<String, Double>()
+                                val unpriced = list.filter { it.price == null && it.contract != null }
+                                coroutineScope {
+                                    unpriced.chunked(2).forEach { chunk ->
+                                        val part = chunk.map { h ->
+                                            async(Dispatchers.IO) {
+                                                val mint = h.contract ?: return@async null
+                                                try {
+                                                    val pools = GeckoTerminal.api.searchPools(mint).data
+                                                    val sol = pools?.firstOrNull {
+                                                        it.relationships?.network?.data?.id == "ton" &&
+                                                        it.relationships?.base_token?.data?.id?.contains(mint, true) == true
+                                                    }
+                                                    val px = sol?.attributes?.priceUsd?.toDoubleOrNull()?.takeIf { it > 0 }
+                                                    if (px != null) (h.symbol to px) else null
+                                                } catch (_: Exception) { null }
+                                            }
+                                        }.awaitAll().filterNotNull()
+                                        for ((sym, px) in part) priceMap[sym] = px
+                                        if (unpriced.size > 2) delay(1000L)
+                                    }
+                                }
+
+                                val finalList = list.map { h ->
+                                    val px = h.price ?: priceMap[h.symbol]
+                                    if (px != null && px > 0) h.copy(price = px, value = h.amount * px) else h
+                                }
+                                holdings = finalList.sortedByDescending { it.value }
+                                total = finalList.sumOf { it.value }
+                                txs = emptyList()
+                                info = "✅ TON: ${finalList.size} توکن پیدا شد"
+                            }
+                        }
                         "solana" -> {
                             val body = mapOf(
                                 "jsonrpc" to "2.0", "id" to 1,
