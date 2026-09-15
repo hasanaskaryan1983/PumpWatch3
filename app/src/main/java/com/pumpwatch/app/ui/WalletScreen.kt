@@ -78,19 +78,22 @@ private const val WALLET_CHUNK_DELAY_MS = 200L
 
 private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?, val kind: String)
 
+// 🚀 Sprint 7 (W3): سه زنجیرهٔ پرمصرف میم‌کوینی فعال شدند
+// (قبلاً bs = null بود → موتور ۱ پیام «پشتیبانی نمی‌شود» می‌داد)
+// GoPlusClient از قبل BSC=56 و Avalanche=43114 را پشتیبانی می‌کند
 private val CHAINS = listOf(
     ChainCfg("auto", "Auto 🌐", "", null, "auto"),
     ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
     ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/", "evm"),
     ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/", "evm"),
-    ChainCfg("bsc", "BNB 🟡", "bsc", null, "evm"),
+    ChainCfg("bsc", "BNB 🟡", "bsc", "https://bsc.blockscout.com/", "evm"),
     ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
     ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
     ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
-    ChainCfg("avalanche", "Avalanche 🔺", "avalanche", null, "evm"),
+    ChainCfg("avalanche", "Avalanche 🔺", "avalanche", "https://avalanche.blockscout.com/", "evm"),
     ChainCfg("ton", "TON 🔵", "ton", null, "ton"),
     ChainCfg("sui", "SUI 💧", "sui", null, "sui"),
-    ChainCfg("sei", "SEI 🌊", "sei", null, "evm"),
+    ChainCfg("sei", "SEI 🌊", "sei", "https://sei.blockscout.com/", "evm"),
     ChainCfg("gnosis", "Gnosis 🦉", "gnosis", "https://gnosis.blockscout.com/", "evm"),
     ChainCfg("robinhood", "Robinhood 🪽", "robinhood", "https://robinhoodchain.blockscout.com/", "evm")
 )
