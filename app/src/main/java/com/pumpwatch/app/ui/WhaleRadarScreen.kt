@@ -252,11 +252,13 @@ private fun sourceLabel(source: String): Pair<String, Color> = when (source) {
     else -> "⚠️ تخمین از DEX (حجم استخر)" to WGold
 }
 
+// 🚀 Sprint 7 (H1): برچسب‌ها با شرط‌های واقعی هم‌خوان شدند
+// (قبلاً: «نقدینگی ≥ ۱۰K» ولی شرط 100_000 بود؛ «حجم ≥ ۵K» ولی شرط 50_000)
 private fun trustChecks(l: WhalePick): List<Pair<String, Boolean>> {
     val r1 = ratio(l.buysH1, l.sellsH1)
     return listOf(
-        "نقدینگی ≥ ۱۰K" to (l.liquidity >= 100_000),
-        "حجم واقعی ۱س ≥ ۵K" to (l.volH1 >= 50_000),
+        "نقدینگی ≥ ۱۰۰K" to (l.liquidity >= 100_000),
+        "حجم واقعی ۱س ≥ ۵۰K" to (l.volH1 >= 50_000),
         "معامله دوطرفه (ضد هانی‌پات)" to (l.buysH1 > 0 && l.sellsH1 > 0),
         "فشار خرید مثبت ≥ ۵۵٪" to (r1 >= 0.55),
         "سن استخر ≥ ۲۴ ساعت" to (l.ageHours >= 24),
@@ -487,7 +489,8 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
             }
 
             Text(verdictText(rSel), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = verdictColor(rSel))
-            Text("🛡️ بررسی اعتماد: $passed از ${checks.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue)
+            // 🚀 Sprint 7 (H2): برچسب صادقانه — این‌ها معیارهای آن‌چین‌اند، نه ممیزی امنیتی
+            Text("🛡️ اعتماد آن‌چین: $passed از ${checks.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue)
             Text(marketPosText(l.rank, l.marketCap), fontSize = 10.sp, color = WGray)
 
             ContractRow(context, l.contract)
@@ -736,17 +739,11 @@ fun WhaleRadarScreen() {
                     catch (_: Exception) { emptyList<CoinMarket>() }
                 }
 
-                val allTrendingDeferred = async(Dispatchers.IO) {
-                    allChains.map { chain ->
-                        try { GeckoTerminal.api.trendingPools(chain).data ?: emptyList() }
-                        catch (_: Exception) { emptyList<GeckoPool>() }
-                    }.flatten()
-                }
-
                 val trend = trendDeferred.await()
                 val news = newsDeferred.await()
                 val markets = marketsDeferred.await()
-                val allTrending = allTrendingDeferred.await()
+                // 🚀 Sprint 7: حذف fetch تکراری trendingPools (قبلاً دقیقاً همین یک بار دیگر هم fetch می‌شد)
+                val allTrending = trend
 
                 fun marketOf(sym: String): CoinMarket? = markets.firstOrNull { it.symbol.equals(sym, true) }
 
@@ -884,7 +881,7 @@ fun WhaleRadarScreen() {
                                 if (an.zone != null) {
                                     Text("🐳 نهنگ‌ها حوالی ${String.format(Locale.US, "$%,.6f", an.zone)} شروع به خرید کردن", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WGold)
                                 }
-                                Text("تغییر بازه: ${String.format(Locale.US, "%+.2f%%", an.changePct)}", fontSize = 11.sp, color = if (an.changePct >= 0) WGreen else WRed)
+                                Text("تغییر بازه: ${String.format(Locale.US, "%+.2f%%", an.changePct)}", fontSize = 11.sp, color = WGreen)
 
                                 if (an.flows.isNotEmpty()) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -907,16 +904,22 @@ fun WhaleRadarScreen() {
                                             Text("${String.format(Locale.US, "%.0f", r * 100)}٪", fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (r >= 0.5) WGreen else WRed)
                                         }
                                     }
-                                    val f24 = an.flows.last()
-                                    Text(
-                                        when {
-                                            f24.buy > f24.sell * 1.5 -> "💡 نهنگ‌ها دارن این ارز رو جمع می‌کنن — پتانسیل پامپ 🚀"
-                                            f24.sell > f24.buy * 1.5 -> "💡 نهنگ‌ها دارن خالی می‌کنن — احتیاط 🩸"
-                                            else -> "💡 تعادل خرید/فروش — منتظر شکست بمون ⚖️"
-                                        },
-                                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                                        color = if (f24.buy > f24.sell * 1.5) WGreen else if (f24.sell > f24.buy * 1.5) WRed else WGold
-                                    )
+                                    // 🚀 Sprint 7 (H2): بنر فقط با ردیف واقعی ۲۴س + نام ارز
+                                    // (قبلاً flows.last() می‌توانست ردیف ۱س باشد و بدون نام ارز گیج‌کننده شود)
+                                    val f24 = an.flows.firstOrNull { it.label.contains("۲۴") }
+                                    if (f24 != null) {
+                                        Text(
+                                            when {
+                                                f24.buy > f24.sell * 1.5 -> "💡 $analysisSymbol: نهنگ‌ها دارن این ارز رو جمع می‌کنن — پتانسیل پامپ 🚀"
+                                                f24.sell > f24.buy * 1.5 -> "💡 $analysisSymbol: نهنگ‌ها دارن خالی می‌کنن — احتیاط 🩸"
+                                                else -> "💡 $analysisSymbol: تعادل خرید/فروش — منتظر شکست بمون ⚖️"
+                                            },
+                                            fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                                            color = if (f24.buy > f24.sell * 1.5) WGreen else if (f24.sell > f24.buy * 1.5) WRed else WGold
+                                        )
+                                    } else {
+                                        Text("💡 $analysisSymbol: جریان ۲۴ساعته در دسترس نیست — فقط ردیف‌های بالا معتبرند", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WGold)
+                                    }
                                 }
                             }
                         }
@@ -928,12 +931,14 @@ fun WhaleRadarScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("👑 مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰۰ CoinGecko + DEX‌ها) — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
+                    // 🚀 Sprint 7 (H1): برچسب صادقانهٔ آستانه + رفع برچسب تکراری «۵۰ هزار» روی چیپ ۵۰۰K
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 }, label = { Text("۱۰۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("۵۰ هزار", fontSize = 10.sp) })
-                        FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 }, label = { Text("۱ میلیون", fontSize = 10.sp) })
+                        FilterChip(selected = threshold == 50_000.0, onClick = { threshold = 50_000.0 }, label = { Text("حجم ۱س ≥ ۵۰K", fontSize = 10.sp) })
+                        FilterChip(selected = threshold == 100_000.0, onClick = { threshold = 100_000.0 }, label = { Text("حجم ۱س ≥ ۱۰۰K", fontSize = 10.sp) })
+                        FilterChip(selected = threshold == 500_000.0, onClick = { threshold = 500_000.0 }, label = { Text("حجم ۱س ≥ ۵۰۰K", fontSize = 10.sp) })
+                        FilterChip(selected = threshold == 1_000_000.0, onClick = { threshold = 1_000_000.0 }, label = { Text("حجم ۱س ≥ ۱M", fontSize = 10.sp) })
                     }
+                    Text("آستانه = حجم کل استخر در ۱ ساعت اخیر (نه اندازهٔ هر معامله) • فقط استخرهایی که خرید ۱س‌شان از فروش بیشتر است", fontSize = 9.sp, color = WGray)
 
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("1h" to "۱ ساعته", "4h" to "۴ ساعته", "6h" to "۶ ساعته", "12h" to "۱۲ ساعته", "24h" to "روزانه", "3d" to "۳ روزه", "1w" to "هفتگی").forEach { (k, label) ->
@@ -989,7 +994,7 @@ fun WhaleRadarScreen() {
                                 Text("💧 ${compact(m.liquidity)}", fontSize = 10.sp, color = WBlue)
                                 Text(String.format(Locale.US, "%+.1f%%", m.changeH1), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (m.changeH1 >= 0) WGreen else WRed)
                             }
-                            Text("🐳 حجم ۱س: ${compact(m.volH1)} • فشار خرید: ${String.format(Locale.US, "%.0f", ratio(m.buysH1, m.sellsH1) * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
+                            Text("🐳 حجم س: ${compact(m.volH1)} • فشار خرید: ${String.format(Locale.US, "%.0f", ratio(m.buysH1, m.sellsH1) * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
                             Text(verdictText(ratio(m.buysH1, m.sellsH1)), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = verdictColor(ratio(m.buysH1, m.sellsH1)))
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("سن: ${ageText(m.ageHours)}", fontSize = 9.sp, color = WGray)
@@ -1008,7 +1013,7 @@ fun WhaleRadarScreen() {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("🌱 تازه‌واردهای تأییدشده (فیلترهای سبک‌تر + پشتیبان پرحجم‌ها)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("اولویت با ارزهای دارای حداقل ۴ از ۷ بررسی اعتماد 🛡️ — وگرنه پرحجم‌ترین تازه‌واردها", fontSize = 9.sp, color = WGray)
+                    Text("اولویت با ارزهای دارای حداقل ۴ از ۷ معیار آن‌چین 🛡️ — وگرنه پرحجم‌ترین تازه‌واردها", fontSize = 9.sp, color = WGray)
                 }
             }
 
