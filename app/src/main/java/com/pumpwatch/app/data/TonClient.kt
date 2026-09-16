@@ -14,7 +14,8 @@ import kotlin.math.pow
  * P0-1: همهٔ فیلدها nullable اند؛ مصرف‌کننده باید حالت‌های
  * Ready / Empty / Failed را جداگانه مدیریت کند.
  *
- * Sprint 8 (T1): فقط لایهٔ داده — هنوز به هیچ UI ای وصل نیست.
+ * Sprint 9 (I2a): baseUrl قابل تزریق است (فقط برای تست با MockWebServer).
+ * در تولید همان tonapi.io پیش‌فرض است و هیچ رفتار دیگری عوض نشده.
  */
 
 data class TonAddr(val address: String?, val name: String?, val is_scam: Boolean?)
@@ -66,13 +67,26 @@ interface TonApi {
 }
 
 object TonClient {
-    val api: TonApi by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://tonapi.io/")
+    const val DEFAULT_BASE_URL = "https://tonapi.io/"
+
+    /** فقط برای تست (MockWebServer). تغییرش نمونهٔ Retrofit را باطل می‌کند. */
+    @Volatile
+    var baseUrl: String = DEFAULT_BASE_URL
+        set(value) {
+            field = value
+            cached = null
+        }
+
+    @Volatile
+    private var cached: TonApi? = null
+
+    val api: TonApi
+        get() = cached ?: Retrofit.Builder()
+            .baseUrl(baseUrl)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(TonApi::class.java)
-    }
+            .also { cached = it }
 }
 
 // 🚀 Sprint 8 (T1): تابع pure برای تبدیل رشتهٔ raw به مقدار اعشاری
