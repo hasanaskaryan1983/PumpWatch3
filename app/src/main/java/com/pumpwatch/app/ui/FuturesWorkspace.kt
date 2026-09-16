@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,10 +21,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.worker.SignalNavigator
 
 enum class FuturesTab(val title: String, val emoji: String) {
     DASHBOARD("داشبورد", "🎛️"),
@@ -41,14 +44,21 @@ private val FuturesNavBg = Color(0xFF1A0E0E)
 private val FuturesNavIdle = Color(0xFF8B949E)
 private val FuturesBg = Color(0xFF0F0B0B)
 
-/**
- * FuturesWorkspace — محیط کامل Futures با ۷ تب اختصاصی.
- * Sprint 5 (Architecture): ساختار و تب‌ها ساخته می‌شوند.
- * محتوای هر صفحه در Sprintهای بعدی (Strategy / Backtest) پیاده‌سازی می‌شود.
- */
 @Composable
 fun FuturesWorkspace() {
+    val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(FuturesTab.DASHBOARD) }
+
+    // 🚀 Sprint 11 (C2b): گوش‌دادن به SignalNavigator برای باز کردن تب اسکنر
+    // (معادل تب سیگنال در Futures) از نوتیفیکیشن
+    LaunchedEffect(Unit) {
+        SignalNavigator.observe(context).collect { pending ->
+            if (pending) {
+                selectedTab = FuturesTab.SCANNER
+                SignalNavigator.consume(context)
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -95,7 +105,6 @@ fun FuturesWorkspace() {
             }
         }
 
-        // Bottom Navigation - تک‌ردیفی برای ۷ تب
         Surface(color = FuturesNavBg, modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
@@ -135,9 +144,6 @@ private fun RowScope.FuturesNavItem(tab: FuturesTab, selected: Boolean, onClick:
     }
 }
 
-/**
- * Placeholder برای Sprint 5 — در Sprintهای ۶/۷ با محتوای واقعی جایگزین می‌شود.
- */
 @Composable
 private fun FuturesPlaceholder(emoji: String, title: String, description: String) {
     Box(
