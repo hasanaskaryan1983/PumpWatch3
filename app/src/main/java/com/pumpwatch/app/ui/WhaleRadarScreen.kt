@@ -135,7 +135,10 @@ private val ALL_CHAINS = listOf(
     "equilibrium" to "Equilibrium ⚖️",
     "genshiro" to "Genshiro 🎯",
     "calamari" to "Calamari 🦑",
-    "manta" to "Manta 🦈"
+    "manta" to "Manta 🦈",
+    // 🚀 Sprint 11 (C3): هم‌پوشانی پوشش با رادار میم
+    "sei" to "SEI 🌊",
+    "robinhood" to "Robinhood 🪽"
 )
 
 private fun chainEmoji(chain: String): String {
@@ -978,7 +981,7 @@ fun WhaleRadarScreen() {
             if (loadingList && leaders.isEmpty()) {
                 item { Text("⏳ در حال دریافت...", fontSize = 11.sp, color = WGray) }
             } else if (leaders.isEmpty()) {
-                item { Text("😴 فعلاً خرید نهنگی سنگینی در ۱۰۰ ارز برتر + DEX‌ها ثبت نشده", fontSize = 11.sp, color = WGray) }
+                item { Text("😴 فعلاً خرید نهنگی سنگینی در ۱۰۰۰ ارز برتر + DEX‌ها ثبت نشده", fontSize = 11.sp, color = WGray) }
             } else {
                 itemsIndexed(leaders) { i, l -> LeaderCard(l, i, leaderTf, bFlows) }
             }
@@ -1054,7 +1057,7 @@ fun WhaleRadarScreen() {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("🌱 تازه‌واردهای تأییدشده (فیلترهای سبک‌تر + پشتیبان پرحجم‌ها)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("اولویت با ارزهای دارای حداقل ۴ از ۷ معیار آن‌چین 🛡️ — وگرنه پرحجم‌ترین تازه‌واردها", fontSize = 9.sp, color = WGray)
+                    Text("اولویت با ارزهای دارای حداقل ۴ از  معیار آن‌چین 🛡️ — وگرنه پرحجم‌ترین تازه‌واردها", fontSize = 9.sp, color = WGray)
                 }
             }
 
