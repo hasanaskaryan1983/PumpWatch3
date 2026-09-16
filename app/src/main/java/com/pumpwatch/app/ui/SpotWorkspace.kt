@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -19,10 +20,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.MarketScreen
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.worker.SignalNavigator
 
 enum class SpotTab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
@@ -41,14 +44,21 @@ private val SpotAccent = Color(0xFF00E676)
 private val SpotNavBg = Color(0xFF121820)
 private val SpotNavIdle = Color(0xFF8B949E)
 
-/**
- * SpotWorkspace — محیط کامل Spot با ۱۰ تب اختصاصی.
- * نکتهٔ معماری: لایهٔ CoinDetail متعلق به AppShell (MainActivity) است،
- * نه این Workspace؛ پس اینجا رندر نمی‌شود.
- */
 @Composable
 fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
+    val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(SpotTab.MARKET) }
+
+    // 🚀 Sprint 11 (C2b): گوش‌دادن به SignalNavigator برای باز کردن تب سیگنال
+    // از نوتیفیکیشن (چه fresh start، چه resume از background)
+    LaunchedEffect(Unit) {
+        SignalNavigator.observe(context).collect { pending ->
+            if (pending) {
+                selectedTab = SpotTab.LOG
+                SignalNavigator.consume(context)
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f)) {
@@ -86,10 +96,6 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
     }
 }
 
-/**
- * SpotNavItem — آیتم ناوبری یک تب.
- * به‌صورت extension روی RowScope تعریف شده تا Modifier.weight(1f) در دسترس باشد.
- */
 @Composable
 private fun RowScope.SpotNavItem(tab: SpotTab, selected: Boolean, onClick: () -> Unit) {
     Column(
