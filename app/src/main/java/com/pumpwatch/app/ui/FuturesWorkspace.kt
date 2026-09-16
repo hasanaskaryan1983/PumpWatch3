@@ -49,8 +49,7 @@ fun FuturesWorkspace() {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(FuturesTab.DASHBOARD) }
 
-    // 🚀 Sprint 11 (C2b): گوش‌دادن به SignalNavigator برای باز کردن تب اسکنر
-    // (معادل تب سیگنال در Futures) از نوتیفیکیشن
+    // 🚀 Sprint 11 (C2b): کلیک روی نوتیفیکیشن → تب اسکنر
     LaunchedEffect(Unit) {
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
@@ -67,11 +66,8 @@ fun FuturesWorkspace() {
     ) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
-                FuturesTab.DASHBOARD -> FuturesPlaceholder(
-                    emoji = "🎛️",
-                    title = "داشبورد Futures",
-                    description = "وضعیت BTC/ETH • Funding • Open Interest • Liquidations • Long/Short Ratio • Top 100 Perpetual"
-                )
+                // 🚀 Sprint 12 (F2): داشبورد واقعی روی ۱۰۰ ارز برتر مارکت
+                FuturesTab.DASHBOARD -> FuturesDashboardScreen()
                 FuturesTab.SCANNER -> FuturesPlaceholder(
                     emoji = "🔍",
                     title = "اسکنر Futures",
