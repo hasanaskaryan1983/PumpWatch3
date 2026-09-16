@@ -35,6 +35,15 @@ data class CoinMarket(
     @SerializedName("low_24h") val low24h: Double?
 )
 
+// 🚀 Sprint 10 (V3b): دادهٔ خام CoinGecko برای /coins/list?include_platform=true
+// فقط id + platforms را می‌گیریم (symbol/name را نمی‌گیریم تا JSON کوچک بماند)
+data class CoinListItem(
+    val id: String,
+    val symbol: String?,
+    val name: String?,
+    val platforms: Map<String, String?>?
+)
+
 interface CoinGeckoApi {
 
     @GET("coins/markets")
@@ -59,54 +68,45 @@ interface CoinGeckoApi {
         @Query("vs_currency") vsCurrency: String = "usd",
         @Query("days") days: Int
     ): MarketChart
+
+    // 🚀 Sprint 10 (V3b): لیست همهٔ کوین‌ها با platform های کانترکت
+    // یک درخواست به‌جای هزاران درخواست جدا
+    @GET("coins/list")
+    suspend fun getCoinsList(
+        @Query("include_platform") includePlatform: Boolean = true
+    ): List<CoinListItem>
 }
 
-/**
- * Rate-limit مشترک برای همه درخواست‌های CoinGecko.
- * 
- * اصلاحات فاز ۲:
- * - MIN_INTERVAL_MS افزایش به 1500ms (CoinGecko free ~10-30 req/min)
- * - خواندن و احترام به Retry-After header
- * - پرتاب RateLimitedException پس از max retries (نه proceed بی‌صدا)
- * - AtomicLong برای thread-safety
- */
 object ThrottledHttp {
 
-    // CoinGecko free tier: ~10-30 requests/minute → ~2-6 seconds بین درخواست‌ها
-    // 1500ms یک تعادل منطقی است که هم throughput خوب دارد هم rate-limit نمی‌شود
     private const val MIN_INTERVAL_MS = 1500L
     private const val MAX_RETRIES = 5
     private const val BASE_BACKOFF_MS = 3000L
-    private const val MAX_BACKOFF_MS = 60_000L // سقف 1 دقیقه
+    private const val MAX_BACKOFF_MS = 60_000L
 
     private val lastRequestMs = AtomicLong(0L)
     private val lock = Any()
 
     private val interceptor = object : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
-            // ۱) Throttle: فاصله حداقل بین درخواست‌ها
             synchronized(lock) {
                 val wait = lastRequestMs.get() + MIN_INTERVAL_MS - System.currentTimeMillis()
                 if (wait > 0) Thread.sleep(wait)
                 lastRequestMs.set(System.currentTimeMillis())
             }
 
-            // ) Retry با backoff نمایی و احترام به Retry-After
             var retries = 0
             while (retries < MAX_RETRIES) {
                 val response = chain.proceed(chain.request())
                 if (response.code != 429) return response
 
-                // Rate-limit شد — close کن و backoff
                 response.close()
                 retries++
 
-                // خواندن Retry-After header (ثانیه)
                 val retryAfter = response.header("Retry-After")?.toLongOrNull()
                 val backoffMs = if (retryAfter != null && retryAfter > 0) {
                     (retryAfter * 1000L).coerceIn(BASE_BACKOFF_MS, MAX_BACKOFF_MS)
                 } else {
-                    // Exponential backoff: 3s, 6s, 12s, 24s, 48s
                     (BASE_BACKOFF_MS * (1L shl (retries - 1))).coerceAtMost(MAX_BACKOFF_MS)
                 }
 
@@ -114,7 +114,6 @@ object ThrottledHttp {
                 synchronized(lock) { lastRequestMs.set(System.currentTimeMillis()) }
             }
 
-            // پس از MAX_RETRIES، exception خاص پرتاب کن تا caller بداند rate-limit شده
             throw RateLimitedException("CoinGecko rate limit exceeded after $MAX_RETRIES retries")
         }
     }
@@ -123,15 +122,11 @@ object ThrottledHttp {
         OkHttpClient.Builder()
             .addInterceptor(interceptor)
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)  // 🚀 Sprint 10 (V3b): /coins/list بزرگ است
             .build()
     }
 }
 
-/**
- * Exception خاص برای rate-limit (HTTP 429).
- * Caller می‌تواند این را از سایر خطاهای شبکه تشخیص دهد.
- */
 class RateLimitedException(message: String) : IOException(message)
 
 object ApiClient {
@@ -150,12 +145,17 @@ object ApiClient {
     private const val MEM_CACHE_TTL = 120_000L
     private const val DISK_FRESH_MS = 1_800_000L
     private const val CHART_FRESH_MS = 300_000L
+    // 🚀 Sprint 10 (V3b): کش platforms طولانی (۲۴ ساعت) چون کانترکت‌ها ثابت‌اند
+    private const val PLATFORMS_FRESH_MS = 24 * 60 * 60 * 1000L
+    private const val PLATFORMS_CACHE_KEY = "platforms_v1"
 
-    // Thread-safe cache با AtomicReference/AtomicLong
     private val cache1000Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache1000TimeRef = AtomicLong(0L)
     private val cache100Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache100TimeRef = AtomicLong(0L)
+    // 🚀 Sprint 10 (V3b): کش in-memory برای platforms
+    private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
+    private val platformsTimeRef = AtomicLong(0L)
 
     val api: CoinGeckoApi by lazy {
         Retrofit.Builder()
@@ -166,8 +166,6 @@ object ApiClient {
             .create(CoinGeckoApi::class.java)
     }
 
-    // ---------- نمایش فوری: کش یا فقط ۱ صفحه ----------
-
     suspend fun getQuickCoins(): List<CoinMarket> {
         cache1000Ref.get().takeIf { it.isNotEmpty() }?.let { return it }
         loadList("m250")?.let { return it }
@@ -175,8 +173,6 @@ object ApiClient {
         OfflineCache.save(app, "m250", gson.toJson(p1))
         return p1
     }
-
-    // ---------- ۱۰۰۰ ارز کامل ----------
 
     suspend fun getTop1000Coins(forceRefresh: Boolean = false): List<CoinMarket> {
         val cached = cache1000Ref.get()
@@ -201,7 +197,6 @@ object ApiClient {
             val results = mutableListOf<CoinMarket>()
             for (page in 1..4) {
                 results.addAll(api.getMarkets(perPage = 250, page = page))
-                // افزایش delay بین صفحات: 2000ms برای CoinGecko free tier
                 if (page < 4) delay(2000)
             }
             val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
@@ -218,8 +213,6 @@ object ApiClient {
             } else throw e
         }
     }
-
-    // ---------- ۱۰۰ ارز ----------
 
     suspend fun getTop100Coins(forceRefresh: Boolean = false): List<CoinMarket> {
         val cached = cache100Ref.get()
@@ -256,8 +249,6 @@ object ApiClient {
         }
     }
 
-    // ---------- نمودار با کش ۵ دقیقه ----------
-
     suspend fun getCoinChart(id: String, days: Int = 90): MarketChart {
         val key = "chart_${id}_$days"
         val cachedJson = OfflineCache.load(app, key)
@@ -283,11 +274,72 @@ object ApiClient {
         }
     }
 
+    // 🚀 Sprint 10 (V3b): نقشهٔ coinId -> (chainId -> contractAddress)
+    // فقط یک درخواست به /coins/list?include_platform=true
+    // کش ۲۴ ساعته (کانترکت‌ها تغییر نمی‌کنند)
+    suspend fun getPlatformMap(forceRefresh: Boolean = false): Map<String, Map<String, String>> {
+        // کش in-memory
+        val cached = platformsRef.get()
+        val cachedTime = platformsTimeRef.get()
+        if (!forceRefresh && cached != null &&
+            System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
+        ) return cached
+
+        // کش دیسک
+        if (!forceRefresh && cached == null) {
+            val diskJson = OfflineCache.load(app, PLATFORMS_CACHE_KEY)
+            val diskTime = OfflineCache.time(app, PLATFORMS_CACHE_KEY)
+            if (diskJson != null && System.currentTimeMillis() - diskTime < PLATFORMS_FRESH_MS) {
+                try {
+                    val type = object : TypeToken<Map<String, Map<String, String>>>() {}.type
+                    val disk: Map<String, Map<String, String>> = gson.fromJson(diskJson, type)
+                    platformsRef.set(disk)
+                    platformsTimeRef.set(System.currentTimeMillis())
+                    return disk
+                } catch (_: Exception) { }
+            }
+        }
+
+        return try {
+            val list = api.getCoinsList(includePlatform = true)
+            val map = HashMap<String, Map<String, String>>()
+            for (item in list) {
+                val platforms = item.platforms ?: continue
+                if (platforms.isEmpty()) continue
+                val filtered = HashMap<String, String>()
+                for ((chain, addr) in platforms) {
+                    val a = addr?.trim().orEmpty()
+                    if (a.isNotEmpty()) filtered[chain] = a
+                }
+                if (filtered.isNotEmpty()) map[item.id] = filtered
+            }
+            platformsRef.set(map)
+            platformsTimeRef.set(System.currentTimeMillis())
+            OfflineCache.save(app, PLATFORMS_CACHE_KEY, gson.toJson(map))
+            map
+        } catch (e: Exception) {
+            // اگر شبکه شکست خورد، از کش قدیمی استفاده کن (بهتر از خالی)
+            val diskJson = OfflineCache.load(app, PLATFORMS_CACHE_KEY)
+            if (diskJson != null) {
+                try {
+                    val type = object : TypeToken<Map<String, Map<String, String>>>() {}.type
+                    val disk: Map<String, Map<String, String>> = gson.fromJson(diskJson, type)
+                    platformsRef.set(disk)
+                    platformsTimeRef.set(System.currentTimeMillis())
+                    return disk
+                } catch (_: Exception) { }
+            }
+            throw e
+        }
+    }
+
     fun clearMemoryCache() {
         cache1000Ref.set(emptyList())
         cache1000TimeRef.set(0L)
         cache100Ref.set(emptyList())
         cache100TimeRef.set(0L)
+        platformsRef.set(null)
+        platformsTimeRef.set(0L)
     }
 
     private fun loadList(key: String): List<CoinMarket>? {
@@ -299,4 +351,64 @@ object ApiClient {
             null
         }
     }
+}
+
+/**
+ * 🚀 Sprint 10 (V3b): helper استخراج کانترکت برای نمایش در UI
+ *
+ * @param coinId شناسهٔ CoinGecko (مثل "bitcoin", "ethereum", "solana")
+ * @param chainHint زنجیرهٔ مورد نظر (اختیاری). اگر null باشد، اولین کانترکت غیرخالی برگردانده می‌شود
+ * @return آدرس کانترکت، یا null اگر:
+ *   - ارز بومی است (BTC/ETH/SOL/TON/SUI — کانترکت ندارند)
+ *   - در نقشه نیست
+ *   - زنجیرهٔ درخواستی کانترکت ندارد
+ *
+ * ارزهای بومی با ID لیست سفید hardcode می‌شوند (نه با حدس).
+ */
+private val NATIVE_COIN_IDS = setOf(
+    "bitcoin", "ethereum", "solana", "the-open-network", "sui",
+    "cardano", "ripple", "dogecoin", "binancecoin", "polkadot",
+    "avalanche-2", "cosmos", "near", "tron", "litecoin",
+    "stellar", "internet-computer", "monero", "algorand", "filecoin",
+    "hedera-hashgraph", "vechain", "eos", "tezos", "iota",
+    "the-graph", "fantom", "aave", "decentraland", "the-sandbox"
+)
+
+fun platformContractOf(
+    map: Map<String, Map<String, String>>,
+    coinId: String,
+    chainHint: String? = null
+): String? {
+    if (coinId in NATIVE_COIN_IDS) return null
+    val platforms = map[coinId] ?: return null
+    if (chainHint != null) {
+        val direct = platforms[chainHint]
+        if (!direct.isNullOrBlank()) return direct
+        // fallback: چند نام مستعار رایج
+        val aliases = when (chainHint) {
+            "ethereum" -> listOf("ethereum", "eth")
+            "bsc" -> listOf("binance-smart-chain", "bsc")
+            "base" -> listOf("base")
+            "arbitrum" -> listOf("arbitrum-one", "arbitrum")
+            "optimism" -> listOf("optimistic-ethereum", "optimism")
+            "polygon" -> listOf("polygon-pos", "polygon")
+            "avalanche" -> listOf("avalanche", "avax")
+            "solana" -> listOf("solana")
+            "ton" -> listOf("the-open-network", "ton")
+            "sui" -> listOf("sui")
+            else -> listOf(chainHint)
+        }
+        for (a in aliases) {
+            val v = platforms[a]
+            if (!v.isNullOrBlank()) return v
+        }
+        return null
+    }
+    // بدون hint: اولین کانترکت غیرخالی (ترجیحاً ethereum، بعد bsc، بعد هر چه باشد)
+    val preferred = listOf("ethereum", "binance-smart-chain", "base", "arbitrum-one", "polygon-pos")
+    for (p in preferred) {
+        val v = platforms[p]
+        if (!v.isNullOrBlank()) return v
+    }
+    return platforms.values.firstOrNull { !it.isNullOrBlank() }
 }
