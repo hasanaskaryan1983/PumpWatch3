@@ -42,7 +42,7 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
-import com.pumpwatch.app.data.KlineCache
+import com.pumpwatch.app.engine.ScoringEngine
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
 import kotlinx.coroutines.Dispatchers
@@ -53,10 +53,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
-import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 private val TGreen = Color(0xFF00E676)
 private val TRed = Color(0xFFFF5252)
@@ -316,7 +313,8 @@ fun TradesScreen() {
                     val sym = c.symbol.uppercase(Locale.US)
                     if (seen.contains(sym)) continue
                     seen.add(sym)
-                    val (trend, atr) = evalCoin(sym)
+                    // 🚀 Sprint 13 (F6b): استفاده از موتور امتیازدهی مشترک
+                    val (trend, atr) = ScoringEngine.score(sym, live = true)
                     val w = whaleMap[sym]
                     val ch24 = c.price_change_percentage_24h ?: 0.0
                     var total = trend
@@ -332,7 +330,7 @@ fun TradesScreen() {
                     seen.add(sym)
                     val px = dexInfo[sym]?.first ?: continue
                     var total = 50
-    total += when { w.first >= 0.7 -> 25; w.first >= 0.6 -> 18; else -> 8 }
+                    total += when { w.first >= 0.7 -> 25; w.first >= 0.6 -> 18; else -> 8 }
                     picks.add(ConsensusPick(sym, null, px, w.third, 50, w.first, w.second, 0.0, total.coerceIn(0, 100), true, 12.0))
                 }
 
@@ -395,7 +393,8 @@ fun TradesScreen() {
                         var tierOpened = 0
                         for (c in cands) {
                             if (tierOpened >= 2 || state.cash < 10) break
-                            val (score, atr) = evalCoin(c.symbol)
+                            // 🚀 Sprint 13 (F6b): استفاده از موتور امتیازدهی مشترک
+                            val (score, atr) = ScoringEngine.score(c.symbol, live = true)
                             val ch24 = c.price_change_percentage_24h ?: 0.0
                             if (score >= 70 || (ch24 >= 8.0 && score >= 45)) {
                                 openTrade(c.symbol.uppercase(Locale.US), tierName, c.current_price, score, atr, min(size, state.cash))
@@ -532,11 +531,11 @@ fun TradesScreen() {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
                         Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                        Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                        Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
                     }
                     realWhale[pk.symbol]?.let { rw ->
                         Text(
-                            "🐳 نهنگ واقعی (aggTrades): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۱۰۰K",
+                            "🐳 نهنگ واقعی (aggTrades): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۰۰K",
                             fontSize = 9.sp, fontWeight = FontWeight.Bold,
                             color = if (rw.buyRatio >= 0.6) TGreen else if (rw.buyRatio <= 0.4) TRed else TGray
                         )
@@ -692,95 +691,4 @@ fun TradesScreen() {
 
         Text("⚠️ شبیه‌سازی کاغذی — پول واقعی در کار نیست.", fontSize = 9.sp, color = TGold)
     }
-}
-
-/**
- * 🟢 P0-6: امتیازدهی یک ارز برای معاملهٔ خودکار — فقط با کندل‌های بسته‌شده.
- * 🚀 P1-1: کندل‌ها از KlineCache (TTL=60s) خوانده می‌شوند — کندل روزانهٔ
- *      ارزهای تکراری در هر چرخهٔ ربات دیگر call تکراری نمی‌زند.
- */
-private suspend fun evalCoin(symbol: String): Pair<Int, Double> = withContext(Dispatchers.IO) {
-    try {
-        // P1-1: مسیر امتیازدهی = cache مجاز (کندل ۱ روزه وسط روز عوض نمی‌شود)
-        val kl = KlineCache.klines("${symbol.uppercase(Locale.US)}USDT", "1d", 300)
-        // P0-6: حذف آخرین کندل (در حال تشکیل) — امتیاز فقط پس از close روزانه
-        val closedKl = kl.dropLast(1)
-        if (closedKl.size < 200) return@withContext 0 to 12.0
-        val closes = closedKl.map { it[4].asDouble }
-        val vols = closedKl.map { it[5].asDouble }
-        val weekly = closes.chunked(7).map { it.last() }
-
-        val price = closes.last()
-        val e50 = emaL(closes, 50)
-        val e200 = emaL(closes, 200)
-        var s = when {
-            price > e50 && e50 > e200 -> 50
-            price > e50 -> 25
-            price < e50 && e50 < e200 -> -50
-            else -> -25
-        }
-        s += if (macdU(closes)) 20 else -20
-        val r = rsi(closes)
-        s += when {
-            r in 45.0..65.0 -> 15
-            r < 35 -> 20
-            r > 75 -> -25
-            else -> 5
-        }
-        if (vols.size > 40) {
-            val rec = vols.takeLast(20).average()
-            val prior = vols.dropLast(20).takeLast(20).average()
-            if (prior > 0 && rec > prior * 1.2) s += 10
-        }
-        if (weekly.size >= 25) {
-            val w = weekly.last(); val e10 = emaL(weekly, 10); val e20 = emaL(weekly, 20)
-            s += when { w > e10 && e10 > e20 -> 15; w > e10 -> 8; w < e10 && e10 < e20 -> -20; else -> -8 }
-        }
-        if (closes.size >= 30) {
-            var obv = 0.0
-            val ser = mutableListOf<Double>()
-            for (i in 1 until closes.size) {
-                obv += when { closes[i] > closes[i - 1] -> vols[i]; closes[i] < closes[i - 1] -> -vols[i]; else -> 0.0 }
-                ser.add(obv)
-            }
-            if (ser.size >= 21) {
-                val now = ser.last(); val past = ser[ser.size - 21]
-                s += when { now > past * 1.05 -> 10; now > past -> 5; now < past * 0.95 -> -10; else -> -5 }
-            }
-        }
-        s = s.coerceIn(-100, 100)
-
-        var atr = 0.0
-        for (i in closes.size - 14 until closes.size) atr += abs(closes[i] - closes[i - 1])
-        atr /= 14
-        val atrPct = if (price > 0) atr / price * 100 else 12.0
-        s to atrPct
-    } catch (_: Exception) { 0 to 12.0 }
-}
-
-private fun emaL(d: List<Double>, p: Int): Double {
-    if (d.size < p) return d.lastOrNull() ?: 0.0
-    val k = 2.0 / (p + 1)
-    var e = d.take(p).average()
-    for (i in p until d.size) e = d[i] * k + e * (1 - k)
-    return e
-}
-
-private fun rsi(d: List<Double>, p: Int = 14): Double {
-    if (d.size <= p) return 50.0
-    var g = 0.0; var l = 0.0
-    for (i in 1..p) { val x = d[i] - d[i - 1]; if (x > 0) g += x else l -= x }
-    var ag = g / p; var al = l / p
-    for (i in p + 1 until d.size) {
-        val x = d[i] - d[i - 1]
-        ag = (ag * (p - 1) + max(x, 0.0)) / p
-        al = (al * (p - 1) + max(-x, 0.0)) / p
-    }
-    return if (al == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + ag / al)
-}
-
-private fun macdU(d: List<Double>): Boolean {
-    if (d.size < 35) return false
-    val p = d.dropLast(1)
-    return (emaL(d, 12) - emaL(d, 26)) > (emaL(p, 12) - emaL(p, 26))
 }
