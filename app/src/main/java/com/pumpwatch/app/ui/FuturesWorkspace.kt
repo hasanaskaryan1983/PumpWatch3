@@ -44,11 +44,6 @@ private val FuturesNavBg = Color(0xFF1A0E0E)
 private val FuturesNavIdle = Color(0xFF8B949E)
 private val FuturesBg = Color(0xFF0F0B0B)
 
-/**
- * FuturesWorkspace — محیط کامل فیوچرز با ۷ تب.
- * 🚀 Sprint 12: داشبورد (F2) و اسکنر (F3) واقعی شدند؛
- * بقیه تب‌ها placeholder صادقانه می‌مانند تا Sprint 13.
- */
 @Composable
 fun FuturesWorkspace() {
     val context = LocalContext.current
@@ -71,17 +66,15 @@ fun FuturesWorkspace() {
     ) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
-                // 🚀 Sprint 12 (F2): داشبورد واقعی روی ۱۰۰ ارز برتر مارکت
+                // 🚀 Sprint 12 (F2): داشبورد واقعی روی ۱۰ ارز برتر مارکت
                 FuturesTab.DASHBOARD -> FuturesDashboardScreen()
 
                 // 🚀 Sprint 12 (F3): اسکنر واقعی Regime/Setup/Trigger
                 FuturesTab.SCANNER -> FuturesScannerScreen()
 
-                FuturesTab.CHART -> FuturesPlaceholder(
-                    emoji = "📊",
-                    title = "نمودار و تحلیل Futures",
-                    description = "Multi-timeframe: 1D/1W (ساختار) • 4H/12H (regime) • 1H/6H (تأیید) • 15M (setup) • 5M (trigger)"
-                )
+                // 🚀 Sprint 12 (F4): نمودار چندتایم‌فریمی واقعی
+                FuturesTab.CHART -> FuturesChartScreen()
+
                 FuturesTab.ALERTS -> FuturesPlaceholder(
                     emoji = "🔔",
                     title = "هشدارهای Futures",
@@ -105,7 +98,6 @@ fun FuturesWorkspace() {
             }
         }
 
-        // Bottom Navigation - تک‌ردیفی برای ۷ تب
         Surface(color = FuturesNavBg, modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier
@@ -145,10 +137,6 @@ private fun RowScope.FuturesNavItem(tab: FuturesTab, selected: Boolean, onClick:
     }
 }
 
-/**
- * Placeholder صادقانه — برای تب‌هایی که هنوز پیاده‌سازی نشده‌اند.
- * هرگز دادهٔ جعلی نشان نمی‌دهیم.
- */
 @Composable
 private fun FuturesPlaceholder(emoji: String, title: String, description: String) {
     Box(
