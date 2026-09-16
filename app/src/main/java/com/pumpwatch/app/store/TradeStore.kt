@@ -80,6 +80,70 @@ object TradeStore {
             totalPnl = totalPnl
         )
     }
+
+    // ---------- 🚀 Sprint 13 (F6a-ext): آمار تفکیکی + R-multiple ----------
+
+    /**
+     * آمار پیشرفته: PnL دلاری + R-multiple میانگین + تفکیک منبع
+     * مصرف‌کننده: ژورنال (F6d)
+     */
+    fun advancedStats(ctx: Context): AdvancedTradeStats {
+        val all = load(ctx)
+        val closed = all.filter { it.status == "CLOSED" }
+        val wins = closed.filter { it.realizedPnl() > 0 }
+        val losses = closed.filter { it.realizedPnl() <= 0 }
+        val pnlUsd = closed.sumOf { it.realizedPnlUsd() }
+        val rMultiples = closed.mapNotNull { it.rMultiple() }
+        val avgR = if (rMultiples.isEmpty()) 0.0 else rMultiples.average()
+        val bestR = rMultiples.maxOrNull() ?: 0.0
+        val worstR = rMultiples.minOrNull() ?: 0.0
+
+        // تفکیک منبع
+        val bySource = all.groupBy { it.source }.mapValues { (_, list) ->
+            val c = list.filter { it.status == "CLOSED" }
+            SourceBreakdown(
+                count = list.size,
+                closedCount = c.size,
+                winCount = c.count { it.realizedPnl() > 0 },
+                pnlUsd = c.sumOf { it.realizedPnlUsd() }
+            )
+        }
+
+        // Max drawdown: بدترین افت متوالی روی PnL تجمعی
+        val maxDD = maxDrawdown(closed)
+
+        return AdvancedTradeStats(
+            totalClosed = closed.size,
+            wins = wins.size,
+            losses = losses.size,
+            winRate = if (closed.isEmpty()) 0.0 else wins.size * 100.0 / closed.size,
+            pnlUsd = pnlUsd,
+            avgR = avgR,
+            bestR = bestR,
+            worstR = worstR,
+            maxDrawdownPct = maxDD,
+            bySource = bySource
+        )
+    }
+
+    /**
+     * Max drawdown محاسبه‌شده از منحنی PnL تجمعی (درصد)
+     * Pure function — قابل تست
+     */
+    private fun maxDrawdown(closedTrades: List<Trade>): Double {
+        if (closedTrades.isEmpty()) return 0.0
+        val sorted = closedTrades.sortedBy { it.exitTime ?: 0L }
+        var equity = 100.0
+        var peak = 100.0
+        var maxDD = 0.0
+        for (t in sorted) {
+            equity += t.realizedPnl()
+            if (equity > peak) peak = equity
+            val dd = (peak - equity) / peak * 100.0
+            if (dd > maxDD) maxDD = dd
+        }
+        return maxDD
+    }
 }
 
 data class TradeStats(
@@ -89,4 +153,25 @@ data class TradeStats(
     val lossCount: Int,
     val winRate: Double,
     val totalPnl: Double
+)
+
+// 🚀 Sprint 13 (F6a-ext): آمار پیشرفته برای ژورنال
+data class AdvancedTradeStats(
+    val totalClosed: Int,
+    val wins: Int,
+    val losses: Int,
+    val winRate: Double,
+    val pnlUsd: Double,
+    val avgR: Double,
+    val bestR: Double,
+    val worstR: Double,
+    val maxDrawdownPct: Double,
+    val bySource: Map<String, SourceBreakdown>
+)
+
+data class SourceBreakdown(
+    val count: Int,
+    val closedCount: Int,
+    val winCount: Int,
+    val pnlUsd: Double
 )
