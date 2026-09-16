@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,6 +41,7 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.platformContractOf
 import com.pumpwatch.app.engine.SpotEngine
+import com.pumpwatch.app.engine.TopPerformersEngine
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -62,7 +64,6 @@ private fun fmtP(price: Double): String = when {
     else -> String.format(Locale.US, "$%.6f", price)
 }
 
-// 🚀 Sprint 10 (V3d): ردیف کانترکت مشترک برای TopPicks
 @Composable
 private fun ContractRow(ctx: Context, contract: String?) {
     if (contract.isNullOrEmpty()) {
@@ -93,9 +94,233 @@ private fun ContractRow(ctx: Context, contract: String?) {
     }
 }
 
+// 🚀 Sprint 12 (C4c): سه حالت — اسپات / فیوچرز / برترین‌های ۱ سال
 @Composable
 fun TopPicksScreen(mode: String) {
-    if (mode == "SPOT") SpotPicksScreen() else FutSwingScreen(mode)
+    var subTab by remember { mutableStateOf(if (mode == "SPOT") 0 else 1) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChip(
+                selected = subTab == 0,
+                onClick = { subTab = 0 },
+                label = { Text("🏦 اسپات", fontSize = 10.sp) }
+            )
+            FilterChip(
+                selected = subTab == 1,
+                onClick = { subTab = 1 },
+                label = { Text("⚡ فیوچرز", fontSize = 10.sp) }
+            )
+            FilterChip(
+                selected = subTab == 2,
+                onClick = { subTab = 2 },
+                label = { Text("📈 ۱ سال", fontSize = 10.sp) }
+            )
+        }
+
+        when (subTab) {
+            0 -> SpotPicksScreen()
+            1 -> FutSwingScreen("FUT")
+            2 -> YearlyPerformersScreen()
+        }
+    }
+}
+
+// ============================================================
+//  📈 برترین‌های ۱ سال (Sprint 12 / C4c)
+// ============================================================
+
+@Composable
+private fun YearlyPerformersScreen() {
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    var report by remember { mutableStateOf<TopPerformersEngine.Report?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    fun scan() {
+        scope.launch {
+            loading = true
+            errorMsg = null
+            try {
+                val coins = ApiClient.getTop1000Coins()
+                val platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
+                report = TopPerformersEngine.analyze(coins, platformMap)
+            } catch (e: Exception) {
+                errorMsg = "⚠️ خطا در دریافت داده: ${e.message}"
+            }
+            loading = false
+        }
+    }
+
+    LaunchedEffect(Unit) { scan() }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "📈 برترین‌های ۱ سال",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { scan() }, enabled = !loading) { Text("اسکن مجدد") }
+        }
+
+        Text(
+            "🎯 سؤال: در ۱۲ ماه گذشته کدام کوین‌ها بیشترین رشد را داشتند و روی کدام شبکه بودند؟\n" +
+            "⚠️ صداقت: ATH/ATL = بالاترین/پایین‌ترین قیمت تمام تاریخ (نه ۵۲ هفته) — CoinGecko رایگان ۵۲ هفته را نمی‌دهد.\n" +
+            "🛡️ فیلتر ایمنی: فقط کوین‌های با market_cap ≥ $10M (حذف میم‌های مرده/اسکم)",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            fontSize = 9.sp, color = TGray, lineHeight = 15.sp
+        )
+
+        if (loading) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) { CircularProgressIndicator(color = TGreen) }
+        } else if (errorMsg != null) {
+            Text(
+                errorMsg ?: "",
+                color = TRed,
+                modifier = Modifier.padding(24.dp)
+            )
+        } else {
+            val rep = report
+            if (rep == null || rep.topList.isEmpty()) {
+                Text(
+                    "😴 داده‌ای برای نمایش نیست — بعداً سر بزن",
+                    color = TGray,
+                    modifier = Modifier.padding(24.dp)
+                )
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // ---------- بخش برنده‌های شبکه‌ای ----------
+                    item {
+                        Surface(color = TCard, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    "🏆 برنده‌های شبکه‌ای (کدام اکوسیستم برندهٔ سیکل بوده؟)",
+                                    fontWeight = FontWeight.Black, fontSize = 13.sp, color = TGold
+                                )
+                                Text(
+                                    "از ${rep.totalScanned} کوین اسکن‌شده، ${rep.winnersCount} کوین برنده (رشد مثبت ۱ ساله) بودند. ${rep.topList.size} برتر در لیست زیر.",
+                                    fontSize = 10.sp, color = TGray
+                                )
+                                rep.networkStats.take(6).forEach { ns ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(ns.networkEmoji, fontSize = 14.sp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(ns.network, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1f))
+                                        Text(
+                                            "${ns.winnerCount} برنده • میانگین ${String.format(Locale.US, "%+.0f%%", ns.avgChange1y)}",
+                                            fontSize = 10.sp, color = TGray
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "${ns.bestSymbol} ${String.format(Locale.US, "%+.0f%%", ns.bestChange1y)}",
+                                            fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TGreen
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---------- لیست ۳۰ کوین برتر ----------
+                    items(rep.topList) { p ->
+                        YearlyCard(p, ctx)
+                    }
+
+                    item {
+                        Text(
+                            "⚠️ رشد گذشته تضمین آینده نیست. این لیست فقط دادهٔ تاریخی است — توصیهٔ خرید نیست.",
+                            fontSize = 10.sp, color = TGold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun YearlyCard(p: TopPerformersEngine.TopPerformer, ctx: Context) {
+    Surface(color = TCard, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Row 1: نماد + شبکه + رتبه
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(p.networkEmoji, fontSize = 16.sp)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    p.coin.symbol.uppercase(Locale.US),
+                    fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.White
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("(${p.network})", fontSize = 10.sp, color = TGray)
+                Spacer(Modifier.weight(1f))
+                if (p.rank != null) {
+                    Text("#${p.rank}", fontSize = 10.sp, color = TGray)
+                }
+            }
+
+            // Row 2: رشد ۱ ساله (بزرگ سبز) + قیمت فعلی
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    String.format(Locale.US, "%+.1f%%", p.change1y),
+                    fontSize = 18.sp, fontWeight = FontWeight.Black, color = TGreen
+                )
+                Text("قیمت فعلی: ${fmtP(p.currentPrice)}", fontSize = 11.sp, color = Color.White)
+            }
+
+            // Row 3: ATH / ATL
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "ATH: ${if (p.ath != null) fmtP(p.ath) else "—"}",
+                    fontSize = 10.sp, color = TRed, fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "ATL: ${if (p.atl != null) fmtP(p.atl) else "—"}",
+                    fontSize = 10.sp, color = TGreen, fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Row 4: فاصله از ATH
+            if (p.athChangePct != null) {
+                Text(
+                    "فاصله از سقف تاریخی: ${String.format(Locale.US, "%.1f%%", p.athChangePct)}",
+                    fontSize = 10.sp, color = if (p.athChangePct < -50) TGold else TGray
+                )
+            }
+
+            // Row 5: کانترکت
+            ContractRow(ctx, p.contract)
+        }
+    }
 }
 
 // ============================================================
@@ -108,7 +333,6 @@ private fun SpotPicksScreen() {
     val ctx = LocalContext.current
     var report by remember { mutableStateOf<SpotEngine.SpotReport?>(null) }
     var loading by remember { mutableStateOf(true) }
-    // 🚀 Sprint 10 (V3d): نگاشت symbol → coinId برای یافتن کانترکت
     var symToId by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
 
@@ -116,9 +340,7 @@ private fun SpotPicksScreen() {
         scope.launch {
             loading = true
             try {
-                // ابتدا platformMap را بگیر
                 platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
-                // برای ساخت symbol→id از ۱۰۰۰ کوین استفاده می‌کنیم
                 val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
                 symToId = coins.associate { it.symbol.uppercase(Locale.US) to it.id }
 
@@ -213,7 +435,6 @@ private fun SpotPickCard(p: SpotEngine.SpotPick, contract: String?, ctx: Context
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    // 🚀 Sprint 10 (V3d): رنگ سفید برای خوانا بودن
                     Text(p.symbol, fontWeight = FontWeight.Black, fontSize = 17.sp, color = Color.White)
                     Text("قیمت: ${fmtP(p.price)}", fontSize = 12.sp, color = TGray)
                 }
@@ -226,7 +447,6 @@ private fun SpotPickCard(p: SpotEngine.SpotPick, contract: String?, ctx: Context
                 )
             }
 
-            // 🚀 Sprint 10 (V3d): ردیف کانترکت
             ContractRow(ctx, contract)
 
             Surface(color = TGreen.copy(alpha = 0.12f), shape = RoundedCornerShape(10.dp)) {
@@ -252,7 +472,7 @@ private fun SpotPickCard(p: SpotEngine.SpotPick, contract: String?, ctx: Context
 }
 
 // ============================================================
-//  فیوچرز — نوسانی کوتاه‌مدت (لیست سریع؛ موتور اصلی در تب سیگنال)
+//  فیوچرز — نوسانی کوتاه‌مدت
 // ============================================================
 
 private data class FutPick(
@@ -343,7 +563,6 @@ private fun FutSwingScreen(mode: String) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    // 🚀 Sprint 10 (V3d): رنگ سفید برای خوانا بودن
                                     Text(p.coin.symbol.uppercase(Locale.US), fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.White)
                                     Text(p.coin.name, fontSize = 11.sp, color = TGray)
                                 }
@@ -354,7 +573,6 @@ private fun FutSwingScreen(mode: String) {
                                 )
                             }
 
-                            // 🚀 Sprint 10 (V3d): ردیف کانترکت
                             ContractRow(ctx, contract)
 
                             Surface(
