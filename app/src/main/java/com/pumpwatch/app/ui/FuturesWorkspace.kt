@@ -66,20 +66,11 @@ fun FuturesWorkspace() {
     ) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
-                // 🚀 Sprint 12 (F2): داشبورد واقعی روی ۱۰ ارز برتر مارکت
                 FuturesTab.DASHBOARD -> FuturesDashboardScreen()
-
-                // 🚀 Sprint 12 (F3): اسکنر واقعی Regime/Setup/Trigger
                 FuturesTab.SCANNER -> FuturesScannerScreen()
-
-                // 🚀 Sprint 12 (F4): نمودار چندتایم‌فریمی واقعی
                 FuturesTab.CHART -> FuturesChartScreen()
-
-                FuturesTab.ALERTS -> FuturesPlaceholder(
-                    emoji = "🔔",
-                    title = "هشدارهای Futures",
-                    description = "BOS/CHOCH • Breakout • Funding extreme • OI spike • Liquidation • EMA cross • Squeeze"
-                )
+                // 🚀 Sprint 12 (F5): هشدارهای واقعی فیوچرز
+                FuturesTab.ALERTS -> FuturesAlertsScreen()
                 FuturesTab.BACKTEST -> FuturesPlaceholder(
                     emoji = "🧪",
                     title = "بک‌تست Futures",
