@@ -1,77 +1,97 @@
 package com.pumpwatch.app.data
 
-import com.google.gson.JsonObject
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.POST
+import retrofit2.http.GET
+import retrofit2.http.Path
+import retrofit2.http.Query
+import kotlin.math.pow
 
 /**
- * SUI Mainnet RPC — عمومی، بدون کلید.
- * مستندات: https://docs.sui.io/sui-jsonrpc
+ * TonAPI v2 — عمومی، بدون کلید (rate limit ~۱ درخواست/ثانیه).
+ * مستندات: https://tonapi.io/api-v2
  *
- * P0-1: پاسخ‌ها raw JsonObject اند؛ مصرف‌کننده باید حالت‌های
+ * P0-1: همهٔ فیلدها nullable اند؛ مصرف‌کننده باید حالت‌های
  * Ready / Empty / Failed را جداگانه مدیریت کند.
  *
- * Sprint 8 (S1): فقط لایهٔ داده — هنوز به هیچ UI ای وصل نیست.
+ * Sprint 9 (I2a): baseUrl قابل تزریق است (فقط برای تست با MockWebServer).
+ * در تولید همان tonapi.io پیش‌فرض است و هیچ رفتار دیگری عوض نشده.
  */
 
-interface SuiApi {
-    @POST("/")
-    suspend fun rpc(@Body body: Map<String, @JvmSuppressWildcards Any?>): JsonObject
+data class TonAddr(val address: String?, val name: String?, val is_scam: Boolean?)
+
+data class TonJettonMeta(
+    val symbol: String?,
+    val name: String?,
+    val decimals: Int?,
+    val address: String?
+)
+
+data class TonAccount(val balance: Long?, val status: String?)
+
+data class TonJettonBalance(val balance: String?, val jetton: TonJettonMeta?)
+data class TonJettons(val jettons: List<TonJettonBalance>?)
+
+data class TonTransfer(val amount: String?, val sender: TonAddr?, val receiver: TonAddr?)
+
+data class TonJettonTransfer(
+    val amount: String?,
+    val sender: TonAddr?,
+    val receiver: TonAddr?,
+    val jetton: TonJettonMeta?
+)
+
+// کلیدهای JSON در TonAPI دقیقاً با حرف بزرگ شروع می‌شوند: "TonTransfer" / "JettonTransfer"
+data class TonAction(
+    val type: String?,
+    val TonTransfer: TonTransfer?,
+    val JettonTransfer: TonJettonTransfer?
+)
+
+data class TonEvent(val event_id: String?, val timestamp: Long?, val actions: List<TonAction>?)
+data class TonEvents(val events: List<TonEvent>?, val next_from: Long?)
+
+interface TonApi {
+    @GET("v2/accounts/{addr}")
+    suspend fun account(@Path("addr") addr: String): TonAccount
+
+    @GET("v2/accounts/{addr}/jettons")
+    suspend fun jettons(@Path("addr") addr: String): TonJettons
+
+    @GET("v2/accounts/{addr}/events")
+    suspend fun events(
+        @Path("addr") addr: String,
+        @Query("limit") limit: Int,
+        @Query("before_lt") beforeLt: Long? = null
+    ): TonEvents
 }
 
-object SuiClient {
-    const val MAINNET = "https://fullnode.mainnet.sui.io/"
+object TonClient {
+    const val DEFAULT_BASE_URL = "https://tonapi.io/"
 
-    val api: SuiApi by lazy {
-        Retrofit.Builder()
-            .baseUrl(MAINNET)
+    /** فقط برای تست (MockWebServer). تغییرش نمونهٔ Retrofit را باطل می‌کند. */
+    @Volatile
+    var baseUrl: String = DEFAULT_BASE_URL
+        set(value) {
+            field = value
+            cached = null
+        }
+
+    @Volatile
+    private var cached: TonApi? = null
+
+    val api: TonApi
+        get() = cached ?: Retrofit.Builder()
+            .baseUrl(baseUrl)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(SuiApi::class.java)
-    }
-
-    /** موجودی همهٔ کوین‌ها (SUI خام + توکن‌ها) برای یک آدرس */
-    suspend fun balances(addr: String): JsonObject? = try {
-        api.rpc(mapOf(
-            "jsonrpc" to "2.0", "id" to 1,
-            "method" to "getAllBalances",
-            "params" to listOf(addr)
-        ))
-    } catch (_: Exception) { null }
-
-    /** لیست تراکنش‌های آدرس + تغییرات موجودی هر تراکنش */
-    suspend fun txBlocks(addr: String, limit: Int): JsonObject? = try {
-        api.rpc(mapOf(
-            "jsonrpc" to "2.0", "id" to 1,
-            "method" to "queryTransactionBlocks",
-            "params" to listOf(
-                mapOf(
-                    "filter" to mapOf("Address" to addr),
-                    "options" to mapOf(
-                        "showBalanceChanges" to true,
-                        "showTimestamp" to true
-                    )
-                ),
-                limit
-            )
-        ))
-    } catch (_: Exception) { null }
-
-    /** متادیتای کوین (symbol/decimals) برای یک coinType */
-    suspend fun coinMetadata(coinType: String): JsonObject? = try {
-        api.rpc(mapOf(
-            "jsonrpc" to "2.0", "id" to 1,
-            "method" to "getCoinMetadata",
-            "params" to listOf(coinType)
-        ))
-    } catch (_: Exception) { null }
+            .create(TonApi::class.java)
+            .also { cached = it }
 }
 
-// 🚀 Sprint 8 (S1): تابع pure — SUI همیشه ۹ اعشار دارد
-// (مثلاً "1000000000" = 1.0 SUI) — تست‌پذیر و بدون وابستگی به UI
-internal fun suiAmount(raw: String?): Double? {
+// 🚀 Sprint 8 (T1): تابع pure برای تبدیل رشتهٔ raw به مقدار اعشاری
+// (مثلاً "1500000000" با ۹ اعشار = 1.5 TON) — تست‌پذیر و بدون وابستگی به UI
+internal fun tonAmount(raw: String?, decimals: Int): Double? {
     val v = raw?.toDoubleOrNull() ?: return null
-    return v / 1_000_000_000.0
+    return v / 10.0.pow(decimals.coerceIn(0, 18).toDouble())
 }
