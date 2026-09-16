@@ -60,7 +60,11 @@ private val MEME_CHAINS = listOf(
     "bsc" to "BSC 🟡",
     "base" to "Base 🔵",
     "ethereum" to "Ethereum ⚪",
-    "ton" to "TON 🔵"
+    "ton" to "TON 🔵",
+    // 🚀 Sprint 11 (C3): برچسب زنجیره‌های جدید رادار میم
+    "robinhood" to "Robinhood 🪽",
+    "avalanche" to "Avalanche 🔺",
+    "sei" to "SEI 🌊"
 )
 
 private fun compact(v: Double): String = when {
@@ -96,7 +100,6 @@ private fun chainEmoji(chain: String): String {
 private fun ContractRow(ctx: Context, contract: String?) {
     if (contract.isNullOrEmpty()) {
         // 🚀 Sprint 10 (V2a): برچسب صادقانه برای نبود کانترکت
-        // (ارز بومی مثل SOL/TON یا توکن بدون داده در API)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
             Text("⛓️ بومی / بدون کانترکت", fontSize = 9.sp, color = MGray)
         }
@@ -184,6 +187,8 @@ fun MemeRadarScreen() {
                     Text("❓ اگر دادهٔ امنیتی موجود نباشد: برچسب UNKNOWN — هرگز safe", fontSize = 10.sp, color = MGray)
                     Text("📊 ضربه روی هر کارت = نمودار کامل استخر در GeckoTerminal", fontSize = 10.sp, color = MGray)
                     Text("شبکه‌ها: ${MEME_CHAINS.joinToString(" • ") { it.second }}", fontSize = 9.sp, color = MBlue)
+                    // 🚀 Sprint 11 (C3): یادداشت صادقانهٔ پوشش
+                    Text("پوشش: فقط استخرهای ترند/تازهٔ همین شبکه‌ها در لحظهٔ اسکن دیده می‌شوند. پامپ‌های زیر ۱ ساعت یا استخرهای خارج از لیست ترند ممکن است دیده نشوند — این رادار کامل نیست، صادق است.", fontSize = 9.sp, color = MGold, lineHeight = 15.sp)
                     Text(lastUpdate, fontSize = 9.sp, color = MGray)
                 }
             }
@@ -298,8 +303,7 @@ fun MemeRadarScreen() {
                                 fontSize = 9.sp, color = MGray
                             )
 
-                            // 🚀 Sprint 10 (V2a): کانترکت واقعی — اگر فیلد موجود نبود،
-                            // خطای کامپایل را بفرستید تا V2b را در MemeRadar.kt بزنم
+                            // 🚀 Sprint 10 (V2a/V2b): کانترکت واقعی از MemeSignal
                             ContractRow(context, m.contract)
                         }
                     }
