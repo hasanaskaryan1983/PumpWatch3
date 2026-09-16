@@ -1,6 +1,9 @@
 package com.pumpwatch.app
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -23,6 +26,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -57,6 +62,7 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.cmcUrl
+import com.pumpwatch.app.data.platformContractOf
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -75,6 +81,8 @@ private val DarkSurface = Color(0xFF121820)
 private val DarkCard = Color(0xFF1A2230)
 private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
+private val ContractBlue = Color(0xFF40C4FF)
+private val ContractGold = Color(0xFFFFC107)
 
 class MainActivity : ComponentActivity() {
 
@@ -243,6 +251,37 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
+// 🚀 Sprint 10 (V3e): ردیف کانترکت برای کارت‌های لیست بازار
+@Composable
+private fun ContractRow(ctx: Context, contract: String?) {
+    if (contract.isNullOrEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+            Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TextSecondary)
+        }
+        return
+    }
+    val copied = remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        Text("📋 ", fontSize = 9.sp, color = TextSecondary)
+        Text(
+            if (contract.length > 24) "${contract.take(12)}...${contract.takeLast(8)}" else contract,
+            fontSize = 9.sp, color = ContractBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+        )
+        Button(
+            onClick = {
+                try {
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("contract", contract))
+                    copied.value = true
+                } catch (_: Exception) { }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) SpotAccent else ContractGold),
+            shape = RoundedCornerShape(6.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
+    }
+}
+
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
@@ -251,6 +290,8 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
+    // 🚀 Sprint 10 (V3e): نقشهٔ کانترکت‌ها
+    var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
     val scope = rememberCoroutineScope()
 
     fun load() {
@@ -271,6 +312,8 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                         NetErr.log("MarketScreen", "coingecko/coins/markets?page=1..4", null, e)
                     }
                 }
+                // 🚀 Sprint 10 (V3e): کش ۲۴ ساعته — فقط بار اول واقعی می‌گیرد
+                platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
             } catch (e: Exception) {
                 NetErr.log("MarketScreen", "coingecko/coins/markets", null, e)
                 errorMsg = NetErr.msg(e)
@@ -331,7 +374,9 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(shown) { coin ->
-                    CoinCard(coin = coin, onClick = { onCoinClick(coin) })
+                    // 🚀 Sprint 10 (V3e): استخراج کانترکت از platformMap برای هر کوین
+                    val contract = platformContractOf(platformMap, coin.id)
+                    CoinCard(coin = coin, contract = contract, onClick = { onCoinClick(coin) })
                 }
             }
         }
@@ -339,7 +384,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 }
 
 @Composable
-fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
+fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
     val context = LocalContext.current
     val change = coin.price_change_percentage_24h ?: 0.0
     val isUp = change >= 0
@@ -349,43 +394,51 @@ fun CoinCard(coin: CoinMarket, onClick: () -> Unit) {
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text("#$rank  ${coin.symbol.uppercase(Locale.US)}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text(coin.name, color = TextSecondary, fontSize = 12.sp)
-                Text("کپ: ${fmtMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 11.sp)
-            }
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    // 🚀 Sprint 10 (V3e): رنگ سفید نماد — خوانا روی کارت تیره
+                    Text(
+                        "#$rank  ${coin.symbol.uppercase(Locale.US)}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        color = Color.White
+                    )
+                    Text(coin.name, color = TextSecondary, fontSize = 12.sp)
+                    Text("کپ: ${fmtMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 11.sp)
+                }
 
-            Text(
-                "📊",
-                fontSize = 18.sp,
-                modifier = Modifier.clickable {
-                    try {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id))))
-                    } catch (_: Exception) { }
-                }.padding(8.dp)
-            )
-
-            Spacer(Modifier.width(4.dp))
-
-            Column(horizontalAlignment = Alignment.End) {
-                Text(fmtPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Text(
-                    String.format(Locale.US, "%+.2f%%", change),
-                    color = if (isUp) SpotAccent else FuturesAccent,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    "📊",
+                    fontSize = 18.sp,
+                    modifier = Modifier.clickable {
+                        try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id))))
+                        } catch (_: Exception) { }
+                    }.padding(8.dp)
                 )
+
+                Spacer(Modifier.width(4.dp))
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(fmtPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text(
+                        String.format(Locale.US, "%+.2f%%", change),
+                        color = if (isUp) SpotAccent else FuturesAccent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
+            // 🚀 Sprint 10 (V3e): ردیف کانترکت پایین هر کارت
+            ContractRow(context, contract)
         }
     }
 }
 
-// توابع قالب‌بندی قیمت — تعریف‌شده در همین فایل با نام منحصربه‌فرد
-// تا با هیچ فایل دیگری (مثل data/Utils.kt) تداخل نداشته باشند.
 private fun fmtPrice(p: Double): String = when {
     p >= 1000 -> String.format(Locale.US, "$%.2f", p)
     p >= 1 -> String.format(Locale.US, "$%.4f", p)
