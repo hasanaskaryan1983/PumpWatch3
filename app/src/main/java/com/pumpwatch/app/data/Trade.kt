@@ -19,7 +19,11 @@ data class Trade(
     val target1: Double,
     val target2: Double,
     val exitReason: String?,     // "STOP" | "TARGET" | "REVERSAL" | "MANUAL"
-    val status: String           // "OPEN" | "CLOSED"
+    val status: String,          // "OPEN" | "CLOSED"
+    // 🚀 Sprint 13 (F6a-ext): فیلدهای جدید با default (backward compatible)
+    val source: String = "manual",   // "scanner" | "manual" | "backtest"
+    val note: String = "",
+    val sizeUsd: Double = 100.0
 ) {
     // محاسبه PnL لحظه‌ای
     fun unrealizedPnl(): Double {
@@ -37,5 +41,25 @@ data class Trade(
         val pct = if (side == "PUMP") diff / entryPrice * 100
                   else -diff / entryPrice * 100
         return pct - 0.2 // کارمزد ورود + خروج
+    }
+
+    // 🚀 Sprint 13 (F6a-ext): PnL دلاری (برای ژورنال)
+    fun realizedPnlUsd(): Double {
+        val pct = realizedPnl()
+        return sizeUsd * pct / 100.0
+    }
+
+    fun unrealizedPnlUsd(): Double {
+        val pct = unrealizedPnl()
+        return sizeUsd * pct / 100.0
+    }
+
+    // 🚀 Sprint 13 (F6a-ext): R-multiple برای ژورنال حرفه‌ای
+    fun rMultiple(): Double? {
+        if (status != "CLOSED" || exitPrice == null) return null
+        val risk = kotlin.math.abs(entryPrice - initialStop)
+        if (risk <= 0.0) return null
+        val dir = if (side == "PUMP") 1.0 else -1.0
+        return ((exitPrice - entryPrice) / risk) * dir
     }
 }
