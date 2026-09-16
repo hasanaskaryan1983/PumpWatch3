@@ -1,5 +1,7 @@
 package com.pumpwatch.app.data
 
+import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
@@ -9,12 +11,12 @@ import retrofit2.http.Path
  * DexScreener API — رایگان، بدون کلید.
  * مستندات: https://docs.dexscreener.com/api/reference
  *
- * نقش در اپ: آخرین لایهٔ قیمت‌گذاری برای توکن‌هایی که نه در CoinGecko
- * لیست‌اند و نه GeckoTerminal استخرشان را برمی‌گرداند. جست‌وجو با
- * «آدرس کانترکت» انجام می‌شود، نه نماد → بدون ابهام نمادهای مشابه.
+ * نقش: آخرین لایهٔ قیمت‌گذاری با «آدرس کانترکت» (نه نماد).
  *
- * P0-1: پاسخ‌ها nullable؛ انتخاب استخر معتبر بر عهدهٔ bestPriceUsd است.
- * Sprint 10 (C2): فقط لایهٔ داده — Wiring در C3/C4.
+ * Sprint 10 (fix): تایم‌اوت صریح اضافه شد — اگر این endpoint روی شبکهٔ
+ * کاربر کند/مسدود باشد، نباید کل اسکن کیف را گروگان بگیرد؛
+ * لایه‌های قبلی قیمت (CoinGecko/GeckoTerminal) معتبر می‌مانند و
+ * ردیف‌های باقی‌مانده صادقانه «❓ نامشخص» می‌مانند (P0-3).
  */
 
 data class DexToken(
@@ -60,6 +62,13 @@ object DexScreenerClient {
     val api: DexScreenerApi
         get() = cached ?: Retrofit.Builder()
             .baseUrl(baseUrl)
+            .client(
+                OkHttpClient.Builder()
+                    .connectTimeout(8, TimeUnit.SECONDS)
+                    .readTimeout(12, TimeUnit.SECONDS)
+                    .callTimeout(15, TimeUnit.SECONDS)
+                    .build()
+            )
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(DexScreenerApi::class.java)
