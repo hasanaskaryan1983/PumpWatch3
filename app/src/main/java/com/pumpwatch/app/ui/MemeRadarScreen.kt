@@ -85,9 +85,23 @@ private fun memeVerdict(ch1: Double, r1: Double): Pair<String, Color> = when {
     else -> "😴 فعلاً حرکت خاصی نداره" to MGray
 }
 
+// 🚀 Sprint 10 (V2a): ایموجی واقعی زنجیره — نه take(2) روی برچسب
+private fun chainEmoji(chain: String): String {
+    val label = MEME_CHAINS.firstOrNull { it.first == chain }?.second ?: return "⛓️"
+    val emoji = label.substringAfterLast(' ', "").trim()
+    return if (emoji.isEmpty()) "⛓️" else emoji
+}
+
 @Composable
 private fun ContractRow(ctx: Context, contract: String?) {
-    if (contract.isNullOrEmpty()) return
+    if (contract.isNullOrEmpty()) {
+        // 🚀 Sprint 10 (V2a): برچسب صادقانه برای نبود کانترکت
+        // (ارز بومی مثل SOL/TON یا توکن بدون داده در API)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Text("⛓️ بومی / بدون کانترکت", fontSize = 9.sp, color = MGray)
+        }
+        return
+    }
     val copied = remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Text("📋 کانترکت: ", fontSize = 9.sp, color = MGray)
@@ -205,9 +219,11 @@ fun MemeRadarScreen() {
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(chainName.take(2), fontSize = 18.sp)
+                                // 🚀 Sprint 10 (V2a): ایموجی واقعی زنجیره
+                                Text(chainEmoji(m.chain), fontSize = 18.sp)
                                 Spacer(Modifier.width(6.dp))
-                                Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                // 🚀 Sprint 10 (V2a): رنگ سفید برای خوانا بودن روی کارت تیره
+                                Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                                 Spacer(Modifier.weight(1f))
                                 Text(String.format(Locale.US, "$%.8f", m.price), fontSize = 10.sp, color = MGray)
                                 Spacer(Modifier.width(6.dp))
@@ -282,7 +298,9 @@ fun MemeRadarScreen() {
                                 fontSize = 9.sp, color = MGray
                             )
 
-                            ContractRow(context, null)  // contract address در MemeSignal نیست
+                            // 🚀 Sprint 10 (V2a): کانترکت واقعی — اگر فیلد موجود نبود،
+                            // خطای کامپایل را بفرستید تا V2b را در MemeRadar.kt بزنم
+                            ContractRow(context, m.contract)
                         }
                     }
                 }
