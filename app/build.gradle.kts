@@ -65,4 +65,6 @@ dependencies {
     // ===== Unit Tests (فاز ۱: Gate parser + MACD هم‌تراز) =====
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.0")
+    // 🚀 Sprint 9 (I2b): MockWebServer برای تست‌های e2e TonClient/SuiClient
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
