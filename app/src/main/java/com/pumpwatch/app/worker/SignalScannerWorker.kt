@@ -19,9 +19,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * SignalScannerWorker — اسکنر ساعتی سیگنال‌ها + نوتیفیکیشن
- * 
- * Sprint 11 (C2): اگر اسکن ≥ ۵ سیگنال قوی پیدا کند، نوتیفیکیشن می‌فرستد
- * تا کاربر حتی وقتی اپ بسته است از فرصت‌ها آگاه شود.
+ *
+ * Sprint 11 (C2): اگر اسکن ≥ ۵ سیگنال قوی پیدا کند، نوتیفیکیشن می‌فرستد.
+ * Sprint 11 (C2b): علاوه بر intent extra، SignalNavigator را هم mark می‌کند
+ * تا workspace حتی پس از fresh start هم تب سیگنال را باز کند.
  */
 class SignalScannerWorker(
     context: Context,
@@ -32,13 +33,12 @@ class SignalScannerWorker(
         const val KEY_MODE = "mode"
         private const val CHANNEL_ID = "signal_alerts"
         private const val NOTIFICATION_ID = 1001
-        private const val SIGNAL_THRESHOLD = 5 // حداقل ۵ سیگنال قوی برای نوتیفیکیشن
+        private const val SIGNAL_THRESHOLD = 5
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val prefs = applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
 
-        // snapshot mode از inputData یا prefs
         val modeRaw = inputData.getString(KEY_MODE)
             ?: prefs.getString("mode", "SPOT")
             ?: "SPOT"
@@ -54,32 +54,25 @@ class SignalScannerWorker(
             .putString("last_scores", "سیگنال: ${report.signalCount}\n" + report.lines.joinToString("\n"))
             .apply()
 
-        // 🚀 Sprint 11 (C2): نوتیفیکیشن برای سیگنال‌های قوی
+        // 🚀 Sprint 11 (C2 + C2b): نوتیفیکیشن + mark کردن SignalNavigator
         if (report.signalCount >= SIGNAL_THRESHOLD) {
+            SignalNavigator.markPending(applicationContext)
             sendSignalNotification(report.signalCount, mode)
         }
 
         Result.success()
     }
 
-    /**
-     * ارسال نوتیفیکیشن برای سیگنال‌های قوی
-     * - ساخت NotificationChannel اگر وجود ندارد (Android 8+)
-     * - چک کردن POST_NOTIFICATIONS permission قبل از ارسال
-     * - Intent برای باز کردن اپ (اگر MainActivity پشتیبانی کند)
-     */
     private fun sendSignalNotification(count: Int, mode: String) {
         val context = applicationContext
-        
-        // چک کردن permission (Android 13+)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) return // کاربر permission نداده، بی‌صدا رد شو
+            if (!granted) return
         }
 
-        // ساخت NotificationChannel (Android 8+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
@@ -93,12 +86,13 @@ class SignalScannerWorker(
             manager?.createNotificationChannel(channel)
         }
 
-        // Intent برای باز کردن اپ
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("open_signals_tab", true) // MainActivity می‌تواند این را بخواند
+            // C2b: این دیگر ضروری نیست (SignalNavigator کار اصلی را می‌کند)،
+            // ولی به‌عنوان fallback می‌ماند
+            putExtra("open_signals_tab", true)
         }
-        
+
         val pendingIntent = if (intent != null) {
             PendingIntent.getActivity(
                 context, 0, intent,
@@ -107,9 +101,9 @@ class SignalScannerWorker(
         } else null
 
         val modeLabel = if (mode == "FUTURES") "فیوچرز" else "اسپات"
-        
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // آیکون پیش‌فرض
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("🔥 $count سیگنال قوی جدید")
             .setContentText("حالت: $modeLabel • برای مشاهده کلیک کنید")
             .setStyle(NotificationCompat.BigTextStyle()
@@ -124,7 +118,7 @@ class SignalScannerWorker(
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
         } catch (_: SecurityException) {
-            // permission revoked mid-flight — بی‌صدا رد شو
+            // permission revoked mid-flight
         }
     }
 }
