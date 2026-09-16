@@ -1,8 +1,11 @@
 package com.pumpwatch.app.ui
 
-import androidx.compose.foundation.horizontalScroll
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,10 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,11 +32,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.platformContractOf
 import com.pumpwatch.app.engine.SpotEngine
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -57,11 +62,37 @@ private fun fmtP(price: Double): String = when {
     else -> String.format(Locale.US, "$%.6f", price)
 }
 
-/**
- * صفحه «برترین» — بسته به حالت، دو دنیای کاملاً جدا:
- *  SPOT → SpotEngine: کندل روزانه، کوین‌های قوی برای نگهداری هفته‌ها تا ماه‌ها
- *  FUT  → لیست نوسانی کوتاه‌مدت (موتور ۱ ساعته در تب سیگنال کار می‌کند)
- */
+// 🚀 Sprint 10 (V3d): ردیف کانترکت مشترک برای TopPicks
+@Composable
+private fun ContractRow(ctx: Context, contract: String?) {
+    if (contract.isNullOrEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TGray)
+        }
+        return
+    }
+    val copied = remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Text("📋 ", fontSize = 9.sp, color = TGray)
+        Text(
+            if (contract.length > 24) "${contract.take(12)}...${contract.takeLast(8)}" else contract,
+            fontSize = 9.sp, color = TBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+        )
+        Button(
+            onClick = {
+                try {
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("contract", contract))
+                    copied.value = true
+                } catch (_: Exception) { }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) TGreen else TGold),
+            shape = RoundedCornerShape(6.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
+    }
+}
+
 @Composable
 fun TopPicksScreen(mode: String) {
     if (mode == "SPOT") SpotPicksScreen() else FutSwingScreen(mode)
@@ -74,20 +105,32 @@ fun TopPicksScreen(mode: String) {
 @Composable
 private fun SpotPicksScreen() {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     var report by remember { mutableStateOf<SpotEngine.SpotReport?>(null) }
     var loading by remember { mutableStateOf(true) }
+    // 🚀 Sprint 10 (V3d): نگاشت symbol → coinId برای یافتن کانترکت
+    var symToId by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
 
     fun scan() {
         scope.launch {
             loading = true
-            report = try {
-                SpotEngine.scan(listOf(
-                    "ETH","BNB","SOL","XRP","DOGE","ADA","TRX","AVAX","LINK","DOT",
-                    "LTC","BCH","UNI","ATOM","ETC","XLM","FIL","NEAR","APT","ARB",
-                    "OP","INJ","SUI","TIA","RUNE","FET","AAVE","CRV","LDO","PEPE",
-                    "WIF","BONK","FLOKI","TON","JUP","WLD","SEI","ORDI","IMX","TAO"
-                ))
-            } catch (_: Exception) { null }
+            try {
+                // ابتدا platformMap را بگیر
+                platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
+                // برای ساخت symbol→id از ۱۰۰۰ کوین استفاده می‌کنیم
+                val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
+                symToId = coins.associate { it.symbol.uppercase(Locale.US) to it.id }
+
+                report = try {
+                    SpotEngine.scan(listOf(
+                        "ETH","BNB","SOL","XRP","DOGE","ADA","TRX","AVAX","LINK","DOT",
+                        "LTC","BCH","UNI","ATOM","ETC","XLM","FIL","NEAR","APT","ARB",
+                        "OP","INJ","SUI","TIA","RUNE","FET","AAVE","CRV","LDO","PEPE",
+                        "WIF","BONK","FLOKI","TON","JUP","WLD","SEI","ORDI","IMX","TAO"
+                    ))
+                } catch (_: Exception) { null }
+            } catch (_: Exception) { }
             loading = false
         }
     }
@@ -149,10 +192,14 @@ private fun SpotPicksScreen() {
                     )
                 } else {
                     LazyColumn(
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                        contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(picks) { p -> SpotPickCard(p) }
+                        items(picks) { p ->
+                            val coinId = symToId[p.symbol.uppercase(Locale.US)]
+                            val contract = coinId?.let { platformContractOf(platformMap, it) }
+                            SpotPickCard(p, contract, ctx)
+                        }
                     }
                 }
             }
@@ -161,12 +208,13 @@ private fun SpotPicksScreen() {
 }
 
 @Composable
-private fun SpotPickCard(p: SpotEngine.SpotPick) {
+private fun SpotPickCard(p: SpotEngine.SpotPick, contract: String?, ctx: Context) {
     Surface(color = TCard, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(p.symbol, fontWeight = FontWeight.Black, fontSize = 17.sp)
+                    // 🚀 Sprint 10 (V3d): رنگ سفید برای خوانا بودن
+                    Text(p.symbol, fontWeight = FontWeight.Black, fontSize = 17.sp, color = Color.White)
                     Text("قیمت: ${fmtP(p.price)}", fontSize = 12.sp, color = TGray)
                 }
                 Text(medalOf(p.score), fontSize = 11.sp, color = TGold, fontWeight = FontWeight.Bold)
@@ -177,6 +225,9 @@ private fun SpotPickCard(p: SpotEngine.SpotPick) {
                     color = if (p.score >= 80) TGreen else TGold
                 )
             }
+
+            // 🚀 Sprint 10 (V3d): ردیف کانترکت
+            ContractRow(ctx, contract)
 
             Surface(color = TGreen.copy(alpha = 0.12f), shape = RoundedCornerShape(10.dp)) {
                 Text(
@@ -214,14 +265,17 @@ private data class FutPick(
 @Composable
 private fun FutSwingScreen(mode: String) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     var picks by remember { mutableStateOf<List<FutPick>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
 
     fun scan() {
         scope.launch {
             loading = true
             try {
                 val coins = ApiClient.getTop1000Coins()
+                platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
                 picks = coins.mapNotNull { c ->
                     val h1 = c.change1h ?: 0.0
                     val h24 = c.price_change_percentage_24h ?: 0.0
@@ -280,15 +334,17 @@ private fun FutSwingScreen(mode: String) {
             ) { CircularProgressIndicator(color = TGreen) }
         } else {
             LazyColumn(
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(picks.take(25)) { p ->
+                    val contract = platformContractOf(platformMap, p.coin.id)
                     Surface(color = TCard, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(p.coin.symbol.uppercase(Locale.US), fontWeight = FontWeight.Black, fontSize = 16.sp)
+                                    // 🚀 Sprint 10 (V3d): رنگ سفید برای خوانا بودن
+                                    Text(p.coin.symbol.uppercase(Locale.US), fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.White)
                                     Text(p.coin.name, fontSize = 11.sp, color = TGray)
                                 }
                                 Text(
@@ -297,6 +353,10 @@ private fun FutSwingScreen(mode: String) {
                                     color = if (p.score >= 80) TGreen else TGold
                                 )
                             }
+
+                            // 🚀 Sprint 10 (V3d): ردیف کانترکت
+                            ContractRow(ctx, contract)
+
                             Surface(
                                 color = (if (p.isPump) TGreen else TRed).copy(alpha = 0.12f),
                                 shape = RoundedCornerShape(10.dp)
