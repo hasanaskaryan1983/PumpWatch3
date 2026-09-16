@@ -44,10 +44,13 @@ object MemeRadar {
 
     private const val TAG = "MemeRadar"
 
-    // 🚀 Sprint 11 (C1): پوشش گسترده‌تر — TON و Robinhood اضافه شدند.
+    // 🚀 Sprint 11 (C1 + C1b): پوشش گسترده — ۸ زنجیره
     // زنجیره‌های ناشناخته برای GeckoTerminal با try/catch بی‌صدا رد می‌شوند،
-    // پس افزودن یک id اشتباه بی‌خطر است.
-    private val CHAINS = listOf("solana", "bsc", "base", "ethereum", "ton", "robinhood")
+    // پس افزودن یک id اشتباه هرگز اسکن را نمی‌شکند.
+    private val CHAINS = listOf(
+        "solana", "bsc", "base", "ethereum",
+        "ton", "robinhood", "avalanche", "sei"
+    )
 
     var lastScanFailed = false
 
@@ -72,9 +75,10 @@ object MemeRadar {
         var anyOk = false
         val pools = mutableListOf<GeckoPool>()
         for (chain in CHAINS) {
-            onProgress(10 + CHAINS.indexOf(chain) * 10, "اسکن زنجیره $chain...")
+            onProgress(10 + CHAINS.indexOf(chain) * 8, "اسکن زنجیره $chain...")
             // 🚀 Sprint 11 (C1): دو منبع برای هر زنجیره —
-            // trending = پرتوجه‌ترین‌ها، new = تازه‌های قبل از ترند (سن ≥ ۱س بعداً فیلتر می‌شود)
+            // trending = پرتوجه‌ترین‌ها، new = تازه‌های قبل از ترند
+            // (فیلتر ایمنی سن ≥ ۱ ساعت بعداً در analyze اعمال می‌شود)
             try {
                 val r = GeckoTerminal.api.trendingPools(chain).data
                 if (r != null) {
@@ -158,6 +162,7 @@ object MemeRadar {
         val chain = p.relationships?.network?.data?.id ?: "?"
 
         // 🚀 Sprint 10 (V2b): استخراج آدرس کانترکت توکن (base_token)
+        // pool.relationships.base_token.data.id = "{chain}_{address}"
         val contractAddress = p.relationships?.base_token?.data?.id?.substringAfter('_', "")
 
         // ---------- چک Rug Safety با GoPlus API (مدل سه‌حالته) ----------
