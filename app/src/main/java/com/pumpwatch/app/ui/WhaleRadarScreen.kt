@@ -138,16 +138,12 @@ private val ALL_CHAINS = listOf(
     "manta" to "Manta 🦈"
 )
 
-// 🚀 Sprint 10 (W-fix): ایموجی بعد از آخرین فاصلهٔ برچسب است.
-// (باگ قبلی: take(2) روی "Solana 🟣" می‌شد "So" و روی همهٔ کارت‌ها چاپ می‌شد!)
 private fun chainEmoji(chain: String): String {
     val label = ALL_CHAINS.firstOrNull { it.first == chain }?.second ?: return "⛓️"
     val emoji = label.substringAfterLast(' ', "").trim()
     return if (emoji.isEmpty()) "⛓️" else emoji
 }
 
-// 🚀 Sprint 10 (W-fix): استیبل‌کوین‌ها و توکن‌های رپ‌شده «انتخاب نهنگ» نیستند —
-// حضورشان در لیست «نهنگ‌ها چی می‌خرن» نویز محض و گمراه‌کننده است
 private val NOISE_SYMBOLS = setOf(
     "USDC", "USDT", "DAI", "USDE", "FDUSD", "TUSD", "USDBC", "BUSD",
     "WETH", "WBTC", "WSOL", "WBNB", "WAVAX", "WMATIC", "WPOL",
@@ -235,9 +231,6 @@ private fun verdictColor(r1: Double): Color = when {
     else -> WGray
 }
 
-// 🚀 Sprint 10 (W-fix): هشدار صریحِ تعقیبِ پامپ — روی خودِ کارت، نه در پاورقی
-// اصل صداقت: اگر ارز ساعت آخر زیاد پامپ شده، خریدنش یعنی ریسکِ
-// «نقدینگی خروج بودن» برای خریداران اولیه
 private fun chaseRiskText(changeH1: Double): String? = when {
     changeH1 >= 25.0 -> "🛑 پامپ سنگین: ${String.format(Locale.US, "%+.0f", changeH1)}٪ ساعت آخر — خرید الان = احتمال بالای تبدیل‌شدن به نقدینگی خروجِ خریداران اولیه"
     changeH1 >= 10.0 -> "⚠️ ریسک تعقیب: ${String.format(Locale.US, "%+.0f", changeH1)}٪ ساعت آخر — هرچه پامپ بیشتر، ریسک خریدِ سقف بیشتر"
@@ -484,7 +477,8 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(chainEmoji(l.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
-                Text(l.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                // 🚀 Sprint 10 (V3a): رنگ سفید — قبلاً پیش‌فرض مشکی روی کارت تیره بود
+                Text(l.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                 Text("(${l.chainName})", fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.weight(1f))
                 Text(String.format(Locale.US, "$%.6f", l.price), fontSize = 10.sp, color = WGray)
@@ -508,7 +502,6 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
 
             Text(verdictText(rSel), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = verdictColor(rSel))
 
-            // 🚀 Sprint 10 (W-fix): هشدار تعقیب پامپ روی کارت نهنگ‌ها
             chaseRiskText(l.changeH1)?.let { risk ->
                 Text(risk, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                     color = if (l.changeH1 >= 25.0) WRed else WGold)
@@ -558,7 +551,8 @@ private fun FreshCard(f: WhalePick, index: Int) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(chainEmoji(f.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
-                Text(f.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                // 🚀 Sprint 10 (V3a): رنگ سفید
+                Text(f.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                 Text("(${f.chainName})", fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.weight(1f))
                 Text("🛡️ $passed/${checks.size}", fontSize = 11.sp, fontWeight = FontWeight.Black, color = if (passed >= 6) WGreen else WGold)
@@ -984,7 +978,7 @@ fun WhaleRadarScreen() {
             if (loadingList && leaders.isEmpty()) {
                 item { Text("⏳ در حال دریافت...", fontSize = 11.sp, color = WGray) }
             } else if (leaders.isEmpty()) {
-                item { Text("😴 فعلاً خرید نهنگی سنگینی در ۱۰۰۰ ارز برتر + DEX‌ها ثبت نشده", fontSize = 11.sp, color = WGray) }
+                item { Text("😴 فعلاً خرید نهنگی سنگینی در ۱۰۰ ارز برتر + DEX‌ها ثبت نشده", fontSize = 11.sp, color = WGray) }
             } else {
                 itemsIndexed(leaders) { i, l -> LeaderCard(l, i, leaderTf, bFlows) }
             }
@@ -997,7 +991,6 @@ fun WhaleRadarScreen() {
                     }
                     Text("Solana • BSC • Base • Ethereum • TON + ${ALL_CHAINS.size - 5} شبکه دیگر", fontSize = 9.sp, color = WBlue)
                     Text("فیلترهای نقدینگی و جریان: نقدینگی ≥ ۵۰K • فشار خرید ≥ ۵۵٪ • سن ≥ ۱ ساعت • FDV سالم", fontSize = 9.sp, color = WGray)
-                    // 🚀 Sprint 10 (W-fix): ترند = سیگنال خرید نیست؛ روی خود هدر گفته می‌شود
                     Text("🔥 ترند = پرحجم‌ترین‌های همین حالا، نه پیشنهاد خرید. ارزی که زیاد پامپ شده، جایی است که خریداران اولیه روی سرِ خریداران دیرتر خالی می‌کنند.", fontSize = 9.sp, color = WGold, lineHeight = 15.sp)
                     if (showGuideMeme) {
                         Text(
@@ -1027,7 +1020,8 @@ fun WhaleRadarScreen() {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(chainEmoji(m.chain), fontSize = 18.sp)
                                 Spacer(Modifier.width(6.dp))
-                                Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                                // 🚀 Sprint 10 (V3a): رنگ سفید
+                                Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                                 Text("(${m.chainName})", fontSize = 10.sp, color = WGray)
                                 Spacer(Modifier.weight(1f))
                                 Text("🔥 ترند #${i + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = WGold)
@@ -1039,7 +1033,6 @@ fun WhaleRadarScreen() {
                             }
                             Text("🐳 حجم س: ${compact(m.volH1)} • فشار خرید: ${String.format(Locale.US, "%.0f", ratio(m.buysH1, m.sellsH1) * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
                             Text(verdictText(ratio(m.buysH1, m.sellsH1)), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = verdictColor(ratio(m.buysH1, m.sellsH1)))
-                            // 🚀 Sprint 10 (W-fix): هشدار تعقیب پامپ روی کارت میم‌کوین
                             chaseRiskText(m.changeH1)?.let { risk ->
                                 Text(risk, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                                     color = if (m.changeH1 >= 25.0) WRed else WGold)
