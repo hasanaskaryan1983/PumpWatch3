@@ -33,7 +33,9 @@ data class MemeSignal(
     val rugScore: Int? = null,
     val rugWarnings: List<String> = emptyList(),
     // P0-1: وضعیت داده امنیتی
-    val securityStatus: String = "UNKNOWN"  // "READY" | "EMPTY" | "FAILED" | "UNKNOWN"
+    val securityStatus: String = "UNKNOWN",  // "READY" | "EMPTY" | "FAILED" | "UNKNOWN"
+    // 🚀 Sprint 10 (V2b): آدرس کانترکت توکن (برای کپی/پیست در CoinGecko/GoPlus)
+    val contract: String? = null
 )
 
 // ---------- رادار میم‌کوین (GeckoTerminal + Rug Safety Check با GoPlus) ----------
@@ -139,6 +141,10 @@ object MemeRadar {
         val sym = fullName.split("/").firstOrNull()?.trim() ?: "?"
         val chain = p.relationships?.network?.data?.id ?: "?"
 
+        // 🚀 Sprint 10 (V2b): استخراج آدرس کانترکت توکن (base_token)
+        // pool.relationships.base_token.data.id = "{chain}_{address}"
+        val contractAddress = p.relationships?.base_token?.data?.id?.substringAfter('_', "")
+
         // ---------- چک Rug Safety با GoPlus API (مدل سه‌حالته) ----------
         val (rugScore, rugWarnings, securityStatus) = checkRugSafety(p, chain)
 
@@ -171,7 +177,8 @@ object MemeRadar {
             reasons = reasons,
             rugScore = rugScore,
             rugWarnings = rugWarnings,
-            securityStatus = securityStatus
+            securityStatus = securityStatus,
+            contract = contractAddress
         )
     }
 
