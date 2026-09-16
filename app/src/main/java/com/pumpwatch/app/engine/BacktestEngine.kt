@@ -1,288 +1,248 @@
 package com.pumpwatch.app.engine
 
+import com.pumpwatch.app.data.KlineCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * موتور pure بک‌تست — نسخهٔ نهایی یکپارچه با UnifiedSignalEngine
- * - fee + slippage + funding
- * - In-Sample / Out-of-Sample
- * - no-lookahead: برش داده فقط تا ایندکس ورود
- * - اصلاح‌شده: emptyList<Trade>() صریح + حداقل ۶۰ کندل + entryUntilEnd برای اسپات
+ * 🚀 Sprint 13 (F6b): موتور بک‌تست استراتژی
+ *
+ * همان استراتژی ربات زنده (TradesScreen) را روی تاریخ اجرا می‌کند.
+ *
+ * منطق:
+ * ۱. برای هر روز، از پنجرهٔ تاریخ تا آن روز امتیاز می‌دهیم (no look-ahead)
+ * ۲. وقتی امتیاز >= entryThreshold و در پوزیشن نیستیم → باز می‌کنیم
+ * ۳. استاپ = ATR × 2.5 (همان فرمول ربات)
+ * ۴. تارگت = استاپ × 2
+ * ۵. تریلینگ فعال (همان فرمول ربات)
+ * ۶. حداکثر روز نگهداری (maxHoldDays) برای جلوگیری از قفل‌شدن سرمایه
+ * ۷. سایز پوزیشن ثابت = ۱۰۰ دلار
+ *
+ * صداقت:
+ * - فقط ارزهایی که در Binance لیست هستند و ۳۰۰ روز تاریخ دارند کار می‌کند
+ * - DEX ها و ارزهای جدید بک‌تست نمی‌شوند (صادقانه در UI گفته می‌شود)
+ * - هزینهٔ درخواست: برای ۱۰ ارز × ۱۲ ماه = ~۱۰ درخواست Binance (cache 60s)
  */
 object BacktestEngine {
 
-    private const val FEE_RATE = 0.001 // 0.1% per side
-    private const val SLIPPAGE_RATE = 0.0005 // 0.05% per side
-
-    data class Trade(
+    data class BacktestTrade(
         val symbol: String,
-        val entryIndex: Int,
-        val exitIndex: Int,
-        val side: String,
+        val entryDay: Int,           // روز از شروع بک‌تست
+        val exitDay: Int,
         val entryPrice: Double,
         val exitPrice: Double,
-        val pnl: Double,
-        val result: String, // WIN, LOSS, EXP
-        val score: Int
+        val pnlPct: Double,
+        val pnlUsd: Double,
+        val rMultiple: Double,
+        val exitReason: String       // "STOP" | "TARGET" | "TIMEOUT"
     )
 
-    data class BacktestMetrics(
+    data class BacktestResult(
+        val symbol: String,
+        val days: Int,
+        val trades: List<BacktestTrade>,
+        val equityCurve: List<Double>,   // موجودی هر روز
+        val stats: Stats
+    )
+
+    data class Stats(
         val totalTrades: Int,
         val wins: Int,
         val losses: Int,
-        val expired: Int,
         val winRate: Double,
-        val profitFactor: Double,
-        val avgPnl: Double,
-        val avgWin: Double,
-        val avgLoss: Double,
-        val expectancy: Double,
-        val totalPnl: Double,
-        val maxDrawdown: Double,
-        val equityCurve: List<Double>,
-        val inSampleMetrics: SampleMetrics?,
-        val outOfSampleMetrics: SampleMetrics?
+        val totalPnlPct: Double,
+        val totalPnlUsd: Double,
+        val avgR: Double,
+        val bestR: Double,
+        val worstR: Double,
+        val maxDrawdownPct: Double,
+        val profitFactor: Double
     )
 
-    data class SampleMetrics(
-        val trades: Int,
-        val winRate: Double,
-        val totalPnl: Double,
-        val avgPnl: Double
+    data class Config(
+        val entryThreshold: Int = 50,
+        val sizeUsd: Double = 100.0,
+        val maxHoldDays: Int = 30,
+        val atrStopMultiple: Double = 2.5,
+        val targetMultiple: Double = 2.0,
+        val trailingEnabled: Boolean = true
     )
 
-    fun runFutures(
-        symbol: String,
-        klines: List<List<Double>>, // [open, high, low, close, volume]
-        evalLast: Int,
-        hold: Int,
-        fundingRate: Double = 0.0,
-        signalThreshold: Int = 70,
-        entryUntilEnd: Boolean = false
-    ): Pair<List<Trade>, BacktestMetrics> {
-        // ✅ اصلاح خطای کامپایل: نوع صریح <Trade>
-        if (klines.size < 60) return emptyList<Trade>() to emptyMetrics()
-
-        val allCandles = klines.mapIndexed { index, k ->
-            Candle(time = 0L, open = k[0], high = k[1], low = k[2], close = k[3], volume = k[4])
+    /**
+     * بک‌تست روی یک ارز — pure و قابل تست
+     * @param candles کندل‌های روزانه (حداقل ۲۰۰ تا برای محاسبهٔ EMA200)
+     */
+    fun runSingle(symbol: String, candles: List<com.google.gson.JsonArray>, config: Config): BacktestResult {
+        val closes = candles.map { it[4].asDouble }
+        if (closes.size < 200) {
+            return BacktestResult(symbol, 0, emptyList(), emptyList(),
+                Stats(0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
         }
-        val closes = allCandles.map { it.close }
-        val highs = allCandles.map { it.high }
-        val lows = allCandles.map { it.low }
 
-        val start = max(60, closes.size - evalLast)
-        val end = if (entryUntilEnd) closes.size - 1 else closes.size - hold
-        val trades = mutableListOf<Trade>()
-        var prevSide = "NONE"
+        val trades = mutableListOf<BacktestTrade>()
+        val equity = mutableListOf(config.sizeUsd)
 
-        for (i in start until end) {
-            val currentCandles = allCandles.subList(0, i + 1)
+        var cash = config.sizeUsd
+        var inTrade = false
+        var entryDay = 0
+        var entryPrice = 0.0
+        var stop = 0.0
+        var target = 0.0
+        var targetHit = false
 
-            val signal = UnifiedSignalEngine.analyze(
-                coinId = "TEST", symbol = symbol, name = symbol,
-                candles1h = currentCandles, mode = "FUT", funding = fundingRate,
-                params = UnifiedSignalParams(minScore = signalThreshold)
-            )
+        // از روز ۲۰۰ شروع می‌کنیم (تا EMA200 قابل محاسبه باشد)
+        for (day in 200 until closes.size) {
+            val price = closes[day]
 
-            val side = signal?.side ?: "NONE"
-            val freshSignal = side != "NONE" && side != prevSide
+            if (inTrade) {
+                val daysHeld = day - entryDay
 
-            if (freshSignal) {
-                val entryPrice = closes[i]
-                val isLong = side == "PUMP"
-                val score = signal?.score ?: 0
-
-                val entryReal = if (isLong) {
-                    entryPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
-                } else {
-                    entryPrice * (1 - FEE_RATE - SLIPPAGE_RATE)
+                // ۱) رسیدن به تارگت → قفل سود (حالت دونده)
+                if (!targetHit && price >= target) {
+                    targetHit = true
+                    target = -1.0
+                    val lock = entryPrice * (1 + (entryPrice - stop) / entryPrice)
+                    if (lock > stop) stop = lock
                 }
 
-                val atr = atrAt(closes, i)
-                val risk = if (atr > 0) atr * 1.5 else entryPrice * 0.05
-                val stop = if (isLong) entryPrice - risk else entryPrice + risk
-                val target = if (isLong) entryPrice + risk * 1.5 else entryPrice - risk * 1.5
-
-                var result = "EXP"
-                var exitPrice = closes[min(i + hold, closes.size - 1)]
-                var exitIndex = min(i + hold, closes.size - 1)
-
-                for (j in (i + 1)..min(i + hold, closes.size - 1)) {
-                    val hj = highs[j]
-                    val lj = lows[j]
-                    if (isLong) {
-                        if (lj <= stop) { result = "LOSS"; exitPrice = stop; exitIndex = j; break }
-                        if (hj >= target) { result = "WIN"; exitPrice = target; exitIndex = j; break }
-                    } else {
-                        if (hj >= stop) { result = "LOSS"; exitPrice = stop; exitIndex = j; break }
-                        if (lj <= target) { result = "WIN"; exitPrice = target; exitIndex = j; break }
-                    }
+                // ۲) تریلینگ
+                if (config.trailingEnabled) {
+                    val dist = if (targetHit)
+                        (entryPrice - stop) / entryPrice * 0.7
+                    else
+                        (entryPrice - stop) / entryPrice
+                    val nt = price * (1 - dist)
+                    if (nt > stop) stop = nt
                 }
 
-                val exitReal = if (isLong) {
-                    exitPrice * (1 - FEE_RATE - SLIPPAGE_RATE)
-                } else {
-                    exitPrice * (1 + FEE_RATE + SLIPPAGE_RATE)
+                // ۳) بررسی خروج
+                val exitReason = when {
+                    price <= stop -> "STOP"
+                    targetHit && price >= entryPrice * 1.5 -> "TARGET" // در حالت دونده، خروج در +50%
+                    daysHeld >= config.maxHoldDays -> "TIMEOUT"
+                    else -> null
                 }
 
-                val fundingCost = if (isLong) {
-                    -fundingRate * (exitIndex - i) / 8.0 * entryPrice
-                } else {
-                    fundingRate * (exitIndex - i) / 8.0 * entryPrice
-                }
+                if (exitReason != null) {
+                    val pnlPct = (price - entryPrice) / entryPrice * 100
+                    val pnlUsd = config.sizeUsd * pnlPct / 100
+                    val risk = abs(entryPrice - stop)
+                    val r = if (risk > 0) (price - entryPrice) / risk else 0.0
 
-                val pnl = if (isLong) {
-                    ((exitReal - entryReal) / entryReal * 100) + (fundingCost / entryPrice * 100)
-                } else {
-                    ((entryReal - exitReal) / entryReal * 100) + (fundingCost / entryPrice * 100)
-                }
-
-                trades.add(
-                    Trade(
-                        symbol = symbol,
-                        entryIndex = i,
-                        exitIndex = exitIndex,
-                        side = if (isLong) "BUY" else "SELL",
-                        entryPrice = entryPrice,
-                        exitPrice = exitPrice,
-                        pnl = pnl,
-                        result = result,
-                        score = score
+                    trades.add(
+                        BacktestTrade(
+                            symbol = symbol,
+                            entryDay = entryDay,
+                            exitDay = day,
+                            entryPrice = entryPrice,
+                            exitPrice = price,
+                            pnlPct = pnlPct,
+                            pnlUsd = pnlUsd,
+                            rMultiple = r,
+                            exitReason = exitReason
+                        )
                     )
-                )
+                    cash += config.sizeUsd + pnlUsd
+                    inTrade = false
+                }
+            } else {
+                // امتیازدهی روی پنجرهٔ تاریخ (no look-ahead)
+                val window = candles.subList(0, day + 1)
+                val (score, atrPct) = ScoringEngine.scoreFromCandles(window)
+
+                if (score >= config.entryThreshold && cash >= config.sizeUsd) {
+                    // محاسبهٔ استاپ از ATR
+                    val atrAbs = price * atrPct / 100
+                    val risk = atrAbs * config.atrStopMultiple
+                    entryDay = day
+                    entryPrice = price
+                    stop = price - risk
+                    target = price + risk * config.targetMultiple
+                    targetHit = false
+                    inTrade = true
+                    cash -= config.sizeUsd
+                }
             }
-            prevSide = side
-        }
-        return trades to computeMetrics(trades)
-    }
 
-    fun runSpot(
-        symbol: String,
-        klines: List<List<Double>>,
-        holdDays: Int,
-        scoreThreshold: Int = 70
-    ): Pair<List<Trade>, BacktestMetrics> {
-        // اسپات: کل تاریخچه ارزیابی می‌شود و ورود تا آخرین کندل مجاز است
-        return runFutures(
-            symbol = symbol,
-            klines = klines,
-            evalLast = klines.size,
-            hold = holdDays,
-            fundingRate = 0.0,
-            signalThreshold = scoreThreshold,
-            entryUntilEnd = true
-        )
-    }
-
-    private fun computeMetrics(trades: List<Trade>): BacktestMetrics {
-        if (trades.isEmpty()) return emptyMetrics()
-
-        val wins = trades.count { it.result == "WIN" }
-        val losses = trades.count { it.result == "LOSS" }
-        val expired = trades.count { it.result == "EXP" }
-        val decided = wins + losses
-        val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
-        val avgPnl = trades.map { it.pnl }.average()
-        val totalPnl = trades.sumOf { it.pnl }
-
-        val winningTrades = trades.filter { it.pnl > 0 }
-        val losingTrades = trades.filter { it.pnl < 0 }
-        val avgWin = if (winningTrades.isNotEmpty()) winningTrades.map { it.pnl }.average() else 0.0
-        val avgLoss = if (losingTrades.isNotEmpty()) abs(losingTrades.map { it.pnl }.average()) else 0.0
-
-        val expectancy = (winRate / 100.0 * avgWin) - ((1 - winRate / 100.0) * avgLoss)
-
-        val totalWins = winningTrades.sumOf { it.pnl }
-        val totalLosses = abs(losingTrades.sumOf { it.pnl })
-        val profitFactor = if (totalLosses > 0) totalWins / totalLosses
-                           else if (totalWins > 0) Double.POSITIVE_INFINITY else 0.0
-
-        val equityCurve = mutableListOf(100.0)
-        var equity = 100.0
-        trades.forEach { t ->
-            equity *= (1 + t.pnl / 100.0)
-            equityCurve.add(equity)
+            // equity روزانه = نقد + ارزش پوزیشن
+            val posValue = if (inTrade) {
+                config.sizeUsd * (1 + (price - entryPrice) / entryPrice)
+            } else 0.0
+            equity.add(cash + posValue)
         }
 
-        var maxDrawdown = 0.0
-        var peak = equityCurve[0]
-        for (e in equityCurve) {
+        // آمار
+        val wins = trades.count { it.pnlPct > 0 }
+        val losses = trades.size - wins
+        val totalPnlPct = trades.sumOf { it.pnlPct }
+        val totalPnlUsd = trades.sumOf { it.pnlUsd }
+        val avgR = if (trades.isEmpty()) 0.0 else trades.map { it.rMultiple }.average()
+        val bestR = trades.maxOfOrNull { it.rMultiple } ?: 0.0
+        val worstR = trades.minOfOrNull { it.rMultiple } ?: 0.0
+
+        // Max drawdown
+        var peak = equity.firstOrNull() ?: 0.0
+        var maxDD = 0.0
+        for (e in equity) {
             if (e > peak) peak = e
-            val dd = (peak - e) / peak * 100.0
-            if (dd > maxDrawdown) maxDrawdown = dd
+            val dd = if (peak > 0) (peak - e) / peak * 100 else 0.0
+            if (dd > maxDD) maxDD = dd
         }
 
-        val splitIndex = (trades.size * 0.7).toInt()
-        val inSampleTrades = trades.subList(0, max(1, splitIndex))
-        val outOfSampleTrades = trades.subList(splitIndex, trades.size)
+        // Profit factor
+        val grossProfit = trades.filter { it.pnlUsd > 0 }.sumOf { it.pnlUsd }
+        val grossLoss = abs(trades.filter { it.pnlUsd < 0 }.sumOf { it.pnlUsd })
+        val pf = if (grossLoss > 0) grossProfit / grossLoss else if (grossProfit > 0) Double.POSITIVE_INFINITY else 0.0
 
-        val inSampleMetrics = if (inSampleTrades.isNotEmpty()) {
-            val inWins = inSampleTrades.count { it.result == "WIN" }
-            val inLosses = inSampleTrades.count { it.result == "LOSS" }
-            val inDecided = inWins + inLosses
-            SampleMetrics(
-                trades = inSampleTrades.size,
-                winRate = if (inDecided > 0) inWins * 100.0 / inDecided else 0.0,
-                totalPnl = inSampleTrades.sumOf { it.pnl },
-                avgPnl = inSampleTrades.map { it.pnl }.average()
-            )
-        } else null
-
-        val outOfSampleMetrics = if (outOfSampleTrades.isNotEmpty()) {
-            val outWins = outOfSampleTrades.count { it.result == "WIN" }
-            val outLosses = outOfSampleTrades.count { it.result == "LOSS" }
-            val outDecided = outWins + outLosses
-            SampleMetrics(
-                trades = outOfSampleTrades.size,
-                winRate = if (outDecided > 0) outWins * 100.0 / outDecided else 0.0,
-                totalPnl = outOfSampleTrades.sumOf { it.pnl },
-                avgPnl = outOfSampleTrades.map { it.pnl }.average()
-            )
-        } else null
-
-        return BacktestMetrics(
+        val stats = Stats(
             totalTrades = trades.size,
             wins = wins,
             losses = losses,
-            expired = expired,
-            winRate = winRate,
-            profitFactor = profitFactor,
-            avgPnl = avgPnl,
-            avgWin = avgWin,
-            avgLoss = avgLoss,
-            expectancy = expectancy,
-            totalPnl = totalPnl,
-            maxDrawdown = maxDrawdown,
-            equityCurve = equityCurve,
-            inSampleMetrics = inSampleMetrics,
-            outOfSampleMetrics = outOfSampleMetrics
+            winRate = if (trades.isEmpty()) 0.0 else wins * 100.0 / trades.size,
+            totalPnlPct = totalPnlPct,
+            totalPnlUsd = totalPnlUsd,
+            avgR = avgR,
+            bestR = bestR,
+            worstR = worstR,
+            maxDrawdownPct = maxDD,
+            profitFactor = pf
         )
+
+        return BacktestResult(symbol, closes.size, trades, equity, stats)
     }
 
-    private fun emptyMetrics(): BacktestMetrics = BacktestMetrics(
-        totalTrades = 0,
-        wins = 0,
-        losses = 0,
-        expired = 0,
-        winRate = 0.0,
-        profitFactor = 0.0,
-        avgPnl = 0.0,
-        avgWin = 0.0,
-        avgLoss = 0.0,
-        expectancy = 0.0,
-        totalPnl = 0.0,
-        maxDrawdown = 0.0,
-        equityCurve = listOf(100.0),
-        inSampleMetrics = null,
-        outOfSampleMetrics = null
-    )
-
-    private fun atrAt(data: List<Double>, index: Int, period: Int = 14): Double {
-        if (index < period) return 0.0
-        var s = 0.0
-        for (k in (index - period + 1)..index) s += abs(data[k] - data[k - 1])
-        return s / period
+    /**
+     * بک‌تست روی چند ارز — هم‌زمان برای کاهش زمان اجرا
+     * @param symbols لیست نمادها (مثلاً ["BTC", "ETH", "SOL"])
+     * @param days تعداد روز تاریخ (معمولاً 365)
+     */
+    suspend fun runMultiple(
+        symbols: List<String>,
+        days: Int = 365,
+        config: Config = Config(),
+        onProgress: (String) -> Unit = {}
+    ): List<BacktestResult> = coroutineScope {
+        symbols.mapIndexed { idx, sym ->
+            async(Dispatchers.IO) {
+                onProgress("دانلود ${sym.uppercase(Locale.US)} (${idx + 1}/${symbols.size})")
+                try {
+                    val candles = KlineCache.klines(
+                        "${sym.uppercase(Locale.US)}USDT", "1d", days
+                    )
+                    onProgress("بک‌تست ${sym.uppercase(Locale.US)}...")
+                    runSingle(sym, candles, config)
+                } catch (_: Exception) {
+                    BacktestResult(sym, 0, emptyList(), emptyList(),
+                        Stats(0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+                }
+            }
+        }.awaitAll()
     }
 }
