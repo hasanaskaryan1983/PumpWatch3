@@ -31,12 +31,18 @@ data class CoinMarket(
     val market_cap_rank: Int?,
     @SerializedName("price_change_percentage_1h_in_currency") val change1h: Double?,
     @SerializedName("price_change_percentage_7d_in_currency") val change7d: Double?,
+    // 🚀 Sprint 12 (C4a): درصد رشد ۱ ساله از endpoint markets
+    @SerializedName("price_change_percentage_1y_in_currency") val change1y: Double?,
+    // 🚀 Sprint 12 (C4a): All-Time High/Low (تمام تاریخ)
+    val ath: Double?,
+    val atl: Double?,
+    val ath_change_percentage: Double?,
+    val atl_change_percentage: Double?,
     @SerializedName("high_24h") val high24h: Double?,
     @SerializedName("low_24h") val low24h: Double?
 )
 
-// 🚀 Sprint 10 (V3b): دادهٔ خام CoinGecko برای /coins/list?include_platform=true
-// فقط id + platforms را می‌گیریم (symbol/name را نمی‌گیریم تا JSON کوچک بماند)
+// دادهٔ خام /coins/list?include_platform=true
 data class CoinListItem(
     val id: String,
     val symbol: String?,
@@ -52,7 +58,8 @@ interface CoinGeckoApi {
         @Query("order") order: String = "market_cap_desc",
         @Query("per_page") perPage: Int = 250,
         @Query("page") page: Int = 1,
-        @Query("price_change_percentage") pcp: String = "1h,24h,7d"
+        // 🚀 Sprint 12 (C4a): +1y برای محاسبهٔ درصد رشد یک‌ساله
+        @Query("price_change_percentage") pcp: String = "1h,24h,7d,1y"
     ): List<CoinMarket>
 
     @GET("coins/{id}/ohlc")
@@ -69,8 +76,6 @@ interface CoinGeckoApi {
         @Query("days") days: Int
     ): MarketChart
 
-    // 🚀 Sprint 10 (V3b): لیست همهٔ کوین‌ها با platform های کانترکت
-    // یک درخواست به‌جای هزاران درخواست جدا
     @GET("coins/list")
     suspend fun getCoinsList(
         @Query("include_platform") includePlatform: Boolean = true
@@ -122,7 +127,7 @@ object ThrottledHttp {
         OkHttpClient.Builder()
             .addInterceptor(interceptor)
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)  // 🚀 Sprint 10 (V3b): /coins/list بزرگ است
+            .readTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 }
@@ -145,7 +150,6 @@ object ApiClient {
     private const val MEM_CACHE_TTL = 120_000L
     private const val DISK_FRESH_MS = 1_800_000L
     private const val CHART_FRESH_MS = 300_000L
-    // 🚀 Sprint 10 (V3b): کش platforms طولانی (۲۴ ساعت) چون کانترکت‌ها ثابت‌اند
     private const val PLATFORMS_FRESH_MS = 24 * 60 * 60 * 1000L
     private const val PLATFORMS_CACHE_KEY = "platforms_v1"
 
@@ -153,7 +157,6 @@ object ApiClient {
     private val cache1000TimeRef = AtomicLong(0L)
     private val cache100Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache100TimeRef = AtomicLong(0L)
-    // 🚀 Sprint 10 (V3b): کش in-memory برای platforms
     private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
     private val platformsTimeRef = AtomicLong(0L)
 
@@ -274,18 +277,13 @@ object ApiClient {
         }
     }
 
-    // 🚀 Sprint 10 (V3b): نقشهٔ coinId -> (chainId -> contractAddress)
-    // فقط یک درخواست به /coins/list?include_platform=true
-    // کش ۲۴ ساعته (کانترکت‌ها تغییر نمی‌کنند)
     suspend fun getPlatformMap(forceRefresh: Boolean = false): Map<String, Map<String, String>> {
-        // کش in-memory
         val cached = platformsRef.get()
         val cachedTime = platformsTimeRef.get()
         if (!forceRefresh && cached != null &&
             System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
         ) return cached
 
-        // کش دیسک
         if (!forceRefresh && cached == null) {
             val diskJson = OfflineCache.load(app, PLATFORMS_CACHE_KEY)
             val diskTime = OfflineCache.time(app, PLATFORMS_CACHE_KEY)
@@ -318,7 +316,6 @@ object ApiClient {
             OfflineCache.save(app, PLATFORMS_CACHE_KEY, gson.toJson(map))
             map
         } catch (e: Exception) {
-            // اگر شبکه شکست خورد، از کش قدیمی استفاده کن (بهتر از خالی)
             val diskJson = OfflineCache.load(app, PLATFORMS_CACHE_KEY)
             if (diskJson != null) {
                 try {
@@ -353,18 +350,6 @@ object ApiClient {
     }
 }
 
-/**
- * 🚀 Sprint 10 (V3b): helper استخراج کانترکت برای نمایش در UI
- *
- * @param coinId شناسهٔ CoinGecko (مثل "bitcoin", "ethereum", "solana")
- * @param chainHint زنجیرهٔ مورد نظر (اختیاری). اگر null باشد، اولین کانترکت غیرخالی برگردانده می‌شود
- * @return آدرس کانترکت، یا null اگر:
- *   - ارز بومی است (BTC/ETH/SOL/TON/SUI — کانترکت ندارند)
- *   - در نقشه نیست
- *   - زنجیرهٔ درخواستی کانترکت ندارد
- *
- * ارزهای بومی با ID لیست سفید hardcode می‌شوند (نه با حدس).
- */
 private val NATIVE_COIN_IDS = setOf(
     "bitcoin", "ethereum", "solana", "the-open-network", "sui",
     "cardano", "ripple", "dogecoin", "binancecoin", "polkadot",
@@ -384,7 +369,6 @@ fun platformContractOf(
     if (chainHint != null) {
         val direct = platforms[chainHint]
         if (!direct.isNullOrBlank()) return direct
-        // fallback: چند نام مستعار رایج
         val aliases = when (chainHint) {
             "ethereum" -> listOf("ethereum", "eth")
             "bsc" -> listOf("binance-smart-chain", "bsc")
@@ -404,7 +388,6 @@ fun platformContractOf(
         }
         return null
     }
-    // بدون hint: اولین کانترکت غیرخالی (ترجیحاً ethereum، بعد bsc، بعد هر چه باشد)
     val preferred = listOf("ethereum", "binance-smart-chain", "base", "arbitrum-one", "polygon-pos")
     for (p in preferred) {
         val v = platforms[p]
