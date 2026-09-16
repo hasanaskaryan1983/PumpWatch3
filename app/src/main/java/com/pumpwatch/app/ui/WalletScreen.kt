@@ -83,24 +83,26 @@ private const val WALLET_CHUNK_DELAY_MS = 200L
 
 private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?, val kind: String)
 
+// 🚀 Sprint 10 (ممیزی 2026-09-16): هاست‌های Blockscout برای BSC / Avalanche / Sei
+// خاموش شده‌اند («default backend - 404»). تا پیدا شدن منبع بدون کلید جایگزین،
+// این زنجیره‌ها با bs = null و برچسب 🚫 صادقانه «بدون منبع» می‌مانند.
 private val CHAINS = listOf(
     ChainCfg("auto", "Auto 🌐", "", null, "auto"),
     ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
     ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/", "evm"),
     ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/", "evm"),
-    ChainCfg("bsc", "BNB 🟡", "bsc", "https://bsc.blockscout.com/", "evm"),
+    ChainCfg("bsc", "BNB 🟡 🚫", "bsc", null, "evm"),
     ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
     ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
     ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
-    ChainCfg("avalanche", "Avalanche 🔺", "avalanche", "https://avalanche.blockscout.com/", "evm"),
+    ChainCfg("avalanche", "Avalanche 🔺 🚫", "avalanche", null, "evm"),
     ChainCfg("ton", "TON 🔵", "ton", null, "ton"),
     ChainCfg("sui", "SUI 💧", "sui", null, "sui"),
-    ChainCfg("sei", "SEI 🌊", "sei", "https://sei.blockscout.com/", "evm"),
+    ChainCfg("sei", "SEI 🌊 🚫", "sei", null, "evm"),
     ChainCfg("gnosis", "Gnosis 🦉", "gnosis", "https://gnosis.blockscout.com/", "evm"),
     ChainCfg("robinhood", "Robinhood 🪽", "robinhood", "https://robinhoodchain.blockscout.com/", "evm")
 )
 
-// 🚀 Sprint 10 (C4): map کردن ChainCfg.key به DexScreener chainId
 private fun dexChainIdFor(key: String): String? = when (key) {
     "eth" -> "ethereum"
     "base" -> "base"
@@ -289,7 +291,6 @@ fun WalletScreen() {
                                     }
                                 } catch (_: Exception) { }
 
-                                // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای SUI non-native
                                 try {
                                     val unpriced = finalList.filter { it.price == null && !it.contract.isNullOrEmpty() }
                                     coroutineScope {
@@ -407,7 +408,6 @@ fun WalletScreen() {
                                     }
                                 } catch (_: Exception) { }
 
-                                // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای Jetton ها
                                 try {
                                     val stillUnpriced = finalList.filter { it.price == null && !it.contract.isNullOrEmpty() }
                                     coroutineScope {
@@ -500,7 +500,6 @@ fun WalletScreen() {
                                 }
                             } catch (_: Exception) { }
 
-                            // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای توکن‌های Solana
                             try {
                                 val unpriced = list.filter { it.price == null && !it.contract.isNullOrEmpty() }
                                 coroutineScope {
@@ -535,7 +534,7 @@ fun WalletScreen() {
                         else -> {
                             val hosts = if (cfg.kind == "auto") CHAINS.filter { it.kind == "evm" && it.bs != null }
                             else listOf(cfg).filter { it.bs != null }
-                            if (hosts.isEmpty()) { info = "⚠️ بررسی کیف روی این شبکه پشتیبانی نمی‌شه"; return@withContext }
+                            if (hosts.isEmpty()) { info = "⚠️ منبع دادهٔ این شبکه فعلاً قطع است (Blockscout غیرفعال — ممیزی 2026-09-16)"; return@withContext }
 
                             val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
 
@@ -617,7 +616,6 @@ fun WalletScreen() {
                                 }
                             } catch (_: Exception) { }
 
-                            // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای توکن‌های EVM
                             try {
                                 val unpriced = allHold.filter { it.price == null && !it.contract.isNullOrEmpty() && !it.dexChainId.isNullOrEmpty() }
                                 coroutineScope {
@@ -671,7 +669,12 @@ fun WalletScreen() {
                                 } catch (_: Exception) { }
                                 txs = rawTxs
                             }
-                            info = if (allHold.isEmpty()) "😴 موجودی پیدا نشد (آدرس یا شبکه رو چک کن)"
+                            info = if (allHold.isEmpty()) {
+                                // 🚀 Sprint 10 (ممیزی 2026-09-16): پیام صادقانه به‌جای سکوت
+                                if (addr.startsWith("0x") && addr.length == 42)
+                                    "😴 موجودی توکنی روی ۷ شبکهٔ EVM فعال پیدا نشد • اگر آدرس BSC/Avax/Sei است: منبع این شبکه‌ها قطع شده (🚫)"
+                                else "😴 موجودی پیدا نشد (آدرس یا شبکه رو چک کن)"
+                            }
                             else "✅ ${allHold.size} توکن روی ${hosts.size} شبکه بررسی شد"
                         }
                     }
@@ -1038,7 +1041,7 @@ fun WalletScreen() {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("📰 موتور ۳: شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange, modifier = Modifier.weight(1f))
+                    Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange, modifier = Modifier.weight(1f))
                     Button(onClick = { infoText = "موتور ۳: نماد ارز خبری → جهش‌های ≥۸٪ = لحظه خبر؛ کیف‌هایی که ۳۰دقیقه-۳ساعت قبلش خریدن = اینسایدر با امتیاز شک. سوال: کی با خبر معامله می‌کنه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                 }
                 Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
