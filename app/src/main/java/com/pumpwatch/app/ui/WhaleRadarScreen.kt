@@ -138,6 +138,22 @@ private val ALL_CHAINS = listOf(
     "manta" to "Manta 🦈"
 )
 
+// 🚀 Sprint 10 (W-fix): ایموجی بعد از آخرین فاصلهٔ برچسب است.
+// (باگ قبلی: take(2) روی "Solana 🟣" می‌شد "So" و روی همهٔ کارت‌ها چاپ می‌شد!)
+private fun chainEmoji(chain: String): String {
+    val label = ALL_CHAINS.firstOrNull { it.first == chain }?.second ?: return "⛓️"
+    val emoji = label.substringAfterLast(' ', "").trim()
+    return if (emoji.isEmpty()) "⛓️" else emoji
+}
+
+// 🚀 Sprint 10 (W-fix): استیبل‌کوین‌ها و توکن‌های رپ‌شده «انتخاب نهنگ» نیستند —
+// حضورشان در لیست «نهنگ‌ها چی می‌خرن» نویز محض و گمراه‌کننده است
+private val NOISE_SYMBOLS = setOf(
+    "USDC", "USDT", "DAI", "USDE", "FDUSD", "TUSD", "USDBC", "BUSD",
+    "WETH", "WBTC", "WSOL", "WBNB", "WAVAX", "WMATIC", "WPOL",
+    "BTCB", "STETH", "WSTETH", "CBBTC", "LBTC"
+)
+
 private data class ChartCandle(val o: Double, val h: Double, val l: Double, val c: Double, val marker: Int)
 private data class FlowRow(val label: String, val buy: Double, val sell: Double)
 
@@ -183,8 +199,6 @@ private fun compact(v: Double): String = when {
     else -> String.format(Locale.US, "$%.0f", v)
 }
 
-private fun chainEmoji(chain: String): String = ALL_CHAINS.firstOrNull { it.first == chain }?.second?.take(2) ?: "⛓️"
-
 private fun ageText(h: Double): String = when {
     h >= 9999 -> "—"
     h < 1 -> "زیر ۱ ساعت"
@@ -219,6 +233,15 @@ private fun verdictColor(r1: Double): Color = when {
     r1 >= 0.6 -> WGreen
     r1 <= 0.4 -> WRed
     else -> WGray
+}
+
+// 🚀 Sprint 10 (W-fix): هشدار صریحِ تعقیبِ پامپ — روی خودِ کارت، نه در پاورقی
+// اصل صداقت: اگر ارز ساعت آخر زیاد پامپ شده، خریدنش یعنی ریسکِ
+// «نقدینگی خروج بودن» برای خریداران اولیه
+private fun chaseRiskText(changeH1: Double): String? = when {
+    changeH1 >= 25.0 -> "🛑 پامپ سنگین: ${String.format(Locale.US, "%+.0f", changeH1)}٪ ساعت آخر — خرید الان = احتمال بالای تبدیل‌شدن به نقدینگی خروجِ خریداران اولیه"
+    changeH1 >= 10.0 -> "⚠️ ریسک تعقیب: ${String.format(Locale.US, "%+.0f", changeH1)}٪ ساعت آخر — هرچه پامپ بیشتر، ریسک خریدِ سقف بیشتر"
+    else -> null
 }
 
 private fun marketPosText(rank: Int?, cap: Double?): String {
@@ -484,6 +507,13 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
             }
 
             Text(verdictText(rSel), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = verdictColor(rSel))
+
+            // 🚀 Sprint 10 (W-fix): هشدار تعقیب پامپ روی کارت نهنگ‌ها
+            chaseRiskText(l.changeH1)?.let { risk ->
+                Text(risk, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    color = if (l.changeH1 >= 25.0) WRed else WGold)
+            }
+
             Text("🛡️ اعتماد آن‌چین: $passed از ${checks.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = WBlue)
             Text(marketPosText(l.rank, l.marketCap), fontSize = 10.sp, color = WGray)
 
@@ -540,6 +570,10 @@ private fun FreshCard(f: WhalePick, index: Int) {
             }
             Text("🐳 فشار خرید: ${String.format(Locale.US, "%.0f", r1 * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
             Text(verdictText(r1), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = verdictColor(r1))
+            chaseRiskText(f.changeH1)?.let { risk ->
+                Text(risk, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                    color = if (f.changeH1 >= 25.0) WRed else WGold)
+            }
             Text(marketPosText(f.rank, f.marketCap), fontSize = 10.sp, color = WGray)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (f.liquidity >= 100_000) Text("✅ نقدینگی قوی", fontSize = 9.sp, color = WGreen)
@@ -570,7 +604,6 @@ fun WhaleRadarScreen() {
     var bFlows by remember { mutableStateOf<Map<String, Pair<Double, Double>>>(emptyMap()) }
     var loadingList by remember { mutableStateOf(true) }
     var lastUpdate by remember { mutableStateOf("") }
-    // 🚀 Sprint 8 (U1): راهنمای بازشو برای دو بخش اصلی
     var showGuideLeader by remember { mutableStateOf(false) }
     var showGuideMeme by remember { mutableStateOf(false) }
 
@@ -747,7 +780,8 @@ fun WhaleRadarScreen() {
                     }
                     .filter {
                         (it.rank == null || it.rank <= 1000) &&
-                        it.volH1 >= threshold && it.buysH1 > it.sellsH1 && it.sellsH1 > 0
+                        it.volH1 >= threshold && it.buysH1 > it.sellsH1 && it.sellsH1 > 0 &&
+                        it.symbol.uppercase(Locale.US) !in NOISE_SYMBOLS
                     }
                     .distinctBy { it.symbol + it.chain }
                     .sortedByDescending { it.volH1 }
@@ -919,7 +953,6 @@ fun WhaleRadarScreen() {
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // 🚀 Sprint 8 (U1): دکمهٔ راهنمای بازشو
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("👑 مهمترین نهنگ‌ها (رتبه ۱ تا ۱۰۰۰ CoinGecko + DEX‌ها) — الان دارن چی می‌خرن؟", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.weight(1f))
                         TextButton(onClick = { showGuideLeader = !showGuideLeader }) { Text("؟ 📖", fontSize = 11.sp) }
@@ -958,14 +991,14 @@ fun WhaleRadarScreen() {
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // 🚀 Sprint 8 (U1): دکمهٔ راهنمای بازشو
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("🚀 شکار میم‌کوین‌های ترند DEX (تمام شبکه‌ها — بدون محدودیت رتبه)", fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.weight(1f))
                         TextButton(onClick = { showGuideMeme = !showGuideMeme }) { Text("؟ 📖", fontSize = 11.sp) }
                     }
                     Text("Solana • BSC • Base • Ethereum • TON + ${ALL_CHAINS.size - 5} شبکه دیگر", fontSize = 9.sp, color = WBlue)
-                    // 🚀 Sprint 8 (U1): برچسب صادقانه — این‌ها فیلتر امنیتی نیستند
                     Text("فیلترهای نقدینگی و جریان: نقدینگی ≥ ۵۰K • فشار خرید ≥ ۵۵٪ • سن ≥ ۱ ساعت • FDV سالم", fontSize = 9.sp, color = WGray)
+                    // 🚀 Sprint 10 (W-fix): ترند = سیگنال خرید نیست؛ روی خود هدر گفته می‌شود
+                    Text("🔥 ترند = پرحجم‌ترین‌های همین حالا، نه پیشنهاد خرید. ارزی که زیاد پامپ شده، جایی است که خریداران اولیه روی سرِ خریداران دیرتر خالی می‌کنند.", fontSize = 9.sp, color = WGold, lineHeight = 15.sp)
                     if (showGuideMeme) {
                         Text(
                             "📖 راهنما: این لیست از استخرهای ترند/جدید همهٔ شبکه‌های DEX می‌آید. فیلترها فقط نقدینگی و جریان خرید/فروش را می‌سنجند — نه امنیت قرارداد هوشمند. قبل از هر خرید: کانترکت را کپی کن و در GoPlus/CoinGecko بررسی کن. میم‌کوین = ریسک بسیار بالا.",
@@ -1006,6 +1039,11 @@ fun WhaleRadarScreen() {
                             }
                             Text("🐳 حجم س: ${compact(m.volH1)} • فشار خرید: ${String.format(Locale.US, "%.0f", ratio(m.buysH1, m.sellsH1) * 100)}٪", fontSize = 10.sp, color = WGreen, fontWeight = FontWeight.Bold)
                             Text(verdictText(ratio(m.buysH1, m.sellsH1)), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = verdictColor(ratio(m.buysH1, m.sellsH1)))
+                            // 🚀 Sprint 10 (W-fix): هشدار تعقیب پامپ روی کارت میم‌کوین
+                            chaseRiskText(m.changeH1)?.let { risk ->
+                                Text(risk, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                    color = if (m.changeH1 >= 25.0) WRed else WGold)
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("سن: ${ageText(m.ageHours)}", fontSize = 9.sp, color = WGray)
                                 Text("FDV: ${compact(m.fdv)}", fontSize = 9.sp, color = WGray)
