@@ -43,7 +43,11 @@ data class MemeSignal(
 object MemeRadar {
 
     private const val TAG = "MemeRadar"
-    private val CHAINS = listOf("solana", "bsc", "base", "ethereum")
+
+    // 🚀 Sprint 11 (C1): پوشش گسترده‌تر — TON و Robinhood اضافه شدند.
+    // زنجیره‌های ناشناخته برای GeckoTerminal با try/catch بی‌صدا رد می‌شوند،
+    // پس افزودن یک id اشتباه بی‌خطر است.
+    private val CHAINS = listOf("solana", "bsc", "base", "ethereum", "ton", "robinhood")
 
     var lastScanFailed = false
 
@@ -63,17 +67,26 @@ object MemeRadar {
         onProgress: (Int, String) -> Unit = { _, _ -> }
     ): List<MemeSignal> {
         lastScanFailed = false
-        onProgress(5, "دریافت استخرهای داغ...")
+        onProgress(5, "دریافت استخرهای داغ و تازه...")
 
         var anyOk = false
         val pools = mutableListOf<GeckoPool>()
         for (chain in CHAINS) {
-            onProgress(10 + CHAINS.indexOf(chain) * 12, "اسکن زنجیره $chain...")
+            onProgress(10 + CHAINS.indexOf(chain) * 10, "اسکن زنجیره $chain...")
+            // 🚀 Sprint 11 (C1): دو منبع برای هر زنجیره —
+            // trending = پرتوجه‌ترین‌ها، new = تازه‌های قبل از ترند (سن ≥ ۱س بعداً فیلتر می‌شود)
             try {
                 val r = GeckoTerminal.api.trendingPools(chain).data
                 if (r != null) {
                     anyOk = true
                     pools.addAll(r)
+                }
+            } catch (_: Exception) { }
+            try {
+                val n = GeckoTerminal.api.newPools(chain).data
+                if (n != null) {
+                    anyOk = true
+                    pools.addAll(n)
                 }
             } catch (_: Exception) { }
         }
@@ -83,8 +96,11 @@ object MemeRadar {
             return emptyList()
         }
 
-        onProgress(70, "تحلیل معیارهای اعتماد + Rug Safety Check...")
-        val results = pools.mapNotNull { analyze(it) }
+        onProgress(75, "تحلیل معیارهای اعتماد + Rug Safety Check...")
+        // 🚀 Sprint 11 (C1): حذف تکراری‌ها (یک استخر ممکن است هم ترند باشد هم تازه)
+        val seen = mutableSetOf<String>()
+        val unique = pools.filter { p -> seen.add(p.id ?: "") }
+        val results = unique.mapNotNull { analyze(it) }
         onProgress(95, "رتبه‌بندی نهایی...")
         return results.sortedByDescending { it.score }.take(20)
     }
@@ -142,7 +158,6 @@ object MemeRadar {
         val chain = p.relationships?.network?.data?.id ?: "?"
 
         // 🚀 Sprint 10 (V2b): استخراج آدرس کانترکت توکن (base_token)
-        // pool.relationships.base_token.data.id = "{chain}_{address}"
         val contractAddress = p.relationships?.base_token?.data?.id?.substringAfter('_', "")
 
         // ---------- چک Rug Safety با GoPlus API (مدل سه‌حالته) ----------
