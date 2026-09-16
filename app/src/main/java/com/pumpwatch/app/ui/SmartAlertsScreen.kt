@@ -1,5 +1,8 @@
 package com.pumpwatch.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +17,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -31,12 +36,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.platformContractOf
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -46,6 +53,7 @@ private val AGreen = Color(0xFF00E676)
 private val ARed = Color(0xFFFF5252)
 private val AGold = Color(0xFFFFC107)
 private val ABlue = Color(0xFF40C4FF)
+private val AGray = Color(0xFF8B949E)
 
 private data class AlertEval(
     val coin: CoinMarket,
@@ -98,22 +106,56 @@ private fun levelOf(score: Int): String = when {
     else -> "👀 زودهنگام"
 }
 
+// 🚀 Sprint 10 (V3c): ردیف کانترکت برای کارت‌های هشدار
+@Composable
+private fun ContractRow(ctx: Context, contract: String?) {
+    if (contract.isNullOrEmpty()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = AGray)
+        }
+        return
+    }
+    val copied = remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        Text("📋 ", fontSize = 9.sp, color = AGray)
+        Text(
+            if (contract.length > 24) "${contract.take(12)}...${contract.takeLast(8)}" else contract,
+            fontSize = 9.sp, color = ABlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+        )
+        Button(
+            onClick = {
+                try {
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("contract", contract))
+                    copied.value = true
+                } catch (_: Exception) { }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) AGreen else AGold),
+            shape = RoundedCornerShape(6.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
+    }
+}
+
 @Composable
 fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
 
     var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf("ALL") }
+    // 🚀 Sprint 10 (V3c): نقشهٔ کانترکت‌ها
+    var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
 
-    // ---------- لود فوری از کش (بدون نابودی کش) ----------
     fun load() {
         scope.launch {
             loading = true
             errorMsg = null
             try {
                 coins = ApiClient.getTop1000Coins(forceRefresh = false)
+                platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -122,7 +164,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    // ---------- فقط با دکمه بروزرسانی ----------
     fun forceRefresh() {
         scope.launch {
             loading = true
@@ -130,6 +171,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             try {
                 ApiClient.clearMemoryCache()
                 coins = ApiClient.getTop1000Coins(forceRefresh = true)
+                platformMap = try { ApiClient.getPlatformMap(forceRefresh = true) } catch (_: Exception) { emptyMap() }
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -238,7 +280,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(alerts) { a ->
-                    AlertSmartCard(a, onClick = { onCoinClick(a.coin) })
+                    AlertSmartCard(a, platformMap = platformMap, ctx = ctx, onClick = { onCoinClick(a.coin) })
                 }
             }
         }
@@ -246,10 +288,17 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 }
 
 @Composable
-private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
+private fun AlertSmartCard(
+    a: AlertEval,
+    platformMap: Map<String, Map<String, String>>,
+    ctx: Context,
+    onClick: () -> Unit
+) {
     val isPump = a.side == "PUMP"
     val sideColor = if (isPump) AGreen else ARed
     val c = a.coin
+    // 🚀 Sprint 10 (V3c): استخراج کانترکت از platformMap
+    val contract = platformContractOf(platformMap, c.id)
 
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -267,10 +316,12 @@ private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // 🚀 Sprint 10 (V3c): رنگ سفید برای خوانا بودن روی کارت تیره
                         Text(
                             c.symbol.uppercase(Locale.US),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
+                            fontSize = 16.sp,
+                            color = Color.White
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(levelOf(a.score), fontSize = 10.sp, color = AGold)
@@ -298,6 +349,9 @@ private fun AlertSmartCard(a: AlertEval, onClick: () -> Unit) {
                     )
                 }
             }
+
+            // 🚀 Sprint 10 (V3c): ردیف کانترکت زیر نام ارز
+            ContractRow(ctx, contract)
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
