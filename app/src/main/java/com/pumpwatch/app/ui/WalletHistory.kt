@@ -68,6 +68,9 @@ private val XCard = Color(0xFF1A2230)
 
 private data class ChainLite(val label: String, val host: String, val dexChain: String?)
 
+// 🚀 Sprint 10 (ممیزی 2026-09-16): هاست‌های BSC / Avalanche / Sei حذف شدند —
+// سرویس میزبان Blockscout برای این سه زنجیره خاموش شده («default backend - 404»).
+// تا پیدا شدن منبع بدون کلید جایگزین، این زنجیره‌ها صادقانه «بدون منبع» می‌مانند.
 private val EVM_HOSTS = listOf(
     ChainLite("Ethereum ⚪", "https://eth.blockscout.com/", "ethereum"),
     ChainLite("Base 🔵", "https://base.blockscout.com/", "base"),
@@ -75,10 +78,7 @@ private val EVM_HOSTS = listOf(
     ChainLite("Optimism 🔴", "https://optimism.blockscout.com/", "optimism"),
     ChainLite("Polygon 🟣", "https://polygon.blockscout.com/", "polygon"),
     ChainLite("Gnosis 🦉", "https://gnosis.blockscout.com/", "gnosis"),
-    ChainLite("Robinhood 🪽", "https://robinhoodchain.blockscout.com/", null),
-    ChainLite("BSC 🟡", "https://bsc.blockscout.com/", "bsc"),
-    ChainLite("Avalanche 🔺", "https://avalanche.blockscout.com/", "avax"),
-    ChainLite("Sei 🌊", "https://sei.blockscout.com/", "sei")
+    ChainLite("Robinhood 🪽", "https://robinhoodchain.blockscout.com/", null)
 )
 
 internal data class HistTx(
@@ -489,6 +489,12 @@ fun WalletHistorySection() {
                         }
                     }
 
+                    // 🚀 Sprint 10 (ممیزی 2026-09-16): پیام صادقانه برای EVM خالی
+                    // به‌جای سکوت کامل، بگوییم چرا هیچ چیز پیدا نشد
+                    if (res.isEmpty() && kindOf(addr) == "evm" && summary.isEmpty()) {
+                        summary = "😴 هیچ تراکنشی روی ۷ شبکهٔ EVM فعال پیدا نشد • اگر آدرس BSC/Avax/Sei است: منبع Blockscout این شبکه‌ها قطع شده (🚫)"
+                    }
+
                     try {
                         val coins = ApiClient.getTop1000Coins()
                         val sdfDay = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -523,8 +529,6 @@ fun WalletHistorySection() {
                     } catch (_: Exception) { }
 
                     // 🚀 Sprint 10 (C3): شانس آخر قیمت از DexScreener
-                    // فقط برای تراکنش‌هایی که contract و dexChainId دارند و هنوز priceUsd == null
-                    // parallelism=2 + delay 1s (DexScreener rate limit)
                     try {
                         val unresolved = res.filter { it.priceUsd == null && !it.contract.isNullOrEmpty() && !it.dexChainId.isNullOrEmpty() }
                         val bySymbol = unresolved.groupBy({ it.symbol }) { Triple(it.contract!!, it.dexChainId!!, it.ts) }
