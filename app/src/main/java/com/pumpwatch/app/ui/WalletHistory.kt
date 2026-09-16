@@ -37,10 +37,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.Blockscout
+import com.pumpwatch.app.data.DexScreenerClient
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.SuiClient
 import com.pumpwatch.app.data.TonClient
+import com.pumpwatch.app.data.bestPriceUsd
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.suiAmount
 import com.pumpwatch.app.data.tonAmount
@@ -64,19 +66,19 @@ private val XGold = Color(0xFFFFC107)
 private val XGray = Color(0xFF8B949E)
 private val XCard = Color(0xFF1A2230)
 
-private data class ChainLite(val label: String, val host: String)
+private data class ChainLite(val label: String, val host: String, val dexChain: String?)
 
 private val EVM_HOSTS = listOf(
-    ChainLite("Ethereum ⚪", "https://eth.blockscout.com/"),
-    ChainLite("Base 🔵", "https://base.blockscout.com/"),
-    ChainLite("Arbitrum 🔷", "https://arbitrum.blockscout.com/"),
-    ChainLite("Optimism 🔴", "https://optimism.blockscout.com/"),
-    ChainLite("Polygon 🟣", "https://polygon.blockscout.com/"),
-    ChainLite("Gnosis 🦉", "https://gnosis.blockscout.com/"),
-    ChainLite("Robinhood 🪽", "https://robinhoodchain.blockscout.com/"),
-    ChainLite("BSC 🟡", "https://bsc.blockscout.com/"),
-    ChainLite("Avalanche 🔺", "https://avalanche.blockscout.com/"),
-    ChainLite("Sei 🌊", "https://sei.blockscout.com/")
+    ChainLite("Ethereum ⚪", "https://eth.blockscout.com/", "ethereum"),
+    ChainLite("Base 🔵", "https://base.blockscout.com/", "base"),
+    ChainLite("Arbitrum 🔷", "https://arbitrum.blockscout.com/", "arbitrum"),
+    ChainLite("Optimism 🔴", "https://optimism.blockscout.com/", "optimism"),
+    ChainLite("Polygon 🟣", "https://polygon.blockscout.com/", "polygon"),
+    ChainLite("Gnosis 🦉", "https://gnosis.blockscout.com/", "gnosis"),
+    ChainLite("Robinhood 🪽", "https://robinhoodchain.blockscout.com/", null),
+    ChainLite("BSC 🟡", "https://bsc.blockscout.com/", "bsc"),
+    ChainLite("Avalanche 🔺", "https://avalanche.blockscout.com/", "avax"),
+    ChainLite("Sei 🌊", "https://sei.blockscout.com/", "sei")
 )
 
 internal data class HistTx(
@@ -87,7 +89,9 @@ internal data class HistTx(
     val amount: Double,
     val incoming: Boolean,
     val other: String,
-    var priceUsd: Double? = null
+    var priceUsd: Double? = null,
+    var contract: String? = null,
+    var dexChainId: String? = null
 )
 
 private fun kindOf(a: String): String = when {
@@ -139,9 +143,6 @@ fun WalletHistorySection() {
                     val fs = filterSym.trim()
 
                     when (kindOf(addr)) {
-                        // 🚀 Sprint 8 (S3): تاریخچهٔ واقعی SUI از RPC رسمی
-                        // queryTransactionBlocks + showBalanceChanges = دقیق‌ترین دید ورود/خروج
-                        // P0-3 invariant: تراکنش با قیمت نامشخص حذف نمی‌شود
                         "sui" -> {
                             val suiDepth = depth.coerceAtMost(100)
                             val tb = SuiClient.txBlocks(addr, suiDepth)
@@ -151,7 +152,6 @@ fun WalletHistorySection() {
                             } else if (dataArr == null || dataArr.size() == 0) {
                                 summary = "😴 این کیف SUI هیچ تراکنشی نداره"
                             } else {
-                                // پاس ۱: جمع‌آوری coinType های یکتا + گرفتن متادیتا (کش)
                                 val coinTypes = mutableSetOf<String>()
                                 for (el in dataArr) {
                                     val bc = el.asJsonObject.getAsJsonArray("balanceChanges") ?: continue
@@ -178,7 +178,6 @@ fun WalletHistorySection() {
                                     }
                                 }
 
-                                // پاس ۲: ساخت تراکنش‌ها از balanceChanges
                                 for (el in dataArr) {
                                     val obj = el.asJsonObject
                                     val ts = obj.get("timestampMs")?.asString?.toLongOrNull() ?: continue
@@ -210,11 +209,15 @@ fun WalletHistorySection() {
                                         val cp = changes.filter { it.second == c.second && it.first != addr && it.third * c.third < 0 }
                                             .maxByOrNull { abs(it.third) }
                                         if (c.second != "0x2::sui::SUI") suiMintBySym[sym] = c.second
-                                        res.add(HistTx(ts, sdf.format(Date(ts)), "SUI 💧", sym, c.third, c.third > 0, cp?.first ?: ""))
+                                        val t = HistTx(ts, sdf.format(Date(ts)), "SUI 💧", sym, c.third, c.third > 0, cp?.first ?: "")
+                                        if (c.second != "0x2::sui::SUI") {
+                                            t.contract = c.second
+                                            t.dexChainId = "sui"
+                                        }
+                                        res.add(t)
                                     }
                                 }
 
-                                // قیمت توکن‌های لیست‌نشدهٔ SUI از GeckoTerminal (parallelism=2 + 1s)
                                 val entries = suiMintBySym.entries.toList()
                                 coroutineScope {
                                     entries.chunked(2).forEach { chunk ->
@@ -283,7 +286,10 @@ fun WalletHistorySection() {
                                                     if (!jettonMints.containsKey(mint)) {
                                                         jettonMints[mint] = Triple(sym, meta.name ?: "", dec)
                                                     }
-                                                    res.add(HistTx(ts, sdf.format(Date(ts)), "TON 🔵", sym, amt, inc, other))
+                                                    val t = HistTx(ts, sdf.format(Date(ts)), "TON 🔵", sym, amt, inc, other)
+                                                    t.contract = mint
+                                                    t.dexChainId = "ton"
+                                                    res.add(t)
                                                 }
                                             }
                                         }
@@ -343,7 +349,13 @@ fun WalletHistorySection() {
                                         val dec = t.tokenDecimal?.toDoubleOrNull() ?: 18.0
                                         val amt = (t.value?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                                         val inc = (t.to ?: "").equals(addr, true)
-                                        res.add(HistTx(ts, sdf.format(Date(ts)), h.label, sym, amt, inc, if (inc) t.from ?: "" else t.to ?: ""))
+                                        val ht = HistTx(ts, sdf.format(Date(ts)), h.label, sym, amt, inc, if (inc) t.from ?: "" else t.to ?: "")
+                                        val c = t.contractAddress
+                                        if (!c.isNullOrEmpty() && h.dexChain != null) {
+                                            ht.contract = c
+                                            ht.dexChainId = h.dexChain
+                                        }
+                                        res.add(ht)
                                     }
                                 } catch (_: Exception) { }
                             }
@@ -421,9 +433,12 @@ fun WalletHistorySection() {
                                             .maxByOrNull { abs(it.third) }
                                         val short = d.second.take(8)
                                         if (filterMint == null) mintByShort[short] = d.second
-                                        res.add(HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana 🟣",
+                                        val t = HistTx(bt * 1000, sdf.format(Date(bt * 1000)), "Solana 🟣",
                                             if (filterMint != null) fs.uppercase(Locale.US) else short,
-                                            d.third, d.third > 0, cp?.first ?: ""))
+                                            d.third, d.third > 0, cp?.first ?: "")
+                                        t.contract = d.second
+                                        t.dexChainId = "solana"
+                                        res.add(t)
                                     }
 
                                     if (filterMint == null) {
@@ -507,6 +522,35 @@ fun WalletHistorySection() {
                         if (solPx != null && solPx > 0) res.forEach { if (it.symbol == "SOL" && it.priceUsd == null) it.priceUsd = solPx }
                     } catch (_: Exception) { }
 
+                    // 🚀 Sprint 10 (C3): شانس آخر قیمت از DexScreener
+                    // فقط برای تراکنش‌هایی که contract و dexChainId دارند و هنوز priceUsd == null
+                    // parallelism=2 + delay 1s (DexScreener rate limit)
+                    try {
+                        val unresolved = res.filter { it.priceUsd == null && !it.contract.isNullOrEmpty() && !it.dexChainId.isNullOrEmpty() }
+                        val bySymbol = unresolved.groupBy({ it.symbol }) { Triple(it.contract!!, it.dexChainId!!, it.ts) }
+
+                        coroutineScope {
+                            bySymbol.entries.toList().chunked(2).forEach { chunk ->
+                                val part = chunk.map { (sym, triples) ->
+                                    async(Dispatchers.IO) {
+                                        try {
+                                            val best = triples.maxByOrNull { it.third } ?: return@async null
+                                            val resp = DexScreenerClient.api.tokens(best.first)
+                                            val px = bestPriceUsd(resp.pairs, best.second, best.first)
+                                            if (px != null) (sym to px) else null
+                                        } catch (_: Exception) { null }
+                                    }
+                                }.awaitAll().filterNotNull()
+                                for ((sym, px) in part) {
+                                    res.forEach {
+                                        if (it.symbol == sym && it.priceUsd == null) it.priceUsd = px
+                                    }
+                                }
+                                if (bySymbol.size > 2) delay(1000L)
+                            }
+                        }
+                    } catch (_: Exception) { }
+
                     val (filtered, sum) = filterAndSummarize(res, res.size)
                     summary = sum
                     filtered
@@ -522,7 +566,7 @@ fun WalletHistorySection() {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📜 موتور : تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
+                Text("📜 موتور ۵: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
                 Text("فقط تراکنش‌های بالای ۱۰ دلار + تراکنش‌های با قیمت نامشخص • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
                     placeholder = { Text("آدرس کیف... (Solana / 0x / TON / SUI)", fontSize = 11.sp) },
