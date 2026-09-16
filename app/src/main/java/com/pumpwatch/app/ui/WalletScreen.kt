@@ -76,15 +76,11 @@ private val VPurple = Color(0xFFCE93D8)
 private val VOrange = Color(0xFFFFA726)
 private val VCard = Color(0xFF1A2230)
 
-// 🚀 P1-3: هم‌روندی اسکن موجودی کیف — ۵ هم‌زمان برای پرهیز از 429 روی GeckoTerminal/Solana RPC
 private const val WALLET_PARALLELISM = 5
 private const val WALLET_CHUNK_DELAY_MS = 200L
 
 private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?, val kind: String)
 
-// 🚀 Sprint 7 (W3): سه زنجیرهٔ پرمصرف میم‌کوینی فعال شدند
-// (قبلاً bs = null بود → موتور ۱ پیام «پشتیبانی نمی‌شود» می‌داد)
-// GoPlusClient از قبل BSC=56 و Avalanche=43114 را پشتیبانی می‌کند
 private val CHAINS = listOf(
     ChainCfg("auto", "Auto 🌐", "", null, "auto"),
     ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
@@ -194,9 +190,6 @@ fun WalletScreen() {
                 withContext(Dispatchers.IO) {
                     val kind = if (cfg.kind == "auto") detectKind(addr) else cfg.kind
                     when (kind) {
-                        // 🚀 Sprint 8 (S2): موجودی واقعی SUI از RPC رسمی
-                        // getAllBalances → برای هر کوین: متادیتا (symbol/decimals) با parallelism=2
-                        // P0-3: قیمت نامشخص → «❓ نامشخص»، هرگز عدد جعلی نه
                         "sui" -> {
                             val bal = SuiClient.balances(addr)
                             val arr = bal?.getAsJsonArray("result")
@@ -238,16 +231,54 @@ fun WalletScreen() {
                                 val suiPx = coinsS.firstOrNull { it.symbol.equals("SUI", true) }?.current_price
                                 val finalList = held.map { h ->
                                     if (h.symbol == "SUI" && suiPx != null && suiPx > 0) h.copy(price = suiPx, value = h.amount * suiPx) else h
-                                }
+                                }.toMutableList()
+
+                                // 🚀 Sprint 10 (C1): اولین خرید = قدیمی‌ترین balanceChange مثبت در ۵۰ تراکنش آخر
+                                try {
+                                    val tb2 = SuiClient.txBlocks(addr, 50)
+                                    val dataArr2 = tb2?.getAsJsonObject("result")?.getAsJsonArray("data")
+                                    if (dataArr2 != null) {
+                                        val symByCt = mutableMapOf("0x2::sui::SUI" to "SUI")
+                                        for (h in held) { h.contract?.let { symByCt[it] = h.symbol } }
+                                        val firstTsBySym = mutableMapOf<String, Long>()
+                                        for (el in dataArr2) {
+                                            val obj = el.asJsonObject
+                                            val ts = obj.get("timestampMs")?.asString?.toLongOrNull() ?: continue
+                                            val bc = obj.getAsJsonArray("balanceChanges") ?: continue
+                                            for (b in bc) {
+                                                val o = b.asJsonObject
+                                                val ownerEl = o.get("owner")
+                                                val owner = if (ownerEl != null && ownerEl.isJsonObject) ownerEl.asJsonObject.get("AddressOwner")?.asString else null
+                                                if (owner != addr) continue
+                                                if ((o.get("amount")?.asString?.toLongOrNull() ?: 0L) <= 0L) continue
+                                                val ct = o.get("coinType")?.asString ?: continue
+                                                val sym = symByCt[ct] ?: continue
+                                                val cur = firstTsBySym[sym]
+                                                if (cur == null || ts < cur) firstTsBySym[sym] = ts
+                                            }
+                                        }
+                                        for (h in finalList) h.firstBuyTs = firstTsBySym[h.symbol]
+                                    }
+                                } catch (_: Exception) { }
+                                try {
+                                    val sdfD2 = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                                    for (h in finalList) {
+                                        val fts = h.firstBuyTs ?: continue
+                                        val coin = coinsS.firstOrNull { it.symbol.equals(h.symbol, true) } ?: continue
+                                        try {
+                                            val chart = ApiClient.getCoinChart(coin.id, days = 365)
+                                            val byDay = chart.prices.associate { p -> sdfD2.format(Date(p[0].toLong())) to p[1] }
+                                            h.buyPrice = byDay[sdfD2.format(Date(fts))]
+                                        } catch (_: Exception) { }
+                                    }
+                                } catch (_: Exception) { }
+
                                 holdings = finalList.sortedByDescending { it.value }
                                 total = finalList.sumOf { it.value }
                                 txs = emptyList()
                                 info = if (finalList.isEmpty()) "😴 این کیف SUI خالیه" else "✅ SUI: ${finalList.size} کوین پیدا شد"
                             }
                         }
-                        // 🚀 Sprint 8 (T3): موجودی واقعی TON از TonAPI v2
-                        // دو درخواست: account (TON خام) + jettons (توکن‌ها)
-                        // P0-3: قیمت نامشخص → «❓ نامشخص»، هرگز عدد جعلی نه
                         "ton" -> {
                             val acc = try { TonClient.api.account(addr) } catch (_: Exception) { null }
                             val jets = try { TonClient.api.jettons(addr) } catch (_: Exception) { null }
@@ -272,7 +303,6 @@ fun WalletScreen() {
                                     list.add(WalletHolding(meta.symbol ?: mint.take(6), meta.name ?: "", amt, null, 0.0, contract = mint))
                                 }
 
-                                // قیمت Jetton ها از GeckoTerminal — parallelism=2 + delay 1s
                                 val priceMap = mutableMapOf<String, Double>()
                                 val unpriced = list.filter { it.price == null && it.contract != null }
                                 coroutineScope {
@@ -299,7 +329,42 @@ fun WalletScreen() {
                                 val finalList = list.map { h ->
                                     val px = h.price ?: priceMap[h.symbol]
                                     if (px != null && px > 0) h.copy(price = px, value = h.amount * px) else h
-                                }
+                                }.toMutableList()
+
+                                // 🚀 Sprint 10 (C1): اولین خرید = قدیمی‌ترین ورودِ هر نماد در ۱۰۰ رویداد آخر
+                                try {
+                                    val ev = TonClient.api.events(addr, limit = 100)
+                                    val firstTsBySym = mutableMapOf<String, Long>()
+                                    for (e in (ev.events ?: emptyList())) {
+                                        val ts = (e.timestamp ?: 0L) * 1000
+                                        if (ts <= 0L) continue
+                                        val actions = e.actions ?: continue
+                                        for (a in actions) {
+                                            val recv: String?
+                                            val sym: String?
+                                            if (a.TonTransfer != null) { recv = a.TonTransfer.receiver?.address; sym = "TON" }
+                                            else if (a.JettonTransfer != null) { recv = a.JettonTransfer.receiver?.address; sym = a.JettonTransfer.jetton?.symbol }
+                                            else continue
+                                            if (recv != addr || sym == null) continue
+                                            val cur = firstTsBySym[sym]
+                                            if (cur == null || ts < cur) firstTsBySym[sym] = ts
+                                        }
+                                    }
+                                    for (h in finalList) h.firstBuyTs = firstTsBySym[h.symbol]
+                                } catch (_: Exception) { }
+                                try {
+                                    val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                                    for (h in finalList) {
+                                        val fts = h.firstBuyTs ?: continue
+                                        val coin = coinsT.firstOrNull { it.symbol.equals(h.symbol, true) } ?: continue
+                                        try {
+                                            val chart = ApiClient.getCoinChart(coin.id, days = 365)
+                                            val byDay = chart.prices.associate { p -> sdfD.format(Date(p[0].toLong())) to p[1] }
+                                            h.buyPrice = byDay[sdfD.format(Date(fts))]
+                                        } catch (_: Exception) { }
+                                    }
+                                } catch (_: Exception) { }
+
                                 holdings = finalList.sortedByDescending { it.value }
                                 total = finalList.sumOf { it.value }
                                 txs = emptyList()
@@ -324,7 +389,6 @@ fun WalletScreen() {
                                 if (amt <= 0.0) null else Triple(mint, amt, a.pubkey ?: "")
                             } ?: emptyList()
 
-                            // 🚀 P1-3: tokenInfo + firstBuy به‌صورت موازی (۵ هم‌زمان + delay بین chunkها)
                             val list = coroutineScope {
                                 raw.take(50).chunked(WALLET_PARALLELISM).flatMap { chunk ->
                                     val part = chunk.map { (mint, amt, acc) ->
@@ -354,7 +418,6 @@ fun WalletScreen() {
                                 }.toMutableList()
                             }
 
-                            // ⚠️ P1-3: sequential (rate limit کوین‌گکو)
                             try {
                                 val coinsH = ApiClient.getTop1000Coins()
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -380,7 +443,6 @@ fun WalletScreen() {
 
                             val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
 
-                            // 🚀 P1-3: اسکن موازی همهٔ زنجیره‌های EVM
                             data class HostResult(val holdings: List<WalletHolding>, val cfg: ChainCfg?)
                             val hostResults = coroutineScope {
                                 hosts.map { h ->
@@ -446,7 +508,6 @@ fun WalletScreen() {
                                 }
                             }
 
-                            // ⚠️ P1-3: sequential (rate limit کوین‌گکو)
                             try {
                                 val sdfD = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                                 for (hd in allHold) {
@@ -475,7 +536,6 @@ fun WalletScreen() {
                                     WalletTx(sdfShow.format(Date(ts)), sdfDay.format(Date(ts)), t.tokenSymbol ?: "?", amt, (t.to ?: "").equals(addr, true), null)
                                 } ?: emptyList()
 
-                                // ⚠️ P1-3: sequential (rate limit کوین‌گکو)
                                 try {
                                     for (sym in rawTxs.map { it.symbol }.distinct()) {
                                         val coin = coins.firstOrNull { it.symbol.equals(sym, true) } ?: continue
@@ -686,7 +746,7 @@ fun WalletScreen() {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🔍 موتور : بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                    Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
                     Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین خرید. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                 }
                 TextField(value = address, onValueChange = { address = it },
@@ -711,7 +771,6 @@ fun WalletScreen() {
                     Text(String.format(Locale.US, "$%,.2f", total), fontSize = 20.sp, fontWeight = FontWeight.Black, color = VGreen)
                 }
             }
-            // 🚀 P1-5: رندر تنبل — فقط کارت‌های قابل‌دیدن compose می‌شوند (تا ۵۰ holding)
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
@@ -722,7 +781,6 @@ fun WalletScreen() {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
                                     if (h.price != null && h.price > 0) {
                                         Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
                                     } else {
@@ -758,7 +816,6 @@ fun WalletScreen() {
 
         if (txs.isNotEmpty()) {
             Text("📜 تاریخچه معاملات:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            // 🚀 P1-5: رندر تنبل — تا ۱۰۰ ردیف تراکنش بدون compose حریص
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)
@@ -773,7 +830,6 @@ fun WalletScreen() {
                                 Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                // P0-3: نمایش "❓ قیمت نامشخص" به جای 0.0
                                 if (t.priceUsd != null && t.priceUsd!! > 0) {
                                     Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
                                     Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * t.priceUsd!!)}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
