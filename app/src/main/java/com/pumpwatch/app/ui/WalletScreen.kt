@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.Blockscout
+import com.pumpwatch.app.data.DexScreenerClient
 import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
@@ -51,6 +52,7 @@ import androidx.compose.material3.FilterChipDefaults
 import com.pumpwatch.app.data.SolanaRpc
 import com.pumpwatch.app.data.SuiClient
 import com.pumpwatch.app.data.TonClient
+import com.pumpwatch.app.data.bestPriceUsd
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.solanaTyped
 import com.pumpwatch.app.data.suiAmount
@@ -98,9 +100,24 @@ private val CHAINS = listOf(
     ChainCfg("robinhood", "Robinhood 🪽", "robinhood", "https://robinhoodchain.blockscout.com/", "evm")
 )
 
+// 🚀 Sprint 10 (C4): map کردن ChainCfg.key به DexScreener chainId
+private fun dexChainIdFor(key: String): String? = when (key) {
+    "eth" -> "ethereum"
+    "base" -> "base"
+    "bsc" -> "bsc"
+    "arbitrum" -> "arbitrum"
+    "optimism" -> "optimism"
+    "polygon" -> "polygon"
+    "avalanche" -> "avax"
+    "sei" -> "sei"
+    "gnosis" -> "gnosis"
+    else -> null
+}
+
 private data class WalletHolding(
     val symbol: String, val name: String, val amount: Double, val price: Double?, val value: Double,
     val contract: String? = null, val host: String? = null,
+    val dexChainId: String? = null,
     var firstBuyTs: Long? = null, var buyPrice: Double? = null
 )
 private data class WalletTx(val dateText: String, val dateDay: String, val symbol: String, val amount: Double, val incoming: Boolean, var priceUsd: Double?)
@@ -219,7 +236,7 @@ fun WalletScreen() {
                                                         var d = (md?.get("decimals")?.asInt ?: 9).coerceIn(0, 18)
                                                         var amt = rb.toDoubleOrNull() ?: return@async null
                                                         while (d > 0) { amt /= 10.0; d-- }
-                                                        WalletHolding(sym, "", amt, null, 0.0, contract = ct)
+                                                        WalletHolding(sym, "", amt, null, 0.0, contract = ct, dexChainId = "sui")
                                                     }
                                                 } catch (_: Exception) { null }
                                             }
@@ -233,7 +250,6 @@ fun WalletScreen() {
                                     if (h.symbol == "SUI" && suiPx != null && suiPx > 0) h.copy(price = suiPx, value = h.amount * suiPx) else h
                                 }.toMutableList()
 
-                                // 🚀 Sprint 10 (C1): اولین خرید = قدیمی‌ترین balanceChange مثبت در ۵۰ تراکنش آخر
                                 try {
                                     val tb2 = SuiClient.txBlocks(addr, 50)
                                     val dataArr2 = tb2?.getAsJsonObject("result")?.getAsJsonArray("data")
@@ -273,6 +289,33 @@ fun WalletScreen() {
                                     }
                                 } catch (_: Exception) { }
 
+                                // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای SUI non-native
+                                try {
+                                    val unpriced = finalList.filter { it.price == null && !it.contract.isNullOrEmpty() }
+                                    coroutineScope {
+                                        unpriced.chunked(2).forEach { chunk ->
+                                            val part = chunk.map { h ->
+                                                async(Dispatchers.IO) {
+                                                    try {
+                                                        val c = h.contract!!
+                                                        val resp = DexScreenerClient.api.tokens(c)
+                                                        val px = bestPriceUsd(resp.pairs, "sui", c)
+                                                        if (px != null) h to px else null
+                                                    } catch (_: Exception) { null }
+                                                }
+                                            }.awaitAll().filterNotNull()
+                                            for ((h, px) in part) {
+                                                val idx = finalList.indexOf(h)
+                                                if (idx >= 0) {
+                                                    val old = finalList[idx]
+                                                    finalList[idx] = old.copy(price = px, value = old.amount * px)
+                                                }
+                                            }
+                                            if (unpriced.size > 2) delay(1000L)
+                                        }
+                                    }
+                                } catch (_: Exception) { }
+
                                 holdings = finalList.sortedByDescending { it.value }
                                 total = finalList.sumOf { it.value }
                                 txs = emptyList()
@@ -300,7 +343,7 @@ fun WalletScreen() {
                                     val dec = meta.decimals ?: 9
                                     val amt = tonAmount(jb.balance, dec) ?: continue
                                     if (amt <= 0.0) continue
-                                    list.add(WalletHolding(meta.symbol ?: mint.take(6), meta.name ?: "", amt, null, 0.0, contract = mint))
+                                    list.add(WalletHolding(meta.symbol ?: mint.take(6), meta.name ?: "", amt, null, 0.0, contract = mint, dexChainId = "ton"))
                                 }
 
                                 val priceMap = mutableMapOf<String, Double>()
@@ -331,7 +374,6 @@ fun WalletScreen() {
                                     if (px != null && px > 0) h.copy(price = px, value = h.amount * px) else h
                                 }.toMutableList()
 
-                                // 🚀 Sprint 10 (C1): اولین خرید = قدیمی‌ترین ورودِ هر نماد در ۱۰۰ رویداد آخر
                                 try {
                                     val ev = TonClient.api.events(addr, limit = 100)
                                     val firstTsBySym = mutableMapOf<String, Long>()
@@ -362,6 +404,33 @@ fun WalletScreen() {
                                             val byDay = chart.prices.associate { p -> sdfD.format(Date(p[0].toLong())) to p[1] }
                                             h.buyPrice = byDay[sdfD.format(Date(fts))]
                                         } catch (_: Exception) { }
+                                    }
+                                } catch (_: Exception) { }
+
+                                // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای Jetton ها
+                                try {
+                                    val stillUnpriced = finalList.filter { it.price == null && !it.contract.isNullOrEmpty() }
+                                    coroutineScope {
+                                        stillUnpriced.chunked(2).forEach { chunk ->
+                                            val part = chunk.map { h ->
+                                                async(Dispatchers.IO) {
+                                                    try {
+                                                        val c = h.contract!!
+                                                        val resp = DexScreenerClient.api.tokens(c)
+                                                        val px = bestPriceUsd(resp.pairs, "ton", c)
+                                                        if (px != null) h to px else null
+                                                    } catch (_: Exception) { null }
+                                                }
+                                            }.awaitAll().filterNotNull()
+                                            for ((h, px) in part) {
+                                                val idx = finalList.indexOf(h)
+                                                if (idx >= 0) {
+                                                    val old = finalList[idx]
+                                                    finalList[idx] = old.copy(price = px, value = old.amount * px)
+                                                }
+                                            }
+                                            if (stillUnpriced.size > 2) delay(1000L)
+                                        }
                                     }
                                 } catch (_: Exception) { }
 
@@ -396,7 +465,7 @@ fun WalletScreen() {
                                             try {
                                                 val t = GeckoPrice.api.tokenInfo("solana", mint).data?.attributes
                                                 val px = t?.price_usd?.toDoubleOrNull()
-                                                val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * (px ?: 0.0), contract = mint)
+                                                val h = WalletHolding(t?.symbol ?: mint.take(6), t?.name ?: "", amt, px, amt * (px ?: 0.0), contract = mint, dexChainId = "solana")
                                                 try {
                                                     if (acc.isNotEmpty()) {
                                                         val sg = solanaRaw(mapOf(
@@ -428,6 +497,33 @@ fun WalletScreen() {
                                         val byDay = chart.prices.associate { p -> sdfD.format(Date(p[0].toLong())) to p[1] }
                                         h.buyPrice = h.firstBuyTs?.let { byDay[sdfD.format(Date(it))] }
                                     } catch (_: Exception) { }
+                                }
+                            } catch (_: Exception) { }
+
+                            // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای توکن‌های Solana
+                            try {
+                                val unpriced = list.filter { it.price == null && !it.contract.isNullOrEmpty() }
+                                coroutineScope {
+                                    unpriced.chunked(2).forEach { chunk ->
+                                        val part = chunk.map { h ->
+                                            async(Dispatchers.IO) {
+                                                try {
+                                                    val c = h.contract!!
+                                                    val resp = DexScreenerClient.api.tokens(c)
+                                                    val px = bestPriceUsd(resp.pairs, "solana", c)
+                                                    if (px != null) h to px else null
+                                                } catch (_: Exception) { null }
+                                            }
+                                        }.awaitAll().filterNotNull()
+                                        for ((h, px) in part) {
+                                            val idx = list.indexOf(h)
+                                            if (idx >= 0) {
+                                                val old = list[idx]
+                                                list[idx] = old.copy(price = px, value = old.amount * px)
+                                            }
+                                        }
+                                        if (unpriced.size > 2) delay(1000L)
+                                    }
                                 }
                             } catch (_: Exception) { }
 
@@ -466,7 +562,7 @@ fun WalletScreen() {
                                                                     GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull()
                                                                 } catch (_: Exception) { null }
                                                                 if (px == null || px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price
-                                                                WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * (px ?: 0.0), contract = contract, host = h.bs)
+                                                                WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * (px ?: 0.0), contract = contract, host = h.bs, dexChainId = dexChainIdFor(h.key))
                                                             } catch (_: Exception) { null }
                                                         }
                                                     }.awaitAll().filterNotNull()
@@ -518,6 +614,33 @@ fun WalletScreen() {
                                         val byDay = chart.prices.associate { p -> sdfD.format(Date(p[0].toLong())) to p[1] }
                                         hd.buyPrice = hd.firstBuyTs?.let { byDay[sdfD.format(Date(it))] }
                                     } catch (_: Exception) { }
+                                }
+                            } catch (_: Exception) { }
+
+                            // 🚀 Sprint 10 (C4): DexScreener آخرین شانس قیمت برای توکن‌های EVM
+                            try {
+                                val unpriced = allHold.filter { it.price == null && !it.contract.isNullOrEmpty() && !it.dexChainId.isNullOrEmpty() }
+                                coroutineScope {
+                                    unpriced.chunked(2).forEach { chunk ->
+                                        val part = chunk.map { h ->
+                                            async(Dispatchers.IO) {
+                                                try {
+                                                    val c = h.contract!!
+                                                    val resp = DexScreenerClient.api.tokens(c)
+                                                    val px = bestPriceUsd(resp.pairs, h.dexChainId!!, c)
+                                                    if (px != null) h to px else null
+                                                } catch (_: Exception) { null }
+                                            }
+                                        }.awaitAll().filterNotNull()
+                                        for ((h, px) in part) {
+                                            val idx = allHold.indexOf(h)
+                                            if (idx >= 0) {
+                                                val old = allHold[idx]
+                                                allHold[idx] = old.copy(price = px, value = old.amount * px)
+                                            }
+                                        }
+                                        if (unpriced.size > 2) delay(1000L)
+                                    }
                                 }
                             } catch (_: Exception) { }
 
@@ -915,7 +1038,7 @@ fun WalletScreen() {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange, modifier = Modifier.weight(1f))
+                    Text("📰 موتور ۳: شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange, modifier = Modifier.weight(1f))
                     Button(onClick = { infoText = "موتور ۳: نماد ارز خبری → جهش‌های ≥۸٪ = لحظه خبر؛ کیف‌هایی که ۳۰دقیقه-۳ساعت قبلش خریدن = اینسایدر با امتیاز شک. سوال: کی با خبر معامله می‌کنه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                 }
                 Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
