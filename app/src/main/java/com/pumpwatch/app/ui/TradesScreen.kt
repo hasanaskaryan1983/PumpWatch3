@@ -1,14 +1,19 @@
 package com.pumpwatch.app.ui
 
 import android.content.Context
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +35,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,7 +60,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.min
 
 private val TGreen = Color(0xFF00E676)
@@ -62,6 +73,7 @@ private val TGold = Color(0xFFFFC107)
 private val TGray = Color(0xFF8B949E)
 private val TCard = Color(0xFF1A2230)
 private val TPurple = Color(0xFFCE93D8)
+private val TCardB = Color(0xFF141B25)
 
 private val GSON = Gson()
 
@@ -92,6 +104,23 @@ private data class ConsensusPick(
     val symbol: String, val rank: Int?, val price: Double, val chain: String?,
     val trend: Int, val whaleRatio: Double, val whaleVol: Double, val ch24: Double,
     val total: Int, val isDex: Boolean, val atr: Double
+)
+
+// 🚀 Sprint 13 (F6d): آمار تفکیکی tier برای ژورنال
+private data class TierStats(
+    val count: Int,
+    val wins: Int,
+    val pnlPct: Double,
+    val pnlUsd: Double,
+    val winRate: Double
+)
+
+// 🚀 Sprint 13 (F6d): دادهٔ ماهانه برای heatmap
+private data class MonthlyPnl(
+    val key: String,     // "2024-09"
+    val label: String,   // "Sep 24"
+    val pnlPct: Double,
+    val count: Int
 )
 
 private val TIERS = listOf(
@@ -146,6 +175,71 @@ private fun saveAlloc(ctx: Context, a: Map<String, Int>) {
 
 private fun usd(v: Double): String = String.format(Locale.US, "$%,.2f", v)
 
+// ---------- 🚀 Sprint 13 (F6d): محاسبات ژورنال ----------
+
+/** R-multiple برای PaperTrade */
+private fun rMultiple(t: PaperTrade): Double {
+    if (t.entry <= 0.0 || t.stopPct <= 0.0) return 0.0
+    val risk = t.entry * t.stopPct / 100.0
+    val move = t.price - t.entry  // closePrice - entry
+    return move / risk
+}
+
+/** ساخت منحنی equity از trades بسته‌شده */
+private fun buildEquityCurve(closed: List<PaperTrade>): List<Double> {
+    val sorted = closed.sortedBy { it.closeTime }
+    val curve = mutableListOf(100.0)
+    var equity = 100.0
+    sorted.forEach { t ->
+        equity *= (1 + t.pnl / 100.0)
+        curve.add(equity)
+    }
+    return curve
+}
+
+/** Max drawdown روی منحنی equity */
+private fun computeMaxDrawdown(curve: List<Double>): Double {
+    if (curve.isEmpty()) return 0.0
+    var peak = curve[0]
+    var maxDD = 0.0
+    for (e in curve) {
+        if (e > peak) peak = e
+        val dd = if (peak > 0) (peak - e) / peak * 100.0 else 0.0
+        if (dd > maxDD) maxDD = dd
+    }
+    return maxDD
+}
+
+/** گروه‌بندی PnL ماهانه */
+private fun computeMonthly(closed: List<PaperTrade>): List<MonthlyPnl> {
+    val fmt = SimpleDateFormat("yyyy-MM", Locale.US)
+    val labelFmt = SimpleDateFormat("MMM yy", Locale.US)
+    val grouped = closed
+        .filter { it.closeTime > 0 }
+        .groupBy { fmt.format(Date(it.closeTime)) }
+    return grouped.entries
+        .sortedBy { it.key }
+        .map { (key, list) ->
+            MonthlyPnl(
+                key = key,
+                label = try { labelFmt.format(Date(list.first().closeTime)) } catch (_: Exception) { key },
+                pnlPct = list.sumOf { it.pnl * it.sizeUsd / 100.0 },
+                count = list.size
+            )
+        }
+}
+
+/** تفکیک آمار بر اساس tier */
+private fun computeTierStats(closed: List<PaperTrade>): Map<String, TierStats> {
+    return closed.groupBy { it.tier }.mapValues { (_, list) ->
+        val wins = list.count { it.pnl > 0 }
+        val pnlPct = list.sumOf { it.pnl }
+        val pnlUsd = list.sumOf { it.pnl * it.sizeUsd / 100.0 }
+        val winRate = if (list.isEmpty()) 0.0 else wins * 100.0 / list.size
+        TierStats(list.size, wins, pnlPct, pnlUsd, winRate)
+    }
+}
+
 @Composable
 fun TradesScreen() {
     val context = LocalContext.current
@@ -154,12 +248,14 @@ fun TradesScreen() {
 
     var state by remember { mutableStateOf(loadState(context)) }
     var alloc by remember { mutableStateOf(loadAlloc(context)) }
-    // P0-5: نصب تازه = ربات خاموش (هم‌راستا با QuickScanner و README)
     var botOn by remember { mutableStateOf(prefs.getBoolean("paper_bot", false)) }
     var status by remember { mutableStateOf("⏳ منتظر اولین اسکن...") }
     var confirmReset by remember { mutableStateOf(false) }
     var consensus by remember { mutableStateOf<List<ConsensusPick>>(emptyList()) }
     var realWhale by remember { mutableStateOf<Map<String, WhaleFlowResult>>(emptyMap()) }
+
+    // 🚀 Sprint 13 (F6d): sub-tab switcher بین Paper و Journal
+    var journalTab by remember { mutableStateOf(false) }
 
     var mSymbol by remember { mutableStateOf("") }
     var mPrice by remember { mutableStateOf<Double?>(null) }
@@ -199,25 +295,18 @@ fun TradesScreen() {
         state.cash -= sizeUsd
     }
 
-    // ---------- مدیریت پوزیشن: تریلینگ + حالت دونده 🏃 ----------
     fun updateTrail(t: PaperTrade, px: Double): Boolean {
         t.price = px
-
-        // ۱) رسیدن به هدف → حالت دونده: دیگه نمی‌بندیم، سود رو قفل می‌کنیم
         if (t.target > 0 && px >= t.target) {
             t.target = -1.0
             val lock = t.entry * (1 + t.stopPct / 100)
             if (lock > t.stop) t.stop = lock
         }
-
-        // ۲) تریلینگ (بعد از هدف، تنگ‌تر برای محافظت از سود بزرگ)
         if (t.trailing != false) {
             val dist = if (t.target < 0) t.stopPct * 0.7 else t.stopPct
             val nt = px * (1 - dist / 100)
             if (nt > t.stop) t.stop = nt
         }
-
-        // ۳) فقط برخورد با استاپ (= برگشت روند) می‌بنده
         return if (px <= t.stop) { closeTrade(t, px); true } else false
     }
 
@@ -229,7 +318,6 @@ fun TradesScreen() {
             mStatus = "🔍 جستجوی $q..."
             mPrice = null
             try {
-                // ⚠️ P1-1: این مسیر هرگز cache نمی‌شود — قیمت ورود دستی باید لحظه‌ای باشد
                 val res = withContext(Dispatchers.IO) {
                     val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
                     coins.firstOrNull { it.symbol.equals(q, true) }?.let {
@@ -262,7 +350,6 @@ fun TradesScreen() {
                     try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
                 }
 
-                // 🚀 P1-2: گرفتن استخرهای ۸ زنجیره به‌صورت هم‌زمان (قبلاً sequential بود)
                 val dexPools = coroutineScope {
                     listOf("solana", "bsc", "base", "optimism", "arbitrum", "polygon", "avalanche", "ton").map { ch ->
                         async(Dispatchers.IO) {
@@ -290,7 +377,6 @@ fun TradesScreen() {
 
                 var closedNow = 0
                 openTrades().forEach { t ->
-                    // ⚠️ P1-1: قیمت تریلینگ/استاپ هرگز cache نمی‌شود — باید لحظه‌ای باشد
                     val px = if (t.tier == "DEX") dexInfo[t.symbol]?.first
                     else if (t.tier == "دستی") coins.firstOrNull { it.symbol.equals(t.symbol, true) }?.current_price
                         ?: try { BinanceClient.api.klines("${t.symbol}USDT", "1h", 2).last()[4].asDouble } catch (_: Exception) { null }
@@ -298,7 +384,6 @@ fun TradesScreen() {
                     if (px != null && px > 0) if (updateTrail(t, px)) closedNow++
                 }
 
-                // ---------- اجماع ----------
                 val picks = mutableListOf<ConsensusPick>()
                 val seen = mutableSetOf<String>()
 
@@ -313,7 +398,6 @@ fun TradesScreen() {
                     val sym = c.symbol.uppercase(Locale.US)
                     if (seen.contains(sym)) continue
                     seen.add(sym)
-                    // 🚀 Sprint 13 (F6b): استفاده از موتور امتیازدهی مشترک
                     val (trend, atr) = ScoringEngine.score(sym, live = true)
                     val w = whaleMap[sym]
                     val ch24 = c.price_change_percentage_24h ?: 0.0
@@ -336,8 +420,6 @@ fun TradesScreen() {
 
                 consensus = picks.sortedByDescending { it.total }.take(10)
 
-                // 🐳 دادهٔ واقعی نهنگ‌ها (aggTrades) برای ۶ کاندید برتر — فقط نمایشی
-                // 🚀 P1-2: شش تحلیل به‌صورت هم‌زمان (قبلاً sequential؛ هر کدام تا ۵ provider!)
                 val rwList = coroutineScope {
                     consensus.take(6).map { pk ->
                         async(Dispatchers.IO) {
@@ -350,7 +432,6 @@ fun TradesScreen() {
                 }
                 realWhale = rwList.toMap()
 
-                // ---------- معامله خودکار per tier (فقط وقتی ربات روشن است) ----------
                 var openedNow = 0
                 if (botOn) for ((tierName, range) in TIERS) {
                     val pct = alloc[tierName] ?: 0
@@ -393,7 +474,6 @@ fun TradesScreen() {
                         var tierOpened = 0
                         for (c in cands) {
                             if (tierOpened >= 2 || state.cash < 10) break
-                            // 🚀 Sprint 13 (F6b): استفاده از موتور امتیازدهی مشترک
                             val (score, atr) = ScoringEngine.score(c.symbol, live = true)
                             val ch24 = c.price_change_percentage_24h ?: 0.0
                             if (score >= 70 || (ch24 >= 8.0 && score >= 45)) {
@@ -405,7 +485,6 @@ fun TradesScreen() {
                     }
                 }
 
-                // ---------- معامله از اجماع (فقط وقتی ربات روشن است) ----------
                 var consensusOpened = 0
                 if (botOn) for (pk in consensus) {
                     if (consensusOpened >= 2 || state.cash < 10) break
@@ -453,7 +532,7 @@ fun TradesScreen() {
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("📈 معاملات شبیه‌سازی", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text("📈 معاملات و ژورنال", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Spacer(Modifier.weight(1f))
             Text("ربات:", fontSize = 12.sp, color = TGray)
             Switch(checked = botOn, onCheckedChange = {
@@ -462,233 +541,571 @@ fun TradesScreen() {
             })
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text("دارایی کل", fontSize = 10.sp, color = TGray)
-                        Text(usd(equity()), fontSize = 20.sp, fontWeight = FontWeight.Black, color = TGreen)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("سود/زیان کل", fontSize = 10.sp, color = TGray)
-                        Text(String.format(Locale.US, "%+.2f%%", totalPnl / START_CAPITAL * 100),
-                            fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                            color = if (totalPnl >= 0) TGreen else TRed)
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("نقد: ${usd(state.cash)}", fontSize = 11.sp, color = TGray)
-                    Text("درگیر: ${usd(invested())}", fontSize = 11.sp, color = TBlue)
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("باز: ${openTrades().size}", fontSize = 11.sp, color = TGold)
-                    Text("برد: $wins", fontSize = 11.sp, color = TGreen)
-                    Text("باخت: $losses", fontSize = 11.sp, color = TRed)
-                    Text("وین‌ریت: ${String.format(Locale.US, "%.0f%%", winRate)}", fontSize = 11.sp, color = if (winRate >= 50) TGreen else TRed)
-                }
-            }
-        }
-
-        Text(status, fontSize = 10.sp, color = TGray)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { cycle() }, colors = ButtonDefaults.buttonColors(containerColor = TBlue),
-                shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
-                Text("🔄 اسکن حالا", fontSize = 11.sp)
-            }
+        // 🚀 Sprint 13 (F6d): sub-tab switcher
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             Button(
-                onClick = {
-                    if (!confirmReset) { confirmReset = true }
-                    else {
-                        state = PaperState()
-                        consensus = emptyList()
-                        save()
-                        confirmReset = false
-                        status = "♻️ ریست شد — ۱۰۰$ تازه"
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = if (confirmReset) TRed else TCard),
-                shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)
-            ) { Text(if (confirmReset) "مطمئنی؟ بزن قطعی!" else "♻️ ریست کامل", fontSize = 11.sp) }
+                onClick = { journalTab = false },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (!journalTab) TBlue else TCard
+                ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.weight(1f)
+            ) { Text("📈 معاملات", fontSize = 12.sp, color = Color.White) }
+            Button(
+                onClick = { journalTab = true },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (journalTab) TPurple else TCard
+                ),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.weight(1f)
+            ) { Text("📓 ژورنال", fontSize = 12.sp, color = Color.White) }
         }
-        if (confirmReset) Text("⚠️ دکمه ریست رو دوباره بزن تا همه چی صفر بشه", fontSize = 9.sp, color = TRed)
 
-        // ---------- اجماع ----------
-        Text("🧠 اجماع همه تب‌ها (نهنگ🐳 + روند📈 + مومنتوم⚡ + ترند🐸) — بررسی کن و انتخاب کن:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TPurple)
-        if (consensus.isEmpty()) {
-            Text("⏳ در حال محاسبه اجماع...", fontSize = 11.sp, color = TGray)
-        }
-        consensus.forEach { pk ->
-            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(pk.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
-                        Text(if (pk.isDex) " (${pk.chain ?: "DEX"})" else " #${pk.rank}", fontSize = 10.sp, color = TGray)
-                        Spacer(Modifier.weight(1f))
-                        Text("${pk.total}/100", fontSize = 16.sp, fontWeight = FontWeight.Black,
-                            color = if (pk.total >= 80) TGreen else if (pk.total >= 65) TGold else TGray)
+        if (journalTab) {
+            // 🚀 Sprint 13 (F6d): محتوای ژورنال
+            JournalContent(state.trades)
+        } else {
+            // ---------- محتوای قبلی معاملات ----------
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("دارایی کل", fontSize = 10.sp, color = TGray)
+                            Text(usd(equity()), fontSize = 20.sp, fontWeight = FontWeight.Black, color = TGreen)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("سود/زیان کل", fontSize = 10.sp, color = TGray)
+                            Text(String.format(Locale.US, "%+.2f%%", totalPnl / START_CAPITAL * 100),
+                                fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                color = if (totalPnl >= 0) TGreen else TRed)
+                        }
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
-                        Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                        Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                        Text("نقد: ${usd(state.cash)}", fontSize = 11.sp, color = TGray)
+                        Text("درگیر: ${usd(invested())}", fontSize = 11.sp, color = TBlue)
                     }
-                    realWhale[pk.symbol]?.let { rw ->
-                        Text(
-                            "🐳 نهنگ واقعی (aggTrades): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۰۰K",
-                            fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                            color = if (rw.buyRatio >= 0.6) TGreen else if (rw.buyRatio <= 0.4) TRed else TGray
-                        )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("باز: ${openTrades().size}", fontSize = 11.sp, color = TGold)
+                        Text("برد: $wins", fontSize = 11.sp, color = TGreen)
+                        Text("باخت: $losses", fontSize = 11.sp, color = TRed)
+                        Text("وین‌ریت: ${String.format(Locale.US, "%.0f%%", winRate)}", fontSize = 11.sp, color = if (winRate >= 50) TGreen else TRed)
                     }
-                    if (pk.total >= 80) Text("🎯 سیگنال اجماع — تأیید چند منبع", fontSize = 9.sp, color = TGreen, fontWeight = FontWeight.Bold)
-                    Button(
-                        onClick = {
-                            if (state.cash >= 10 && openTrades().none { it.symbol == pk.symbol }) {
-                                openTrade(pk.symbol, tierOfRank(pk.rank), pk.price, pk.total, pk.atr, min(50.0, state.cash))
-                                save()
-                                status = "✅ ${pk.symbol} با اجماع ${pk.total}/100 باز شد"
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = if (pk.total >= 80) TGreen else TCard),
-                        shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()
-                    ) { Text("🟢 معامله با این سیگنال (۵۰$)", fontSize = 10.sp) }
                 }
             }
-        }
 
-        // ---------- معامله دستی ----------
-        Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("➕ معامله دستی (خودت انتخاب کن)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TGold)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextField(
-                        value = mSymbol, onValueChange = { mSymbol = it },
-                        placeholder = { Text("نماد ارز... (BTC, ZCAT...)", fontSize = 11.sp) },
-                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Button(onClick = { findPrice() }, enabled = !mLoading,
-                        colors = ButtonDefaults.buttonColors(containerColor = TBlue),
-                        shape = RoundedCornerShape(8.dp)) {
-                        Text("💲 قیمت", fontSize = 11.sp)
-                    }
-                }
-                if (mStatus.isNotEmpty()) {
-                    Text(mStatus, fontSize = 10.sp,
-                        color = if (mStatus.contains("✅")) TGreen else if (mStatus.contains("❌") || mStatus.contains("⚠️")) TRed else TGray)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Column(Modifier.weight(1f)) {
-                        Text("مبلغ ($)", fontSize = 9.sp, color = TGray)
-                        TextField(value = mAmount, onValueChange = { mAmount = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text("استاپ ٪", fontSize = 9.sp, color = TRed)
-                        TextField(value = mStop, onValueChange = { mStop = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text("هدف ٪", fontSize = 9.sp, color = TGreen)
-                        TextField(value = mTarget, onValueChange = { mTarget = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("استاپ شناور (تریلینگ):", fontSize = 11.sp, color = TGray)
-                    Spacer(Modifier.weight(1f))
-                    Switch(checked = mTrailing, onCheckedChange = { mTrailing = it })
-                    Text(if (mTrailing) "🔄 شناور" else "📌 ثابت", fontSize = 11.sp, color = if (mTrailing) TGreen else TGold)
+            Text(status, fontSize = 10.sp, color = TGray)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { cycle() }, colors = ButtonDefaults.buttonColors(containerColor = TBlue),
+                    shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
+                    Text("🔄 اسکن حالا", fontSize = 11.sp)
                 }
                 Button(
                     onClick = {
-                        val px = mPrice
-                        val amt = mAmount.toDoubleOrNull() ?: 0.0
-                        val stp = mStop.toDoubleOrNull() ?: 10.0
-                        val tgt = mTarget.toDoubleOrNull() ?: 20.0
-                        when {
-                            px == null || px <= 0 -> mStatus = "❌ اول دکمه «قیمت» رو بزن"
-                            amt <= 0 || amt > state.cash -> mStatus = "❌ مبلغ نامعتبر (نقد: ${usd(state.cash)})"
-                            stp <= 0 || tgt <= 0 -> mStatus = "❌ استاپ/هدف نامعتبر"
-                            else -> {
-                                openTrade(mSymbol.uppercase(Locale.US), "دستی", px, 0, stp, amt,
-                                    trailing = mTrailing, stopPctOverride = stp, targetPctOverride = tgt)
-                                save()
-                                mStatus = "✅ معامله ${mSymbol.uppercase(Locale.US)} باز شد (${usd(amt)})"
-                            }
+                        if (!confirmReset) { confirmReset = true }
+                        else {
+                            state = PaperState()
+                            consensus = emptyList()
+                            save()
+                            confirmReset = false
+                            status = "♻️ ریست شد — ۱۰۰۰$ تازه"
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = TGreen),
-                    shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()
-                ) { Text("🟢 باز کردن معامله", fontSize = 12.sp) }
+                    colors = ButtonDefaults.buttonColors(containerColor = if (confirmReset) TRed else TCard),
+                    shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)
+                ) { Text(if (confirmReset) "مطمئنی؟ بزن قطعی!" else "♻️ ریست کامل", fontSize = 11.sp) }
             }
-        }
+            if (confirmReset) Text("⚠️ دکمه ریست رو دوباره بزن تا همه چی صفر بشه", fontSize = 9.sp, color = TRed)
 
-        // ---------- تقسیم‌بندی ----------
-        Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("⚙️ تقسیم‌بندی دارایی ربات (مجموع: $allocSum٪)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TBlue)
-                TIERS.forEach { (name, _) ->
-                    val v = alloc[name] ?: 0
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(name, fontSize = 11.sp, color = TGray, modifier = Modifier.width(70.dp))
-                        Button(onClick = {
-                            if (v > 0) { alloc[name] = v - 5; alloc = LinkedHashMap(alloc); saveAlloc(context, alloc) }
-                        }, colors = ButtonDefaults.buttonColors(containerColor = TCard), shape = RoundedCornerShape(6.dp)) { Text("−", fontSize = 12.sp) }
-                        Text(" $v٪ ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TGold)
-                        Button(onClick = {
-                            if (allocSum < 100) { alloc[name] = v + 5; alloc = LinkedHashMap(alloc); saveAlloc(context, alloc) }
-                        }, colors = ButtonDefaults.buttonColors(containerColor = TCard), shape = RoundedCornerShape(6.dp)) { Text("+", fontSize = 12.sp) }
-                        Spacer(Modifier.weight(1f))
-                        Text("≤${MAX_PER_TIER} پوزیشن", fontSize = 9.sp, color = TGray)
+            // ---------- اجماع ----------
+            Text("🧠 اجماع همه تب‌ها (نهنگ🐳 + روند📈 + مومنتوم⚡ + ترند🐸) — بررسی کن و انتخاب کن:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TPurple)
+            if (consensus.isEmpty()) {
+                Text("⏳ در حال محاسبه اجماع...", fontSize = 11.sp, color = TGray)
+            }
+            consensus.forEach { pk ->
+                Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(pk.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                            Text(if (pk.isDex) " (${pk.chain ?: "DEX"})" else " #${pk.rank}", fontSize = 10.sp, color = TGray)
+                            Spacer(Modifier.weight(1f))
+                            Text("${pk.total}/100", fontSize = 16.sp, fontWeight = FontWeight.Black,
+                                color = if (pk.total >= 80) TGreen else if (pk.total >= 65) TGold else TGray)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
+                            Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
+                            Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                        }
+                        realWhale[pk.symbol]?.let { rw ->
+                            Text(
+                                "🐳 نهنگ واقعی (aggTrades): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۱۰۰K",
+                                fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                color = if (rw.buyRatio >= 0.6) TGreen else if (rw.buyRatio <= 0.4) TRed else TGray
+                            )
+                        }
+                        if (pk.total >= 80) Text("🎯 سیگنال اجماع — تأیید چند منبع", fontSize = 9.sp, color = TGreen, fontWeight = FontWeight.Bold)
+                        Button(
+                            onClick = {
+                                if (state.cash >= 10 && openTrades().none { it.symbol == pk.symbol }) {
+                                    openTrade(pk.symbol, tierOfRank(pk.rank), pk.price, pk.total, pk.atr, min(50.0, state.cash))
+                                    save()
+                                    status = "✅ ${pk.symbol} با اجماع ${pk.total}/100 باز شد"
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = if (pk.total >= 80) TGreen else TCard),
+                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()
+                        ) { Text("🟢 معامله با این سیگنال (۵۰$)", fontSize = 10.sp) }
                     }
                 }
-                if (allocSum != 100) Text("💡 مجموع رو روی ۱۰۰٪ تنظیم کن (الان $allocSum٪)", fontSize = 9.sp, color = TGold)
             }
-        }
 
-        // ---------- پوزیشن‌های باز ----------
-        Text("📂 پوزیشن‌های باز (${openTrades().size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        if (openTrades().isEmpty()) {
-            Text("هنوز پوزیشنی باز نشده 🤖", fontSize = 11.sp, color = TGray)
-        }
-        openTrades().forEach { t ->
-            val pnl = if (t.entry > 0) (t.price - t.entry) / t.entry * 100 else 0.0
-            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // ---------- معامله دستی ----------
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("➕ معامله دستی (خودت انتخاب کن)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TGold)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("${t.symbol} • ${t.tier}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text(if (t.trailing != false) " 🔄" else " 📌", fontSize = 12.sp)
-                        if (t.target < 0) Text(" 🏃", fontSize = 12.sp)
-                        Text(" (${t.score})", fontSize = 9.sp, color = TGray)
+                        TextField(
+                            value = mSymbol, onValueChange = { mSymbol = it },
+                            placeholder = { Text("نماد ارز... (BTC, ZCAT...)", fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Button(onClick = { findPrice() }, enabled = !mLoading,
+                            colors = ButtonDefaults.buttonColors(containerColor = TBlue),
+                            shape = RoundedCornerShape(8.dp)) {
+                            Text("💲 قیمت", fontSize = 11.sp)
+                        }
+                    }
+                    if (mStatus.isNotEmpty()) {
+                        Text(mStatus, fontSize = 10.sp,
+                            color = if (mStatus.contains("✅")) TGreen else if (mStatus.contains("❌") || mStatus.contains("⚠️")) TRed else TGray)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text("مبلغ ($)", fontSize = 9.sp, color = TGray)
+                            TextField(value = mAmount, onValueChange = { mAmount = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text("استاپ ٪", fontSize = 9.sp, color = TRed)
+                            TextField(value = mStop, onValueChange = { mStop = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text("هدف ٪", fontSize = 9.sp, color = TGreen)
+                            TextField(value = mTarget, onValueChange = { mTarget = it }, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("استاپ شناور (تریلینگ):", fontSize = 11.sp, color = TGray)
                         Spacer(Modifier.weight(1f))
-                        Text(String.format(Locale.US, "%+.2f%%", pnl), fontWeight = FontWeight.Black, fontSize = 14.sp,
-                            color = if (pnl >= 0) TGreen else TRed)
+                        Switch(checked = mTrailing, onCheckedChange = { mTrailing = it })
+                        Text(if (mTrailing) "🔄 شناور" else "📌 ثابت", fontSize = 11.sp, color = if (mTrailing) TGreen else TGold)
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = TGray)
-                        Text("الان: ${usd(t.price)}", fontSize = 9.sp, color = TGray)
-                        Text("استاپ: ${usd(t.stop)}", fontSize = 9.sp, color = TRed)
-                        Text(if (t.target > 0) "هدف: ${usd(t.target)}" else "هدف: 🏃 آزاد", fontSize = 9.sp, color = TGreen)
-                    }
-                    if (t.target < 0) Text("🏃 حالت دونده: سود قفل شده، تا برگشت روند ادامه می‌ده", fontSize = 9.sp, color = TGold)
                     Button(
-                        onClick = { closeTrade(t, t.price); save(); status = "✋ ${t.symbol} دستی بسته شد" },
-                        colors = ButtonDefaults.buttonColors(containerColor = TRed.copy(alpha = 0.25f)),
-                        shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()
-                    ) { Text("✋ بستن دستی", fontSize = 10.sp) }
+                        onClick = {
+                            val px = mPrice
+                            val amt = mAmount.toDoubleOrNull() ?: 0.0
+                            val stp = mStop.toDoubleOrNull() ?: 10.0
+                            val tgt = mTarget.toDoubleOrNull() ?: 20.0
+                            when {
+                                px == null || px <= 0 -> mStatus = "❌ اول دکمه «قیمت» رو بزن"
+                                amt <= 0 || amt > state.cash -> mStatus = "❌ مبلغ نامعتبر (نقد: ${usd(state.cash)})"
+                                stp <= 0 || tgt <= 0 -> mStatus = "❌ استاپ/هدف نامعتبر"
+                                else -> {
+                                    openTrade(mSymbol.uppercase(Locale.US), "دستی", px, 0, stp, amt,
+                                        trailing = mTrailing, stopPctOverride = stp, targetPctOverride = tgt)
+                                    save()
+                                    mStatus = "✅ معامله ${mSymbol.uppercase(Locale.US)} باز شد (${usd(amt)})"
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = TGreen),
+                        shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()
+                    ) { Text("🟢 باز کردن معامله", fontSize = 12.sp) }
                 }
             }
-        }
 
-        // ---------- تاریخچه ----------
-        Text("📜 آخرین معامله‌های بسته:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        if (closed.isEmpty()) Text("هنوز معامله‌ای بسته نشده", fontSize = 11.sp, color = TGray)
-        closed.sortedByDescending { it.closeTime }.take(15).forEach { t ->
-            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${if (t.pnl > 0) "✅" else "❌"} ${t.symbol} • ${t.tier}", fontSize = 11.sp)
-                Text(String.format(Locale.US, "%+.2f%%", t.pnl), fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                    color = if (t.pnl > 0) TGreen else TRed)
+            // ---------- تقسیم‌بندی ----------
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("⚙️ تقسیم‌بندی دارایی ربات (مجموع: $allocSum٪)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TBlue)
+                    TIERS.forEach { (name, _) ->
+                        val v = alloc[name] ?: 0
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(name, fontSize = 11.sp, color = TGray, modifier = Modifier.width(70.dp))
+                            Button(onClick = {
+                                if (v > 0) { alloc[name] = v - 5; alloc = LinkedHashMap(alloc); saveAlloc(context, alloc) }
+                            }, colors = ButtonDefaults.buttonColors(containerColor = TCard), shape = RoundedCornerShape(6.dp)) { Text("−", fontSize = 12.sp) }
+                            Text(" $v٪ ", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TGold)
+                            Button(onClick = {
+                                if (allocSum < 100) { alloc[name] = v + 5; alloc = LinkedHashMap(alloc); saveAlloc(context, alloc) }
+                            }, colors = ButtonDefaults.buttonColors(containerColor = TCard), shape = RoundedCornerShape(6.dp)) { Text("+", fontSize = 12.sp) }
+                            Spacer(Modifier.weight(1f))
+                            Text("≤${MAX_PER_TIER} پوزیشن", fontSize = 9.sp, color = TGray)
+                        }
+                    }
+                    if (allocSum != 100) Text("💡 مجموع رو روی ۱۰۰٪ تنظیم کن (الان $allocSum٪)", fontSize = 9.sp, color = TGold)
+                }
             }
+
+            // ---------- پوزیشن‌های باز ----------
+            Text("📂 پوزیشن‌های باز (${openTrades().size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            if (openTrades().isEmpty()) {
+                Text("هنوز پوزیشنی باز نشده 🤖", fontSize = 11.sp, color = TGray)
+            }
+            openTrades().forEach { t ->
+                val pnl = if (t.entry > 0) (t.price - t.entry) / t.entry * 100 else 0.0
+                Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${t.symbol} • ${t.tier}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(if (t.trailing != false) " 🔄" else " 📌", fontSize = 12.sp)
+                            if (t.target < 0) Text(" 🏃", fontSize = 12.sp)
+                            Text(" (${t.score})", fontSize = 9.sp, color = TGray)
+                            Spacer(Modifier.weight(1f))
+                            Text(String.format(Locale.US, "%+.2f%%", pnl), fontWeight = FontWeight.Black, fontSize = 14.sp,
+                                color = if (pnl >= 0) TGreen else TRed)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = TGray)
+                            Text("الان: ${usd(t.price)}", fontSize = 9.sp, color = TGray)
+                            Text("استاپ: ${usd(t.stop)}", fontSize = 9.sp, color = TRed)
+                            Text(if (t.target > 0) "هدف: ${usd(t.target)}" else "هدف: 🏃 آزاد", fontSize = 9.sp, color = TGreen)
+                        }
+                        if (t.target < 0) Text("🏃 حالت دونده: سود قفل شده، تا برگشت روند ادامه می‌ده", fontSize = 9.sp, color = TGold)
+                        Button(
+                            onClick = { closeTrade(t, t.price); save(); status = "✋ ${t.symbol} دستی بسته شد" },
+                            colors = ButtonDefaults.buttonColors(containerColor = TRed.copy(alpha = 0.25f)),
+                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()
+                        ) { Text("✋ بستن دستی", fontSize = 10.sp) }
+                    }
+                }
+            }
+
+            // ---------- تاریخچه ----------
+            Text("📜 آخرین معامله‌های بسته:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            if (closed.isEmpty()) Text("هنوز معامله‌ای بسته نشده", fontSize = 11.sp, color = TGray)
+            closed.sortedByDescending { it.closeTime }.take(15).forEach { t ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("${if (t.pnl > 0) "✅" else "❌"} ${t.symbol} • ${t.tier}", fontSize = 11.sp)
+                    Text(String.format(Locale.US, "%+.2f%%", t.pnl), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = if (t.pnl > 0) TGreen else TRed)
+                }
+            }
+
+            Text("⚠️ شبیه‌سازی کاغذی — پول واقعی در کار نیست.", fontSize = 9.sp, color = TGold)
+        }
+    }
+}
+
+// ====================================================================
+// =====================  📓 ژورنال پیشرفته  =========================
+// ====================================================================
+
+@Composable
+private fun JournalContent(allTrades: List<PaperTrade>) {
+    val closed = allTrades.filter { it.status == "CLOSED" }
+    val wins = closed.filter { it.pnl > 0 }
+    val losses = closed.filter { it.pnl < 0 }
+
+    // محاسبات آماری
+    val winRate = if (closed.isEmpty()) 0.0 else wins.size * 100.0 / closed.size
+    val avgPnl = if (closed.isEmpty()) 0.0 else closed.map { it.pnl }.average()
+    val avgWin = if (wins.isEmpty()) 0.0 else wins.map { it.pnl }.average()
+    val avgLoss = if (losses.isEmpty()) 0.0 else abs(losses.map { it.pnl }.average())
+    val expectancy = (winRate / 100.0 * avgWin) - ((1 - winRate / 100.0) * avgLoss)
+    val totalPnlPct = closed.sumOf { it.pnl }
+    val totalPnlUsd = closed.sumOf { it.pnl * it.sizeUsd / 100.0 }
+
+    val grossProfit = wins.sumOf { it.pnl * it.sizeUsd / 100.0 }
+    val grossLoss = abs(losses.sumOf { it.pnl * it.sizeUsd / 100.0 })
+    val profitFactor = when {
+        grossLoss > 0 -> grossProfit / grossLoss
+        grossProfit > 0 -> Double.POSITIVE_INFINITY
+        else -> 0.0
+    }
+
+    // Equity curve + max DD
+    val equityCurve = buildEquityCurve(closed)
+    val maxDD = computeMaxDrawdown(equityCurve)
+
+    // R-multiples
+    val rMultiples = closed.map { rMultiple(it) }
+    val avgR = if (rMultiples.isEmpty()) 0.0 else rMultiples.average()
+    val bestR = rMultiples.maxOrNull() ?: 0.0
+    val worstR = rMultiples.minOrNull() ?: 0.0
+
+    // Monthly heatmap
+    val monthly = computeMonthly(closed)
+
+    // Tier breakdown
+    val tierStats = computeTierStats(closed)
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            "📓 ژورنال عملکرد (${closed.size} معاملهٔ بسته‌شده)",
+            fontWeight = FontWeight.Black, fontSize = 15.sp, color = TPurple
+        )
+
+        if (closed.isEmpty()) {
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("📭", fontSize = 48.sp)
+                    Text("هنوز معاملهٔ بسته‌شده‌ای نیست", fontSize = 13.sp, color = TGray)
+                    Text("بعد از بسته‌شدن اولین معامله، ژورنال اینجا نمایش داده می‌شود", fontSize = 11.sp, color = TGray)
+                }
+            }
+        } else {
+            // ---------- خلاصه کلی ----------
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("📊 خلاصهٔ عملکرد", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Stat("کل معاملات", "${closed.size}", TGray)
+                        Stat("✅ برد", "${wins.size}", TGreen)
+                        Stat("❌ باخت", "${losses.size}", TRed)
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Stat("وین‌ریت", String.format(Locale.US, "%.1f%%", winRate),
+                            if (winRate >= 50) TGreen else TRed)
+                        Stat("Profit Factor",
+                            if (profitFactor.isInfinite()) "∞" else String.format(Locale.US, "%.2f", profitFactor),
+                            if (profitFactor >= 1.5) TGreen else if (profitFactor >= 1.0) TGold else TRed)
+                        Stat("Max DD", String.format(Locale.US, "%.1f%%", maxDD),
+                            if (maxDD < 15) TGreen else if (maxDD < 30) TGold else TRed)
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Stat("میانگین PnL", String.format(Locale.US, "%+.2f%%", avgPnl),
+                            if (avgPnl >= 0) TGreen else TRed)
+                        Stat("امید ریاضی", String.format(Locale.US, "%+.2f%%", expectancy),
+                            if (expectancy > 0) TGreen else TRed)
+                        Stat("PnL کل", String.format(Locale.US, "%+.2f$", totalPnlUsd),
+                            if (totalPnlUsd >= 0) TGreen else TRed)
+                    }
+                }
+            }
+
+            // ---------- R-multiple و avg win/loss ----------
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("🎯 کیفیت معاملات (R-multiple و میانگین‌ها)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Stat("میانگین R", String.format(Locale.US, "%+.2f", avgR),
+                            if (avgR >= 0.5) TGreen else if (avgR >= 0) TGold else TRed)
+                        Stat("بهترین R", String.format(Locale.US, "%+.2f", bestR), TGreen)
+                        Stat("بدترین R", String.format(Locale.US, "%+.2f", worstR), TRed)
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Stat("میانگین سود", String.format(Locale.US, "%+.2f%%", avgWin), TGreen)
+                        Stat("میانگین ضرر", String.format(Locale.US, "%+.2f%%", -avgLoss), TRed)
+                    }
+
+                    // نسبت سود به زیان
+                    val rr = if (avgLoss > 0) avgWin / avgLoss else 0.0
+                    Text(
+                        "💡 نسبت Reward:Risk = ${String.format(Locale.US, "%.2f:1", rr)}" +
+                            (if (rr >= 2.0) " — عالی" else if (rr >= 1.0) " — قابل‌قبول" else " — نیاز به بهبود"),
+                        fontSize = 10.sp, color = if (rr >= 2.0) TGreen else if (rr >= 1.0) TGold else TRed,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // ---------- منحنی equity ----------
+            Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("📈 منحنی سرمایه", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
+                    Text(
+                        "شروع: ۱۰۰$ • الان: ${String.format(Locale.US, "$%.2f", equityCurve.lastOrNull() ?: 100.0)}" +
+                            " • رشد: ${String.format(Locale.US, "%+.1f%%", ((equityCurve.lastOrNull() ?: 100.0) - 100))}",
+                        fontSize = 10.sp, color = TGray
+                    )
+                    EquityChart(equityCurve)
+                }
+            }
+
+            // ---------- Heatmap ماهانه ----------
+            if (monthly.isNotEmpty()) {
+                Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🗓️ Heatmap ماهانه (PnL $)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
+                        val maxAbs = monthly.maxOfOrNull { abs(it.pnlPct) }?.coerceAtLeast(1.0) ?: 1.0
+                        val rows = monthly.chunked(4)
+                        rows.forEach { row ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                row.forEach { m ->
+                                    val intensity = (abs(m.pnlPct) / maxAbs).coerceIn(0.0, 1.0).toFloat()
+                                    val base = if (m.pnlPct >= 0) TGreen else TRed
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(1.3f)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(base.copy(alpha = 0.15f + intensity * 0.5f))
+                                            .padding(4.dp)
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(m.label, fontSize = 8.sp, color = TGray)
+                                            Text(
+                                                String.format(Locale.US, "%+.0f$", m.pnlPct),
+                                                fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White
+                                            )
+                                            Text("${m.count}", fontSize = 8.sp, color = TGray)
+                                        }
+                                    }
+                                }
+                                // پر کردن فضای خالی برای تراز grid
+                                repeat(4 - row.size) {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---------- تفکیک tier ----------
+            if (tierStats.isNotEmpty()) {
+                Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("🏷️ عملکرد بر اساس دستهٔ ارز", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
+                        Text(
+                            "کدام دسته برای تو سودآورتر بوده؟",
+                            fontSize = 9.sp, color = TGray
+                        )
+                        tierStats.entries
+                            .sortedByDescending { it.value.pnlPct }
+                            .forEach { (tier, s) ->
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(tier, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("${s.count} معامله", fontSize = 10.sp, color = TGray)
+                                    Text(
+                                        String.format(Locale.US, "%.0f%% برد", s.winRate),
+                                        fontSize = 10.sp, color = if (s.winRate >= 50) TGreen else TRed
+                                    )
+                                    Text(
+                                        String.format(Locale.US, "%+.1f$", s.pnlUsd),
+                                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                        color = if (s.pnlUsd >= 0) TGreen else TRed
+                                    )
+                                }
+                            }
+                    }
+                }
+            }
+
+            // ---------- ۳۰ معاملهٔ آخر ----------
+            Text("📋 ۳۰ معاملهٔ اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TPurple)
+            closed.sortedByDescending { it.closeTime }.take(30).forEach { t ->
+                Card(colors = CardDefaults.cardColors(containerColor = TCardB), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "${if (t.pnl > 0) "✅" else "❌"} ${t.symbol}",
+                                fontWeight = FontWeight.Black, fontSize = 13.sp, color = Color.White
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("• ${t.tier}", fontSize = 10.sp, color = TGray)
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                String.format(Locale.US, "%+.2f%%", t.pnl),
+                                fontWeight = FontWeight.Black, fontSize = 13.sp,
+                                color = if (t.pnl > 0) TGreen else TRed
+                            )
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = TGray)
+                            Text("خروج: ${usd(t.price)}", fontSize = 9.sp, color = TGray)
+                            Text("امتیاز: ${t.score}", fontSize = 9.sp, color = TGold)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("سایز: ${usd(t.sizeUsd)}", fontSize = 9.sp, color = TGray)
+                            Text("PnL $: ${String.format(Locale.US, "%+.2f$", t.pnl * t.sizeUsd / 100)}",
+                                fontSize = 9.sp, color = if (t.pnl >= 0) TGreen else TRed)
+                            Text("R: ${String.format(Locale.US, "%+.2f", rMultiple(t))}",
+                                fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                color = if (rMultiple(t) >= 1) TGreen else if (rMultiple(t) >= 0) TGold else TRed)
+                        )
+                        }
+                        if (t.trailing == false) Text("📌 استاپ ثابت", fontSize = 8.sp, color = TGold)
+                        else if (t.target < 0) Text("🏃 حالت دونده", fontSize = 8.sp, color = TGold)
+                        else Text("🔄 تریلینگ فعال", fontSize = 8.sp, color = TBlue)
+                    }
+                }
+            }
+
+            Text(
+                "💡 تفسیر ژورنال: وین‌ریت ≥ ۵۰٪ + Profit Factor ≥ ۱.۵ + R میانگین ≥ ۰.۵ = استراتژی سودآور. " +
+                "Max DD < ۲۰٪ = ریسک کنترل‌شده. اگر هر کدام پایین‌تر است، تنظیمات ربات را بازبینی کن.",
+                fontSize = 9.sp, color = TGold, lineHeight = 15.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun Stat(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+        Text(label, fontSize = 9.sp, color = TGray)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Black, color = color)
+    }
+}
+
+@Composable
+private fun EquityChart(curve: List<Double>) {
+    if (curve.size < 2) {
+        Box(modifier = Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
+            Text("داده کافی نیست", fontSize = 10.sp, color = TGray)
+        }
+        return
+    }
+    Canvas(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+        val minV = curve.min().coerceAtMost(100.0)
+        val maxV = curve.max().coerceAtLeast(100.0)
+        val range = if (maxV > minV) maxV - minV else 1.0
+        val w = size.width
+        val h = size.height
+        val pad = 20f
+
+        fun y(v: Double) = pad + ((maxV - v) / range * (h - 2 * pad)).toFloat()
+
+        // خط baseline ۱۰۰$
+        drawLine(
+            TGray.copy(alpha = 0.3f),
+            Offset(0f, y(100.0)),
+            Offset(w, y(100.0)),
+            strokeWidth = 1f
+        )
+
+        // منحنی equity
+        for (i in 1 until curve.size) {
+            val x1 = (i - 1).toFloat() / (curve.size - 1) * w
+            val x2 = i.toFloat() / (curve.size - 1) * w
+            val col = if (curve[i] >= curve[i - 1]) TGreen else TRed
+            drawLine(col, Offset(x1, y(curve[i - 1])), Offset(x2, y(curve[i])), strokeWidth = 3f)
         }
 
-        Text("⚠️ شبیه‌سازی کاغذی — پول واقعی در کار نیست.", fontSize = 9.sp, color = TGold)
+        // برچسب‌های بالا/پایین
+        val paint = android.graphics.Paint().apply {
+            textSize = 22f
+            color = android.graphics.Color.GRAY
+        }
+        drawContext.canvas.nativeCanvas.drawText(
+            String.format(Locale.US, "$%.0f", maxV), 4f, y(maxV) + 14f, paint
+        )
+        drawContext.canvas.nativeCanvas.drawText(
+            String.format(Locale.US, "$%.0f", minV), 4f, y(minV) - 4f, paint
+        )
+        drawContext.canvas.nativeCanvas.drawText(
+            "$100", w - 60f, y(100.0) - 4f, paint.apply { color = android.graphics.Color.LTGRAY }
+        )
     }
 }
