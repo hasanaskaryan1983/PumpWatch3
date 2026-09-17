@@ -96,7 +96,11 @@ object QuickScanner {
                 val deferreds = chunk.map { symbol ->
                     async(Dispatchers.IO) {
                         try {
-                            val klines = KlineCache.klines("${symbol}USDT", "1h", 100)
+                            // 🚀 Sprint 14 (مرحله ۱ / Commit 1 — رفع C4):
+                            // با limit=100 گارد closes4h.size>=60 موتور هرگز true نمی‌شد
+                            // (۱۰۰/۴=۲۵) و حداکثر امتیاز ممکن ۶۵ < ۷۰ می‌ماند → صفر سیگنال ساختاری.
+                            // با ۴۰۰ کندل: 4h=100 ≥ 60 ✓ و لایهٔ رژیم معنادار می‌شود.
+                            val klines = KlineCache.klines("${symbol}USDT", "1h", 400)
                             if (klines.size < 100) {
                                 return@async ScanLine("$symbol: کندل کم (${klines.size})", null)
                             }
@@ -189,7 +193,11 @@ object QuickScanner {
                 val deferreds = chunk.map { symbol ->
                     async(Dispatchers.IO) {
                         try {
-                            val klines = KlineCache.klines("${symbol}USDT", "1d", 300)
+                            // 🚀 Sprint 14 (مرحله ۱ / Commit 1 — رفع C2):
+                            // موتور برای ورودی ۱ساعته طراحی شده (aggregate 4 → 4h، aggregate 24 → روزانه).
+                            // قبلاً کندل روزانه داده می‌شد → «4h» واقعی می‌شد ۴ روز و برچسب MTF دروغ بود.
+                            // حالا اسپات هم ۱ساعته می‌خواند (۵۰۰ کندل ≈ ۲۰ روز) تا لایهٔ 4h موتور معتبر باشد.
+                            val klines = KlineCache.klines("${symbol}USDT", "1h", 500)
                             if (klines.size < 100) {
                                 return@async ScanLine("$symbol: تاریخچه کم (${klines.size})", null)
                             }
