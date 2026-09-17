@@ -7,13 +7,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,8 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -106,7 +106,6 @@ private data class ConsensusPick(
     val total: Int, val isDex: Boolean, val atr: Double
 )
 
-// 🚀 Sprint 13 (F6d): آمار تفکیکی tier برای ژورنال
 private data class TierStats(
     val count: Int,
     val wins: Int,
@@ -115,10 +114,9 @@ private data class TierStats(
     val winRate: Double
 )
 
-// 🚀 Sprint 13 (F6d): دادهٔ ماهانه برای heatmap
 private data class MonthlyPnl(
-    val key: String,     // "2024-09"
-    val label: String,   // "Sep 24"
+    val key: String,
+    val label: String,
     val pnlPct: Double,
     val count: Int
 )
@@ -177,15 +175,13 @@ private fun usd(v: Double): String = String.format(Locale.US, "$%,.2f", v)
 
 // ---------- 🚀 Sprint 13 (F6d): محاسبات ژورنال ----------
 
-/** R-multiple برای PaperTrade */
 private fun rMultiple(t: PaperTrade): Double {
     if (t.entry <= 0.0 || t.stopPct <= 0.0) return 0.0
     val risk = t.entry * t.stopPct / 100.0
-    val move = t.price - t.entry  // closePrice - entry
+    val move = t.price - t.entry
     return move / risk
 }
 
-/** ساخت منحنی equity از trades بسته‌شده */
 private fun buildEquityCurve(closed: List<PaperTrade>): List<Double> {
     val sorted = closed.sortedBy { it.closeTime }
     val curve = mutableListOf(100.0)
@@ -197,7 +193,6 @@ private fun buildEquityCurve(closed: List<PaperTrade>): List<Double> {
     return curve
 }
 
-/** Max drawdown روی منحنی equity */
 private fun computeMaxDrawdown(curve: List<Double>): Double {
     if (curve.isEmpty()) return 0.0
     var peak = curve[0]
@@ -210,7 +205,6 @@ private fun computeMaxDrawdown(curve: List<Double>): Double {
     return maxDD
 }
 
-/** گروه‌بندی PnL ماهانه */
 private fun computeMonthly(closed: List<PaperTrade>): List<MonthlyPnl> {
     val fmt = SimpleDateFormat("yyyy-MM", Locale.US)
     val labelFmt = SimpleDateFormat("MMM yy", Locale.US)
@@ -229,7 +223,6 @@ private fun computeMonthly(closed: List<PaperTrade>): List<MonthlyPnl> {
         }
 }
 
-/** تفکیک آمار بر اساس tier */
 private fun computeTierStats(closed: List<PaperTrade>): Map<String, TierStats> {
     return closed.groupBy { it.tier }.mapValues { (_, list) ->
         val wins = list.count { it.pnl > 0 }
@@ -565,10 +558,8 @@ fun TradesScreen() {
         }
 
         if (journalTab) {
-            // 🚀 Sprint 13 (F6d): محتوای ژورنال
             JournalContent(state.trades)
         } else {
-            // ---------- محتوای قبلی معاملات ----------
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -620,7 +611,6 @@ fun TradesScreen() {
             }
             if (confirmReset) Text("⚠️ دکمه ریست رو دوباره بزن تا همه چی صفر بشه", fontSize = 9.sp, color = TRed)
 
-            // ---------- اجماع ----------
             Text("🧠 اجماع همه تب‌ها (نهنگ🐳 + روند📈 + مومنتوم⚡ + ترند🐸) — بررسی کن و انتخاب کن:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TPurple)
             if (consensus.isEmpty()) {
                 Text("⏳ در حال محاسبه اجماع...", fontSize = 11.sp, color = TGray)
@@ -663,7 +653,6 @@ fun TradesScreen() {
                 }
             }
 
-            // ---------- معامله دستی ----------
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("➕ معامله دستی (خودت انتخاب کن)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TGold)
@@ -728,7 +717,6 @@ fun TradesScreen() {
                 }
             }
 
-            // ---------- تقسیم‌بندی ----------
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("⚙️ تقسیم‌بندی دارایی ربات (مجموع: $allocSum٪)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TBlue)
@@ -751,7 +739,6 @@ fun TradesScreen() {
                 }
             }
 
-            // ---------- پوزیشن‌های باز ----------
             Text("📂 پوزیشن‌های باز (${openTrades().size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             if (openTrades().isEmpty()) {
                 Text("هنوز پوزیشنی باز نشده 🤖", fontSize = 11.sp, color = TGray)
@@ -785,7 +772,6 @@ fun TradesScreen() {
                 }
             }
 
-            // ---------- تاریخچه ----------
             Text("📜 آخرین معامله‌های بسته:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             if (closed.isEmpty()) Text("هنوز معامله‌ای بسته نشده", fontSize = 11.sp, color = TGray)
             closed.sortedByDescending { it.closeTime }.take(15).forEach { t ->
@@ -811,13 +797,11 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
     val wins = closed.filter { it.pnl > 0 }
     val losses = closed.filter { it.pnl < 0 }
 
-    // محاسبات آماری
     val winRate = if (closed.isEmpty()) 0.0 else wins.size * 100.0 / closed.size
     val avgPnl = if (closed.isEmpty()) 0.0 else closed.map { it.pnl }.average()
     val avgWin = if (wins.isEmpty()) 0.0 else wins.map { it.pnl }.average()
     val avgLoss = if (losses.isEmpty()) 0.0 else abs(losses.map { it.pnl }.average())
     val expectancy = (winRate / 100.0 * avgWin) - ((1 - winRate / 100.0) * avgLoss)
-    val totalPnlPct = closed.sumOf { it.pnl }
     val totalPnlUsd = closed.sumOf { it.pnl * it.sizeUsd / 100.0 }
 
     val grossProfit = wins.sumOf { it.pnl * it.sizeUsd / 100.0 }
@@ -828,20 +812,15 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
         else -> 0.0
     }
 
-    // Equity curve + max DD
     val equityCurve = buildEquityCurve(closed)
     val maxDD = computeMaxDrawdown(equityCurve)
 
-    // R-multiples
     val rMultiples = closed.map { rMultiple(it) }
     val avgR = if (rMultiples.isEmpty()) 0.0 else rMultiples.average()
     val bestR = rMultiples.maxOrNull() ?: 0.0
     val worstR = rMultiples.minOrNull() ?: 0.0
 
-    // Monthly heatmap
     val monthly = computeMonthly(closed)
-
-    // Tier breakdown
     val tierStats = computeTierStats(closed)
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -859,7 +838,6 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                 }
             }
         } else {
-            // ---------- خلاصه کلی ----------
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("📊 خلاصهٔ عملکرد", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
@@ -891,7 +869,6 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                 }
             }
 
-            // ---------- R-multiple و avg win/loss ----------
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("🎯 کیفیت معاملات (R-multiple و میانگین‌ها)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
@@ -908,7 +885,6 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                         Stat("میانگین ضرر", String.format(Locale.US, "%+.2f%%", -avgLoss), TRed)
                     }
 
-                    // نسبت سود به زیان
                     val rr = if (avgLoss > 0) avgWin / avgLoss else 0.0
                     Text(
                         "💡 نسبت Reward:Risk = ${String.format(Locale.US, "%.2f:1", rr)}" +
@@ -919,27 +895,24 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                 }
             }
 
-            // ---------- منحنی equity ----------
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("📈 منحنی سرمایه", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
                     Text(
                         "شروع: ۱۰۰$ • الان: ${String.format(Locale.US, "$%.2f", equityCurve.lastOrNull() ?: 100.0)}" +
-                            " • رشد: ${String.format(Locale.US, "%+.1f%%", ((equityCurve.lastOrNull() ?: 100.0) - 100))}",
+                            " • رشد: ${String.format(Locale.US, "%+.1f%%", (equityCurve.lastOrNull() ?: 100.0) - 100)}",
                         fontSize = 10.sp, color = TGray
                     )
                     EquityChart(equityCurve)
                 }
             }
 
-            // ---------- Heatmap ماهانه ----------
             if (monthly.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("🗓️ Heatmap ماهانه (PnL $)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
                         val maxAbs = monthly.maxOfOrNull { abs(it.pnlPct) }?.coerceAtLeast(1.0) ?: 1.0
-                        val rows = monthly.chunked(4)
-                        rows.forEach { row ->
+                        monthly.chunked(4).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 row.forEach { m ->
                                     val intensity = (abs(m.pnlPct) / maxAbs).coerceIn(0.0, 1.0).toFloat()
@@ -962,7 +935,6 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                                         }
                                     }
                                 }
-                                // پر کردن فضای خالی برای تراز grid
                                 repeat(4 - row.size) {
                                     Spacer(Modifier.weight(1f))
                                 }
@@ -972,17 +944,13 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                 }
             }
 
-            // ---------- تفکیک tier ----------
             if (tierStats.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("🏷️ عملکرد بر اساس دستهٔ ارز", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
-                        Text(
-                            "کدام دسته برای تو سودآورتر بوده؟",
-                            fontSize = 9.sp, color = TGray
-                        )
+                        Text("کدام دسته برای تو سودآورتر بوده؟", fontSize = 9.sp, color = TGray)
                         tierStats.entries
-                            .sortedByDescending { it.value.pnlPct }
+                            .sortedByDescending { it.value.pnlUsd }
                             .forEach { (tier, s) ->
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text(tier, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -1002,8 +970,7 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                 }
             }
 
-            // ---------- ۳۰ معاملهٔ آخر ----------
-            Text("📋 ۳۰ معاملهٔ اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TPurple)
+            Text("📋 ۰ معاملهٔ اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TPurple)
             closed.sortedByDescending { it.closeTime }.take(30).forEach { t ->
                 Card(colors = CardDefaults.cardColors(containerColor = TCardB), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1028,12 +995,15 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("سایز: ${usd(t.sizeUsd)}", fontSize = 9.sp, color = TGray)
-                            Text("PnL $: ${String.format(Locale.US, "%+.2f$", t.pnl * t.sizeUsd / 100)}",
-                                fontSize = 9.sp, color = if (t.pnl >= 0) TGreen else TRed)
-                            Text("R: ${String.format(Locale.US, "%+.2f", rMultiple(t))}",
+                            Text(
+                                "PnL $: ${String.format(Locale.US, "%+.2f", t.pnl * t.sizeUsd / 100)}",
+                                fontSize = 9.sp, color = if (t.pnl >= 0) TGreen else TRed
+                            )
+                            Text(
+                                "R: ${String.format(Locale.US, "%+.2f", rMultiple(t))}",
                                 fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                                color = if (rMultiple(t) >= 1) TGreen else if (rMultiple(t) >= 0) TGold else TRed)
-                        )
+                                color = if (rMultiple(t) >= 1) TGreen else if (rMultiple(t) >= 0) TGold else TRed
+                            )
                         }
                         if (t.trailing == false) Text("📌 استاپ ثابت", fontSize = 8.sp, color = TGold)
                         else if (t.target < 0) Text("🏃 حالت دونده", fontSize = 8.sp, color = TGold)
@@ -1051,8 +1021,10 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
     }
 }
 
+// 🚀 Sprint 13 (F6d-fix): Stat باید extension روی RowScope باشد
+// تا Modifier.weight(1f) داخلش resolve شود
 @Composable
-private fun Stat(label: String, value: String, color: Color) {
+private fun RowScope.Stat(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
         Text(label, fontSize = 9.sp, color = TGray)
         Text(value, fontSize = 13.sp, fontWeight = FontWeight.Black, color = color)
@@ -1077,7 +1049,6 @@ private fun EquityChart(curve: List<Double>) {
 
         fun y(v: Double) = pad + ((maxV - v) / range * (h - 2 * pad)).toFloat()
 
-        // خط baseline ۱۰۰$
         drawLine(
             TGray.copy(alpha = 0.3f),
             Offset(0f, y(100.0)),
@@ -1085,7 +1056,6 @@ private fun EquityChart(curve: List<Double>) {
             strokeWidth = 1f
         )
 
-        // منحنی equity
         for (i in 1 until curve.size) {
             val x1 = (i - 1).toFloat() / (curve.size - 1) * w
             val x2 = i.toFloat() / (curve.size - 1) * w
@@ -1093,7 +1063,6 @@ private fun EquityChart(curve: List<Double>) {
             drawLine(col, Offset(x1, y(curve[i - 1])), Offset(x2, y(curve[i])), strokeWidth = 3f)
         }
 
-        // برچسب‌های بالا/پایین
         val paint = android.graphics.Paint().apply {
             textSize = 22f
             color = android.graphics.Color.GRAY
@@ -1103,9 +1072,6 @@ private fun EquityChart(curve: List<Double>) {
         )
         drawContext.canvas.nativeCanvas.drawText(
             String.format(Locale.US, "$%.0f", minV), 4f, y(minV) - 4f, paint
-        )
-        drawContext.canvas.nativeCanvas.drawText(
-            "$100", w - 60f, y(100.0) - 4f, paint.apply { color = android.graphics.Color.LTGRAY }
         )
     }
 }
