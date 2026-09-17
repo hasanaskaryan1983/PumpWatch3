@@ -35,7 +35,9 @@ data class MemeSignal(
     // P0-1: وضعیت داده امنیتی
     val securityStatus: String = "UNKNOWN",  // "READY" | "EMPTY" | "FAILED" | "UNKNOWN"
     // 🚀 Sprint 10 (V2b): آدرس کانترکت توکن (برای کپی/پیست در CoinGecko/GoPlus)
-    val contract: String? = null
+    val contract: String? = null,
+    // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#4): آدرس pool واقعی (برای لینک GeckoTerminal)
+    val poolAddress: String? = null
 )
 
 // ---------- رادار میم‌کوین (GeckoTerminal + Rug Safety Check با GoPlus) ----------
@@ -165,8 +167,13 @@ object MemeRadar {
         // pool.relationships.base_token.data.id = "{chain}_{address}"
         val contractAddress = p.relationships?.base_token?.data?.id?.substringAfter('_', "")
 
+        // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#4): استخراج آدرس pool واقعی
+        // pool.id = "{chain}_{poolAddress}"
+        val poolAddress = p.id?.substringAfter('_', "")
+
         // ---------- چک Rug Safety با GoPlus API (مدل سه‌حالته) ----------
-        val (rugScore, rugWarnings, securityStatus) = checkRugSafety(p, chain)
+        // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#3): پاس دادن contractAddress به checkRugSafety
+        val (rugScore, rugWarnings, securityStatus) = checkRugSafety(chain, contractAddress)
 
         // P0-1: فقط وقتی rugScore واقعاً پایین است فیلتر کن
         // null (UNKNOWN) یا score بالا → توکن را نگه دار
@@ -198,12 +205,16 @@ object MemeRadar {
             rugScore = rugScore,
             rugWarnings = rugWarnings,
             securityStatus = securityStatus,
-            contract = contractAddress
+            contract = contractAddress,
+            poolAddress = poolAddress
         )
     }
 
     /**
-     * P0-1: چک Rug Safety با GoPlus API (مدل سه‌حالته)
+     * 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#3): چک Rug Safety با GoPlus API (مدل سه‌حالته)
+     * 
+     * @param chain نام زنجیره (solana, bsc, base, ...)
+     * @param contractAddress آدرس **توکن** (نه pool!) برای بررسی امنیتی
      * @return Triple(rugScore: Int?, warnings: List<String>, status: String)
      *
      * - Ready: rugScore = عدد واقعی (0-100)
@@ -213,14 +224,15 @@ object MemeRadar {
      * هیچ‌کدام به score خنثی تبدیل نمی‌شوند — UI باید برای UNKNOWN برچسب نمایش دهد.
      */
     private suspend fun checkRugSafety(
-        pool: GeckoPool,
-        chain: String
+        chain: String,
+        contractAddress: String?
     ): Triple<Int?, List<String>, String> {
         val warnings = mutableListOf<String>()
 
-        val poolId = pool.id ?: return Triple(null, listOf("⚠️ آدرس contract در دسترس نیست"), "FAILED")
-        val contractAddress = poolId.substringAfter('_', "")
-        if (contractAddress.isEmpty()) return Triple(null, listOf("⚠️ آدرس contract یافت نشد"), "FAILED")
+        // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#3): استفاده از contractAddress (توکن) نه poolAddress
+        if (contractAddress.isNullOrEmpty()) {
+            return Triple(null, listOf("⚠️ آدرس contract توکن در دسترس نیست"), "FAILED")
+        }
 
         // P0-1: استفاده از مدل سه‌حالته
         return when (val result = GoPlusClient.getTokenSecurityResult(chain, contractAddress)) {
