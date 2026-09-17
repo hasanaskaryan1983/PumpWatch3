@@ -384,7 +384,8 @@ fun SignalLogScreen() {
                         }
                     }
 
-                    Divider(color = LGr.copy(alpha = 0.3f), thickness = 1.dp)
+                    // 🚀 Sprint 13 (SignalLogScreen fix): Divider deprecated -> HorizontalDivider
+                    HorizontalDivider(color = LGr.copy(alpha = 0.3f), thickness = 1.dp)
 
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         TextField(
