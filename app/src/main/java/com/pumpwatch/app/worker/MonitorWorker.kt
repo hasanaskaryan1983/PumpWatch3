@@ -1,10 +1,13 @@
 package com.pumpwatch.app.worker
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.pumpwatch.app.data.KlineCache
@@ -27,6 +30,9 @@ import java.util.Locale
  * 🚀 Sprint 3: time = candleCloseTs (نه زمان اسکن)
  * 🚀 Sprint 4: پارامترهای سیگنال از ParamsStore (بهینه‌شده یا default)
  * 🚀 Sprint 5: ارزیابی قوانین هشدار سفارشی روی همهٔ نتایج + نوتیفیکیشن 🔔
+ * 🚀 Sprint 14 (مرحله ۱ / Commit 3 — C3): گارد مجوز POST_NOTIFICATIONS
+ *      روی اندروید ۱۳+ بدون مجوز، notify() بی‌صدا سرکوب می‌شود؛ پس قبل از
+ *      ساخت و ارسال چک می‌کنیم و وضعیت را برای نمایش صادقانه در UI ثبت می‌کنیم.
  */
 class MonitorWorker(
     context: Context,
@@ -40,6 +46,29 @@ class MonitorWorker(
         private const val MAX_RULE_ALERTS_PER_RUN = 3
 
         const val KEY_MODE = "mode"
+    }
+
+    /**
+     * 🚀 Sprint 14 (C3): آیا مجوز نمایش نوتیفیکیشن داریم؟
+     * زیر اندروید ۱۳ مجوز جدا لازم نیست → همیشه true.
+     */
+    private fun canPostNotifications(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                applicationContext,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+
+    /**
+     * 🚀 Sprint 14 (C3): ثبت وضعیت «هشدارها مسدود» برای نمایش صادقانه در UI.
+     * مرحلهٔ ۶ (معماری هشدار) این پرچم را در تب هشدارها نشان می‌دهد.
+     */
+    private fun markNotificationsBlocked(blocked: Boolean) {
+        applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
+            .edit().putBoolean("notif_permission_denied", blocked).apply()
     }
 
     override suspend fun doWork(): Result {
@@ -154,6 +183,12 @@ class MonitorWorker(
     }
 
     private fun showRuleNotification(rule: AlertRule, r: SignalResult) {
+        // 🚀 Sprint 14 (C3): بدون مجوز، ساخت کانال و نوتیفیکیشن بی‌معنی است
+        if (!canPostNotifications()) {
+            markNotificationsBlocked(true)
+            return
+        }
+
         val nm = applicationContext
             .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -175,10 +210,22 @@ class MonitorWorker(
             .setAutoCancel(true)
             .build()
 
-        nm.notify("rule_${rule.id}".hashCode(), notification)
+        // 🚀 Sprint 14 (C3): برخی OEMها حتی با چک مجوز، SecurityException می‌اندازند
+        try {
+            nm.notify("rule_${rule.id}".hashCode(), notification)
+            markNotificationsBlocked(false)
+        } catch (_: SecurityException) {
+            markNotificationsBlocked(true)
+        }
     }
 
     private fun showNotification(id: Int, title: String, text: String) {
+        // 🚀 Sprint 14 (C3): بدون مجوز، ساخت کانال و نوتیفیکیشن بی‌معنی است
+        if (!canPostNotifications()) {
+            markNotificationsBlocked(true)
+            return
+        }
+
         val nm = applicationContext
             .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -199,6 +246,12 @@ class MonitorWorker(
             .setAutoCancel(true)
             .build()
 
-        nm.notify(id, notification)
+        // 🚀 Sprint 14 (C3): برخی OEMها حتی با چک مجوز، SecurityException می‌اندازند
+        try {
+            nm.notify(id, notification)
+            markNotificationsBlocked(false)
+        } catch (_: SecurityException) {
+            markNotificationsBlocked(true)
+        }
     }
 }
