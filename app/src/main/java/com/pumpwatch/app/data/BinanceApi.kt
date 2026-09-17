@@ -270,18 +270,45 @@ object BinanceClient {
     val api: KlineCompat = KlineCompat
 
     object KlineCompat {
+        /**
+         * 🚀 Sprint 14 (مرحله ۱ / Commit 1 — رفع C1):
+         * خروجی حالا ۷ عضو دارد: [openTime, open, high, low, close, volume, closeTime]
+         * عضو هفتم = زمان بسته شدن کندل = openTime + طول تایم‌فریم.
+         * مصرف‌کننده‌های قبلی (ایندکس ۰ تا ۵) دست‌نخورده می‌مانند؛
+         * QuickScanner که k[6] می‌خواند از این پس معتبر است.
+         */
         suspend fun klines(symbol: String, interval: String, limit: Int): List<JsonArray> {
             val sym = symbol.uppercase().removeSuffix("USDT")
-            return MultiExchange.fetchKlines(sym, interval, limit).map { c ->
-                JsonArray().apply {
-                    add(c.time)
-                    add(c.open)
-                    add(c.high)
-                    add(c.low)
-                    add(c.close)
-                    add(c.volume)
-                }
+            val step = intervalMs(interval)
+            return MultiExchange.fetchKlines(sym, interval, limit).map { c -> toJsonArray(c, step) }
+        }
+
+        /** internal و pure — برای تست رگرسیون شکل آرایه */
+        internal fun toJsonArray(c: BinanceCandle, stepMs: Long): JsonArray =
+            JsonArray().apply {
+                add(c.time)
+                add(c.open)
+                add(c.high)
+                add(c.low)
+                add(c.close)
+                add(c.volume)
+                add(c.time + stepMs)
             }
+
+        /** internal و pure — طول تایم‌فریم به میلی‌ثانیه */
+        internal fun intervalMs(interval: String): Long = when (interval) {
+            "1m" -> 60_000L
+            "5m" -> 300_000L
+            "15m" -> 900_000L
+            "30m" -> 1_800_000L
+            "1h" -> 3_600_000L
+            "2h" -> 7_200_000L
+            "4h" -> 14_400_000L
+            "6h" -> 21_600_000L
+            "12h" -> 43_200_000L
+            "1d" -> 86_400_000L
+            "1w" -> 604_800_000L
+            else -> 3_600_000L
         }
     }
 
