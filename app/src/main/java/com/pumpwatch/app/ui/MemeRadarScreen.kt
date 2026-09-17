@@ -201,7 +201,11 @@ fun MemeRadarScreen() {
                 itemsIndexed(items) { i, m ->
                     val (verdict, vColor) = memeVerdict(m.changeH1, m.buyRatio)
                     val chainName = MEME_CHAINS.firstOrNull { it.first == m.chain }?.second ?: m.chain
-                    val poolUrl = "https://www.geckoterminal.com/${m.chain}/pools/${m.name.split("/").lastOrNull()?.lowercase() ?: ""}"
+
+                    // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#4): لینک استخر از poolAddress واقعی
+                    // قبلاً از m.name ساخته می‌شد و کاربر را به صفحهٔ دارایی دیگری می‌برد.
+                    val poolUrl = if (m.poolAddress.isNullOrEmpty()) null
+                    else "https://www.geckoterminal.com/${m.chain}/pools/${m.poolAddress}"
 
                     // P0-1: val محلی برای smart cast روی Int?
                     val rug = m.rugScore
@@ -217,10 +221,16 @@ fun MemeRadarScreen() {
                     Surface(
                         color = cardColor,
                         shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(poolUrl))
-                            context.startActivity(intent)
-                        }
+                        modifier = Modifier.fillMaxWidth().then(
+                            // 🚀 Sprint 14: اگر لینک معتبر نداریم، کارت کلیک‌پذیر نیست
+                            // (به‌جای بازکردن صفحهٔ اشتباه، هیچ اتفاقی نمی‌افتد)
+                            if (poolUrl != null) Modifier.clickable {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(poolUrl))
+                                    context.startActivity(intent)
+                                } catch (_: Exception) { }
+                            } else Modifier
+                        )
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
