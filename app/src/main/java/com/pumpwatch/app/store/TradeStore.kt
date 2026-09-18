@@ -28,6 +28,33 @@ object TradeStore {
         prefs(ctx).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 
+    // ---------- 🚀 Sprint 14 (Commit 7C-fix): sanitizer مهاجرت ----------
+
+    /**
+     * 🚀 Sprint 14 (مرحله ۳ / Commit 7C-fix):
+     *
+     * تلهٔ Gson: وقتی JSON قدیمی فیلدی ندارد، Gson constructor کاتلین را
+     * صدا نمی‌زند و default value ها اعمال نمی‌شوند — فیلد null/0 می‌ماند.
+     * پس هر trade قدیمی باید از این sanitizer عبور کند تا:
+     *  ۱) null ها به default امن تبدیل شوند (جلوگیری از NPE و PnL غلط)
+     *  ۲) feePct=0.1 تنظیم شود تا PnL دقیقاً معادل فرمول قدیمی (۰.۲٪ رفت‌وبرگشت) بماند
+     *  ۳) slippagePct=0.0 بماند (مدل قدیمی slippage نداشت → برابری دقیق)
+     *  ۴) ledgerVersion=2 شود
+     *
+     * pure function — قابل تست روی JVM
+     */
+    internal fun upgradeLegacy(t: Trade): Trade = t.copy(
+        source = (t.source as String?) ?: "manual",
+        note = (t.note as String?) ?: "",
+        sizeUsd = if (t.sizeUsd > 0.0) t.sizeUsd else 100.0,
+        venue = (t.venue as String?) ?: "unknown",
+        contract = t.contract,
+        slippagePct = if (t.slippagePct > 0.0) t.slippagePct else 0.0,
+        feePct = if (t.feePct > 0.0) t.feePct else 0.1,
+        fillTime = t.fillTime,
+        ledgerVersion = 2
+    )
+
     // ---------- Migration خودکار ----------
 
     /**
@@ -39,8 +66,8 @@ object TradeStore {
 
         val oldTrades = loadLegacy(ctx)
         if (oldTrades.isNotEmpty()) {
-            // ارتقا به نسخه ۲ با default values
-            val upgraded = oldTrades.map { it.copy(ledgerVersion = 2) }
+            // 🚀 Commit 7C-fix: عبور از sanitizer قبل از رمزنگاری
+            val upgraded = oldTrades.map { upgradeLegacy(it) }
             saveEncrypted(ctx, upgraded)
         }
 
