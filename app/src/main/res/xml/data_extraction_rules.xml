@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 🚀 Sprint 14 (Commit 7B): قوانین استخراج داده برای اندروید ۱۲+
+     هم cloud-backup (Google Drive) و هم device-transfer (Smart Switch) -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="pumpwatch_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="pumpwatch_prefs.xml" />
+        <exclude domain="database" path="signal_log.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="pumpwatch_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="pumpwatch_prefs.xml" />
+        <exclude domain="database" path="signal_log.db" />
+    </device-transfer>
+</data-extraction-rules>
