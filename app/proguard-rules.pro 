@@ -1,1 +1,103 @@
-# Add project specific ProGuard rules here.
+# 🚀 Sprint 14 (Commit 9A): ProGuard/R8 rules for release build
+
+# ===== General =====
+-optimizationpasses 5
+-dontusemixedcaseclassnames
+-dontskipnonpubliclibraryclasses
+-verbose
+
+# ===== Keep annotations =====
+-keepattributes *Annotation*
+-keepattributes Signature
+-keepattributes InnerClasses
+-keepattributes EnclosingMethod
+
+# ===== Kotlin =====
+-keep class kotlin.Metadata { *; }
+-keepclassmembers class **$WhenMappings {
+    <fields>;
+}
+-keepclassmembers class kotlin.Metadata {
+    public <methods>;
+}
+
+# ===== Coroutines =====
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+-keepclassmembers class kotlinx.coroutines.** {
+    volatile <fields>;
+}
+-dontwarn kotlinx.coroutines.**
+
+# ===== Retrofit + OkHttp =====
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn retrofit2.**
+-keep class retrofit2.** { *; }
+-keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
+-keepclassmembers,allowshrinking,allowobfuscation interface retrofit2.Call
+-keepclassmembers,allowshrinking,allowobfuscation interface retrofit2.Response
+
+# ===== Gson =====
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn sun.misc.**
+-keep class com.google.gson.** { *; }
+-keep class * implements com.google.gson.TypeAdapterFactory
+-keep class * implements com.google.gson.JsonSerializer
+-keep class * implements com.google.gson.JsonDeserializer
+-keepclassmembers,allowobfuscation class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
+
+# Keep data classes used by Gson
+-keep class com.pumpwatch.app.data.** { *; }
+-keep class com.pumpwatch.app.engine.** { *; }
+-keep class com.pumpwatch.app.store.** { *; }
+
+# ===== Compose =====
+-dontwarn androidx.compose.**
+-keep class androidx.compose.** { *; }
+
+# ===== AndroidX =====
+-keep class androidx.** { *; }
+-keep interface androidx.** { *; }
+-dontwarn androidx.**
+
+# ===== Security Crypto (if added later) =====
+-keep class androidx.security.crypto.** { *; }
+
+# ===== WorkManager =====
+-keep class androidx.work.** { *; }
+-keep class * extends androidx.work.Worker
+-keep class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
+
+# ===== Keep native methods =====
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# ===== Keep Parcelable =====
+-keepclassmembers class * implements android.os.Parcelable {
+    public static final android.os.Parcelable$Creator CREATOR;
+}
+
+# ===== Keep Serializable =====
+-keepclassmembers class * implements java.io.Serializable {
+    static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}
+
+# ===== Keep BuildConfig =====
+-keep class com.pumpwatch.app.BuildConfig { *; }
+
+# ===== Prevent stripping of JavaScript interfaces =====
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
