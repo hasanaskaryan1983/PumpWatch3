@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 🚀 Sprint 14 (Commit 7B): قوانین exclude برای full-backup (اندروید ≤ ۱۱) -->
+<full-backup-content>
+    <!-- آدرس‌های کیف‌پول، ledger و هشدارها هرگز در backup کپی نشوند -->
+    <exclude domain="sharedpref" path="pumpwatch_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="pumpwatch_prefs.xml" />
+    <exclude domain="database" path="signal_log.db" />
+</full-backup-content>
