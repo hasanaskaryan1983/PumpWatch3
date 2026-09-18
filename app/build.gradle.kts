@@ -6,21 +6,25 @@ plugins {
 
 android {
     namespace = "com.pumpwatch.app"
-    compileSdk = 34
+    compileSdk = 35  // 🚀 Sprint 14 (Commit 9A): Play Store الزامی
 
     defaultConfig {
         applicationId = "com.pumpwatch.app"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 35  // 🚀 Sprint 14 (Commit 9A): الزام Play Store
+        versionCode = 2  // 🚀 Sprint 14 (Commit 9A): bump برای release
+        versionName = "1.1.0"  // 🚀 Sprint 14 (Commit 9A): Sprint 14 release
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            isMinifyEnabled = true  // 🚀 Sprint 14 (Commit 9A): R8 فعال
+            isShrinkResources = true  // 🚀 Sprint 14 (Commit 9A): حذف منابع بلااستفاده
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 
