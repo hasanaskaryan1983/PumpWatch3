@@ -251,6 +251,18 @@ fun MemeRadarScreen() {
 
                             Text(verdict, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = vColor)
 
+                            // 🚀 Sprint 14 (مرحله ۲ / Commit 6A): provenance هر کارت
+                            // منبع دادهٔ استخر + وضعیت واقعی بررسی امنیتی (هرگز «safe» پیش‌فرض)
+                            Text(
+                                "📡 منبع داده: GeckoTerminal • 🛡️ بررسی امنیتی: " + when (m.securityStatus) {
+                                    "READY" -> "GoPlus ✅"
+                                    "EMPTY" -> "GoPlus: توکن ناشناخته ❓"
+                                    "FAILED" -> "GoPlus: انجام نشد ⚠️"
+                                    else -> "نامشخص ⚪"
+                                },
+                                fontSize = 8.sp, color = MGray
+                            )
+
                             // 🛡️ نمایش Rug Safety Score — سه‌حالته (P0-1)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 val rugColor = when {
