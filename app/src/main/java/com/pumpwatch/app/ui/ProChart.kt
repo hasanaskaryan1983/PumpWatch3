@@ -39,6 +39,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.data.klineSourceLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,6 +59,18 @@ private val PGold = Color(0xFFFFD700)
 private val PTeal = Color(0xFF26A69A)
 
 private data class Candle(val o: Double, val h: Double, val l: Double, val c: Double, val v: Double = 0.0)
+
+/**
+ * 🚀 Sprint 14 (مرحله ۲ / Commit 6C): provenance نمودار.
+ * - venue: منبع واقعی کندل‌ها (BYBIT/OKX/GATE) یا COINGECKO_SYNTH
+ * - synthetic: true یعنی کندل‌ها از نقاط قیمت CoinGecko ترکیب شده‌اند
+ *   (high/low ساخته‌شده) و کاربر باید این را بداند.
+ */
+private data class ChartData(
+    val candles: List<Candle>,
+    val venue: String,
+    val synthetic: Boolean
+)
 
 enum class IndicatorMode(val label: String, val emoji: String) {
     EMA("EMA 7/30", "📊"),
@@ -93,17 +106,27 @@ private fun candlesFrom(prices: List<Double>): List<Candle> {
     return out
 }
 
-private suspend fun buildCandles(coinId: String, tf: String, symbol: String): List<Candle> =
+/**
+ * 🚀 Sprint 14 (Commit 6C): حالا منبع کندل‌ها هم برگردانده می‌شود.
+ * مسیر واقعی: BinanceClient.candles (که خودش Bybit→OKX→Gate را ثبت می‌کند)
+ * مسیر فال‌بک: کندل ترکیبی از نقاط قیمت CoinGecko → synthetic = true
+ */
+private suspend fun buildCandles(coinId: String, tf: String, symbol: String): ChartData =
     withContext(Dispatchers.IO) {
         if (symbol.isNotEmpty()) {
             try {
                 val real = BinanceClient.candles(symbol, tf)
                 if (real.size >= 50) {
-                    return@withContext real.map { Candle(o = it.open, h = it.high, l = it.low, c = it.close, v = it.volume) }
+                    val venue = BinanceClient.api.lastSource(symbol)
+                    return@withContext ChartData(
+                        candles = real.map { Candle(o = it.open, h = it.high, l = it.low, c = it.close, v = it.volume) },
+                        venue = venue,
+                        synthetic = false
+                    )
                 }
             } catch (_: Exception) { }
         }
-        when (tf) {
+        val synth = when (tf) {
             "15m" -> {
                 val p = ApiClient.getCoinChart(coinId, 1).prices.map { it[1] }
                 candlesFrom(chunkEvery(p, 3))
@@ -129,6 +152,7 @@ private suspend fun buildCandles(coinId: String, tf: String, symbol: String): Li
                 candlesFrom(chunkEvery(p, 7).takeLast(200))
             }
         }
+        ChartData(candles = synth, venue = "COINGECKO_SYNTH", synthetic = true)
     }
 
 private fun emaSeries(v: List<Double>, p: Int): List<Double> {
@@ -597,6 +621,23 @@ private fun ModeChips(selected: Set<IndicatorMode>, onToggle: (IndicatorMode) ->
     }
 }
 
+/**
+ * 🚀 Sprint 14 (Commit 6C): خط صداقت منبع کندل‌ها (هر دو حالت عادی و تمام‌صفحه)
+ */
+@Composable
+private fun SourceLine(source: ChartData?) {
+    source?.let { s ->
+        Text(
+            if (s.synthetic)
+                "🟠 کندل‌ها ترکیبی از نقاط قیمت CoinGecko هستند (high/low تخمینی) — کندل واقعی صرافی در دسترس نبود"
+            else
+                "🕯️ کندل‌های واقعی صرافی: ${klineSourceLabel(s.venue)}",
+            fontSize = 9.sp,
+            color = if (s.synthetic) POrange else PGray
+        )
+    }
+}
+
 @Composable
 fun ProChart(
     coinId: String,
@@ -608,6 +649,8 @@ fun ProChart(
     var selectedModes by remember { mutableStateOf(setOf(IndicatorMode.EMA)) }
     var full by remember { mutableStateOf(false) }
     var candles by remember { mutableStateOf<List<Candle>>(emptyList()) }
+    // 🚀 Sprint 14 (Commit 6C): منبع واقعی کندل‌ها
+    var source by remember { mutableStateOf<ChartData?>(null) }
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
@@ -615,9 +658,12 @@ fun ProChart(
         scope.launch {
             loading = true
             try {
-                candles = buildCandles(coinId, tf, symbol)
+                val data = buildCandles(coinId, tf, symbol)
+                candles = data.candles
+                source = data
             } catch (_: Exception) {
                 candles = emptyList()
+                source = null
             }
             loading = false
         }
@@ -657,6 +703,9 @@ fun ProChart(
                 ) { Text("⛶", fontSize = 14.sp) }
             }
 
+            // 🚀 Sprint 14 (Commit 6C): صداقت منبع کندل‌ها
+            SourceLine(source)
+
             Spacer(Modifier.height(6.dp))
             Text("⏱️ تایم‌فریم:", fontSize = 11.sp, color = PGray)
             TfChips(tf, ::setTf, tfs)
@@ -693,8 +742,11 @@ fun ProChart(
                     Spacer(Modifier.weight(1f))
                     Button(onClick = { full = false }) { Text("✕ بستن") }
                 }
-                Spacer(Modifier.height(6.dp))
 
+                // 🚀 Sprint 14 (Commit 6C): صداقت منبع کندل‌ها در حالت تمام‌صفحه
+                SourceLine(source)
+
+                Spacer(Modifier.height(6.dp))
                 Text("⏱️ تایم‌فریم:", fontSize = 11.sp, color = PGray)
                 TfChips(tf, ::setTf, tfs)
 
