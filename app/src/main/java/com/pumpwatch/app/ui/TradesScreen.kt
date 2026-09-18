@@ -50,6 +50,7 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.sourceLabel
 import com.pumpwatch.app.engine.ScoringEngine
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
@@ -628,11 +629,12 @@ fun TradesScreen() {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
                             Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                            Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                            Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
                         }
                         realWhale[pk.symbol]?.let { rw ->
                             Text(
-                                "🐳 نهنگ واقعی (aggTrades): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۱۰۰K",
+                                // 🚀 Sprint 14 (Commit 5): منبع واقعی جریان نهنگ‌ها — نه برچسب سخت‌کدشده
+                                "🐳 جریان نهنگ‌ها (${rw.sourceLabel()}): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۱۰۰K",
                                 fontSize = 9.sp, fontWeight = FontWeight.Bold,
                                 color = if (rw.buyRatio >= 0.6) TGreen else if (rw.buyRatio <= 0.4) TRed else TGray
                             )
@@ -970,7 +972,7 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                 }
             }
 
-            Text("📋 ۰ معاملهٔ اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TPurple)
+            Text("📋 ۳۰ معاملهٔ اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TPurple)
             closed.sortedByDescending { it.closeTime }.take(30).forEach { t ->
                 Card(colors = CardDefaults.cardColors(containerColor = TCardB), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1021,8 +1023,6 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
     }
 }
 
-// 🚀 Sprint 13 (F6d-fix): Stat باید extension روی RowScope باشد
-// تا Modifier.weight(1f) داخلش resolve شود
 @Composable
 private fun RowScope.Stat(label: String, value: String, color: Color) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
