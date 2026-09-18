@@ -1,6 +1,7 @@
 package com.pumpwatch.app.engine
 
 import android.content.Context
+import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.ScanClient
 import com.pumpwatch.app.data.Trade
 import com.pumpwatch.app.store.PicksStore
@@ -17,6 +18,10 @@ object PaperTradingEngine {
             .map { it.coinId }
             .toSet()
         if (sig.coinId in openIds) return
+
+        // 🚀 Sprint 14 (مرحله ۳ / Commit 7C): ثبت venue و fillTime واقعی
+        val venue = BinanceClient.api.lastSource(sig.symbol)
+        val fillTime = System.currentTimeMillis()  // در real-world: زمان fill کندل بعدی
 
         val trade = Trade(
             id = UUID.randomUUID().toString(),
@@ -35,7 +40,13 @@ object PaperTradingEngine {
             target1 = sig.target1,
             target2 = sig.target2,
             exitReason = null,
-            status = "OPEN"
+            status = "OPEN",
+            source = "scanner",
+            venue = venue,
+            fillTime = fillTime,
+            slippagePct = 0.1,   // پیش‌فرض ۰.۱٪
+            feePct = 0.1,        // پیش‌فرض ۰.۱٪
+            ledgerVersion = 2
         )
         TradeStore.upsert(ctx, trade)
     }
