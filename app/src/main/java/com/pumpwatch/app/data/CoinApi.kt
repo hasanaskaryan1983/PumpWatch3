@@ -118,7 +118,6 @@ object ThrottledHttp {
                 Thread.sleep(backoffMs)
                 synchronized(lock) { lastRequestMs.set(System.currentTimeMillis()) }
             }
-
             throw RateLimitedException("CoinGecko rate limit exceeded after $MAX_RETRIES retries")
         }
     }
@@ -160,6 +159,16 @@ object ApiClient {
     private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
     private val platformsTimeRef = AtomicLong(0L)
 
+    // 🚀 Sprint 14 (مرحله ۲ / Commit 5): متادیتای provenance — سن و مبدأ واقعی دادهٔ بازار
+    private val marketMetaRef = AtomicReference(MarketMeta(0L, ServedFrom.UNKNOWN, 0))
+
+    /** UI با این تابع بفهمد عددی که نشان می‌دهد زنده است یا کش/دیسک */
+    fun marketMeta(): MarketMeta = marketMetaRef.get()
+
+    private fun setMeta(observedAt: Long, from: ServedFrom, count: Int) {
+        marketMetaRef.set(MarketMeta(observedAt, from, count))
+    }
+
     val api: CoinGeckoApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.coingecko.com/api/v3/")
@@ -181,9 +190,13 @@ object ApiClient {
         val cached = cache1000Ref.get()
         val cachedTime = cache1000TimeRef.get()
 
+        // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = کش حافظه
         if (!forceRefresh && cached.isNotEmpty() &&
             System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
-        ) return cached
+        ) {
+            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size)
+            return cached
+        }
 
         if (!forceRefresh && cached.isEmpty()) {
             val disk = loadList("m1000")
@@ -192,6 +205,8 @@ object ApiClient {
             ) {
                 cache1000Ref.set(disk)
                 cache1000TimeRef.set(System.currentTimeMillis())
+                // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = دیسک (هرگز «زنده» نیست)
+                setMeta(OfflineCache.time(app, "m1000"), ServedFrom.DISK_CACHE, disk.size)
                 return disk
             }
         }
@@ -203,15 +218,25 @@ object ApiClient {
                 if (page < 4) delay(2000)
             }
             val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
+            val nowMs = System.currentTimeMillis()
             cache1000Ref.set(sorted)
-            cache1000TimeRef.set(System.currentTimeMillis())
+            cache1000TimeRef.set(nowMs)
+            // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = شبکه
+            setMeta(nowMs, ServedFrom.NETWORK, sorted.size)
             OfflineCache.save(app, "m1000", gson.toJson(sorted))
             sorted
         } catch (e: Exception) {
-            val disk = loadList("m1000") ?: loadList("m250")
+            // 🚀 Sprint 14 (Commit 5): کلید دیسک واقعی ثبت می‌شود (m1000 یا m250)
+            var diskKey = "m1000"
+            var disk = loadList(diskKey)
+            if (disk == null) {
+                diskKey = "m250"
+                disk = loadList(diskKey)
+            }
             if (disk != null) {
                 cache1000Ref.set(disk)
                 cache1000TimeRef.set(System.currentTimeMillis())
+                setMeta(OfflineCache.time(app, diskKey), ServedFrom.DISK_CACHE, disk.size)
                 disk
             } else throw e
         }
@@ -221,9 +246,13 @@ object ApiClient {
         val cached = cache100Ref.get()
         val cachedTime = cache100TimeRef.get()
 
+        // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = کش حافظه
         if (!forceRefresh && cached.isNotEmpty() &&
             System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
-        ) return cached
+        ) {
+            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size)
+            return cached
+        }
 
         if (!forceRefresh && cached.isEmpty()) {
             val disk = loadList("m100")
@@ -232,14 +261,19 @@ object ApiClient {
             ) {
                 cache100Ref.set(disk)
                 cache100TimeRef.set(System.currentTimeMillis())
+                // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = دیسک
+                setMeta(OfflineCache.time(app, "m100"), ServedFrom.DISK_CACHE, disk.size)
                 return disk
             }
         }
 
         return try {
             val fresh = api.getMarkets(perPage = 100, page = 1)
+            val nowMs = System.currentTimeMillis()
             cache100Ref.set(fresh)
-            cache100TimeRef.set(System.currentTimeMillis())
+            cache100TimeRef.set(nowMs)
+            // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = شبکه
+            setMeta(nowMs, ServedFrom.NETWORK, fresh.size)
             OfflineCache.save(app, "m100", gson.toJson(fresh))
             fresh
         } catch (e: Exception) {
@@ -247,6 +281,7 @@ object ApiClient {
             if (disk != null) {
                 cache100Ref.set(disk)
                 cache100TimeRef.set(System.currentTimeMillis())
+                setMeta(OfflineCache.time(app, "m100"), ServedFrom.DISK_CACHE, disk.size)
                 disk
             } else throw e
         }
