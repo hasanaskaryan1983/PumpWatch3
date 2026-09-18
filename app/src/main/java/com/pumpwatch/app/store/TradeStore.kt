@@ -3,13 +3,16 @@ package com.pumpwatch.app.store
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.pumpwatch.app.data.SecureStorage
 import com.pumpwatch.app.data.Trade
 
 object TradeStore {
 
     private const val PREFS = "pumpdump_trades"
     private const val KEY_TRADES = "trades"
+    private const val KEY_TRADES_ENCRYPTED = "trades_v2_encrypted"
     private const val KEY_ENABLED = "paper_enabled"
+    private const val KEY_MIGRATED = "migrated_to_v2"
     private const val MAX_HISTORY = 200
 
     private val gson = Gson()
@@ -25,13 +28,30 @@ object TradeStore {
         prefs(ctx).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 
-    // ---------- ذخیره‌سازی ----------
+    // ---------- Migration خودکار ----------
 
-    fun save(ctx: Context, trades: List<Trade>) {
-        prefs(ctx).edit().putString(KEY_TRADES, gson.toJson(trades)).apply()
+    /**
+     * 🚀 Sprint 14 (مرحله ۳ / Commit 7C): migration از plain text به رمزنگاری‌شده
+     * فقط یک بار اجرا می‌شود (flag KEY_MIGRATED)
+     */
+    private fun migrateIfNeeded(ctx: Context) {
+        if (prefs(ctx).getBoolean(KEY_MIGRATED, false)) return
+
+        val oldTrades = loadLegacy(ctx)
+        if (oldTrades.isNotEmpty()) {
+            // ارتقا به نسخه ۲ با default values
+            val upgraded = oldTrades.map { it.copy(ledgerVersion = 2) }
+            saveEncrypted(ctx, upgraded)
+        }
+
+        prefs(ctx).edit().putBoolean(KEY_MIGRATED, true).apply()
     }
 
-    fun load(ctx: Context): List<Trade> {
+    /**
+     * خواندن از legacy storage (plain text)
+     * فقط برای migration استفاده می‌شود
+     */
+    private fun loadLegacy(ctx: Context): List<Trade> {
         val json = prefs(ctx).getString(KEY_TRADES, null) ?: return emptyList()
         return try {
             val type = object : TypeToken<List<Trade>>() {}.type
@@ -41,9 +61,39 @@ object TradeStore {
         }
     }
 
+    // ---------- ذخیره‌سازی رمزنگاری‌شده ----------
+
+    private fun saveEncrypted(ctx: Context, trades: List<Trade>) {
+        val json = gson.toJson(trades)
+        SecureStorage.putString(ctx, KEY_TRADES_ENCRYPTED, json)
+    }
+
+    private fun loadEncrypted(ctx: Context): List<Trade> {
+        val json = SecureStorage.getString(ctx, KEY_TRADES_ENCRYPTED) ?: return emptyList()
+        return try {
+            val type = object : TypeToken<List<Trade>>() {}.type
+            gson.fromJson(json, type) ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // ---------- API عمومی ----------
+
+    fun save(ctx: Context, trades: List<Trade>) {
+        migrateIfNeeded(ctx)
+        saveEncrypted(ctx, trades)
+    }
+
+    fun load(ctx: Context): List<Trade> {
+        migrateIfNeeded(ctx)
+        return loadEncrypted(ctx)
+    }
+
     // ---------- اضافه/بروزرسانی ----------
 
     fun upsert(ctx: Context, trade: Trade) {
+        migrateIfNeeded(ctx)
         val list = load(ctx).toMutableList()
         val idx = list.indexOfFirst { it.id == trade.id }
         if (idx >= 0) list[idx] = trade else list.add(0, trade)
@@ -55,11 +105,16 @@ object TradeStore {
     }
 
     fun remove(ctx: Context, id: String) {
+        migrateIfNeeded(ctx)
         save(ctx, load(ctx).filterNot { it.id == id })
     }
 
     fun clearAll(ctx: Context) {
-        prefs(ctx).edit().remove(KEY_TRADES).apply()
+        SecureStorage.remove(ctx, KEY_TRADES_ENCRYPTED)
+        prefs(ctx).edit()
+            .remove(KEY_TRADES)
+            .remove(KEY_MIGRATED)
+            .apply()
     }
 
     // ---------- آمار ----------
