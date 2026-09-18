@@ -37,7 +37,9 @@ enum class SpotTab(val title: String, val emoji: String) {
     MEME("میم", "🐸"),
     LOG("سیگنال", "📓"),
     TRADES("معامله", "📈"),
-    WALLETS("کیف پول", "👛")
+    WALLETS("کیف پول", "👛"),
+    // 🚀 Sprint 14 (مرحله ۳ / Commit 7D): مرکز حریم خصوصی
+    PRIVACY("حریم", "🔒")
 }
 
 private val SpotAccent = Color(0xFF00E676)
@@ -73,6 +75,8 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 SpotTab.LOG -> SignalLogScreen()
                 SpotTab.TRADES -> TradesScreen()
                 SpotTab.WALLETS -> WalletScreen()
+                // 🚀 Sprint 14 (Commit 7D)
+                SpotTab.PRIVACY -> PrivacyCenterScreen()
             }
         }
 
