@@ -59,8 +59,10 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.MarketMeta
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
+import com.pumpwatch.app.data.ServedFrom
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.data.platformContractOf
 import com.pumpwatch.app.ui.FuturesWorkspace
@@ -83,6 +85,11 @@ private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
 private val ContractBlue = Color(0xFF40C4FF)
 private val ContractGold = Color(0xFFFFC107)
+// 🚀 Sprint 14 (Commit 6D): رنگ‌های بج تازگی
+private val FreshGreen = Color(0xFF00E676)
+private val FreshYellow = Color(0xFFFFC107)
+private val FreshRed = Color(0xFFFF5252)
+private val FreshGray = Color(0xFF8B949E)
 
 class MainActivity : ComponentActivity() {
 
@@ -282,6 +289,33 @@ private fun ContractRow(ctx: Context, contract: String?) {
     }
 }
 
+/**
+ * 🚀 Sprint 14 (Commit 6D): بج تازگی دادهٔ بازار
+ * نمایش صادقانهٔ اینکه داده از کجا آمده (شبکه/کش/دیسک) و چقدر تازه است
+ */
+@Composable
+private fun FreshnessBadge(meta: MarketMeta) {
+    val (emoji, color, text) = when {
+        meta.observedAtMs <= 0L -> Triple("⚪", FreshGray, "نامشخص")
+        meta.servedFrom == ServedFrom.DISK_CACHE -> Triple("🟠", FreshYellow, "آفلاین (${meta.ageSec() / 60}د)")
+        meta.ageSec() <= 130 -> Triple("🟢", FreshGreen, "زنده")
+        meta.ageSec() <= 1800 -> Triple("🟡", FreshYellow, "کش (${meta.ageSec() / 60}د)")
+        else -> Triple("🔴", FreshRed, "مانده (${meta.ageSec() / 60}د)")
+    }
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = color.copy(alpha = 0.15f)
+    ) {
+        Text(
+            "$emoji $text",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
@@ -292,6 +326,8 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     var query by remember { mutableStateOf("") }
     // 🚀 Sprint 10 (V3e): نقشهٔ کانترکت‌ها
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
+    // 🚀 Sprint 14 (Commit 6D): متادیتای تازگی داده
+    var meta by remember { mutableStateOf(MarketMeta(0L, ServedFrom.UNKNOWN, 0)) }
     val scope = rememberCoroutineScope()
 
     fun load() {
@@ -312,6 +348,8 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                         NetErr.log("MarketScreen", "coingecko/coins/markets?page=1..4", null, e)
                     }
                 }
+                // 🚀 Sprint 14 (Commit 6D): خواندن متادیتای تازگی بعد از load
+                meta = ApiClient.marketMeta()
                 // 🚀 Sprint 10 (V3e): کش ۲۴ ساعته — فقط بار اول واقعی می‌گیرد
                 platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
             } catch (e: Exception) {
@@ -338,6 +376,9 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("قیمت لحظه‌ای", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(8.dp))
+            // 🚀 Sprint 14 (Commit 6D): بج تازگی داده
+            FreshnessBadge(meta)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { load() }) { Text("بروزرسانی") }
         }
