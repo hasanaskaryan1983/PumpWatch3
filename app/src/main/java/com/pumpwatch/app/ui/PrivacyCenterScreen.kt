@@ -47,7 +47,7 @@ private val PrCard = Color(0xFF1A2230)
 private val PrBlue = Color(0xFF40C4FF)
 
 /**
- * 🚀 Sprint 14 (مرحله ۳ / Commit 7D): فهرست صادقانهٔ منابع دادهٔ اپ.
+ * 🚀 Sprint 14 (مرحله ۳ / Commit 7D): فهرست صادقانهٔ منابع داده اپ.
  * هر منبع + هدفش — همان چیزی که فرم Data Safety پلی‌استور می‌پرسد.
  * internal تا تست JVM قفلش کند.
  */
@@ -83,6 +83,8 @@ fun PrivacyCenterScreen() {
     var confirmWipe by remember { mutableStateOf(false) }
     var confirmExport by remember { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
+    // 🚀 Sprint 14 (مرحلهٔ ۰ گزارش / Commit 8C): ورود به صفحهٔ متدولوژی
+    var showMethodology by remember { mutableStateOf(false) }
 
     val keystoreOk = remember { SecureStorage.isKeystoreAvailable() }
     val insecure = remember { SecureStorage.isInsecureFallback(context) }
@@ -92,6 +94,12 @@ fun PrivacyCenterScreen() {
                 context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
         } else true
+    }
+
+    // 🚀 Commit 8C: صفحهٔ متدولوژی جای کل محتوا را می‌گیرد تا «صفحهٔ مستقل» باشد
+    if (showMethodology) {
+        MethodologyScreen(onBack = { showMethodology = false })
+        return
     }
 
     Column(
@@ -150,6 +158,14 @@ fun PrivacyCenterScreen() {
                 )
             }
         }
+
+        // ---------- 🚀 Commit 8C: درب ورود به متدولوژی ----------
+        Button(
+            onClick = { showMethodology = true },
+            colors = ButtonDefaults.buttonColors(containerColor = PrBlue.copy(alpha = 0.2f)),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("📖 متدولوژی و ریسک: هر عدد از کجا می‌آید؟", fontSize = 11.sp) }
 
         // ---------- کنترل کاربر ----------
         Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
