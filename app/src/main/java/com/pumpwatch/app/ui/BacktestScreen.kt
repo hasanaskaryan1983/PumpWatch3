@@ -19,6 +19,7 @@ import com.google.gson.JsonArray
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.KlineCache as SharedKlineCache
+import com.pumpwatch.app.data.klineSourceLabel
 import com.pumpwatch.app.engine.BacktestEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -94,6 +95,8 @@ fun BacktestScreen() {
     var selectedHorizon by remember { mutableStateOf("۱ ماه") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var analyzedInfo by remember { mutableStateOf("") }
+    // 🚀 Sprint 14 (مرحله ۲ / Commit 6B): خط صداقتِ اجرای بک‌تست
+    var provInfo by remember { mutableStateOf("") }
 
     Column(
         Modifier
@@ -110,8 +113,10 @@ fun BacktestScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                if (isFutures) "⚡ فیوچرز: کوتاه‌مدت، خروج روی CLOSE کندل | کارمزد 0.2% + Slippage 0.1%"
-                else "🏦 اسپات: امتیاز ≥۰ + هفتگی مثبت + OBV مثبت | کارمزد 0.2% + Slippage 0.1%",
+                // 🚀 Sprint 14 (Commit 6B): برچسب‌ها مطابق موتور واقعی شدند
+                // (قبلاً: «خروج روی CLOSE کندل» و «کارمزد 0.2%» — هر دو نادرست)
+                if (isFutures) "⚡ فیوچرز: ورود next-bar + خروج intrabar با اولویت استاپ | هزینهٔ رفت‌وبرگشت: ۲×(کارمزد صرافی + ۰.۰۵٪ اسلیپیج)"
+                else "🏦 اسپات: امتیاز ≥۰ + هفتگی مثبت + OBV مثبت | ورود next-bar + خروج intrabar | هزینهٔ رفت‌وبرگشت: ۰.۳٪",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
@@ -192,6 +197,8 @@ fun BacktestScreen() {
                     errorMsg = null
                     scope.launch {
                         val allTrades = mutableListOf<BacktestEngine.Trade>()
+                        // 🚀 Sprint 14 (Commit 6B): ثبت منبع واقعی کندل‌ها در طول اجرا
+                        val sourcesUsed = mutableSetOf<String>()
 
                         val allCoins = withContext(Dispatchers.IO) {
                             try {
@@ -226,6 +233,8 @@ fun BacktestScreen() {
                                 val klines = withContext(Dispatchers.IO) {
                                     getKlinesCached("${symbol}USDT", tf.interval, tf.limit)
                                 }
+                                // 🚀 Sprint 14 (Commit 6B): منبع واقعی کندل این نماد
+                                sourcesUsed.add(klineSourceLabel(BinanceClient.api.lastSource(symbol)))
                                 if (klines.size >= 60) {
                                     analyzed++
                                     val klinesList = klines.map { k ->
@@ -241,6 +250,8 @@ fun BacktestScreen() {
                                 val klines = withContext(Dispatchers.IO) {
                                     getKlinesCached("${symbol}USDT", "1d", 300)
                                 }
+                                // 🚀 Sprint 14 (Commit 6B): منبع واقعی کندل این نماد
+                                sourcesUsed.add(klineSourceLabel(BinanceClient.api.lastSource(symbol)))
                                 if (klines.size >= 210) {
                                     analyzed++
                                     val klinesList = klines.map { k ->
@@ -256,7 +267,13 @@ fun BacktestScreen() {
 
                         analyzedInfo = "ارزهای تحلیل‌شده: $analyzed از ${coinsToTest.size}"
                         results = allTrades
-                        
+
+                        // 🚀 Sprint 14 (Commit 6B): ساخت خط صداقت اجرا
+                        provInfo = "🕯️ منابع کندل: ${sourcesUsed.sorted().joinToString("، ")} • " +
+                                (if (isFutures) "هزینهٔ رفت‌وبرگشت: ۲×(کارمزد صرافی + ۰.۰۵٪ اسلیپیج)"
+                                else "هزینهٔ رفت‌وبرگشت: ۰.۳٪ (۰.۱٪ کارمزد + ۰.۰۵٪ اسلیپیج هر طرف)") +
+                                " • ورود: next-bar • خروج: intrabar با اولویت استاپ"
+
                         // محاسبه metrics با استفاده از تابع computeMetrics در BacktestEngine
                         // اما چون private است، اینجا دوباره محاسبه می‌کنیم
                         val wins = allTrades.count { it.result == "WIN" }
@@ -266,24 +283,24 @@ fun BacktestScreen() {
                         val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
                         val avgPnl = allTrades.map { it.pnl }.average()
                         val totalPnl = allTrades.sumOf { it.pnl }
-                        
+
                         val winningTrades = allTrades.filter { it.pnl > 0 }
                         val losingTrades = allTrades.filter { it.pnl < 0 }
                         val avgWin = if (winningTrades.isNotEmpty()) winningTrades.map { it.pnl }.average() else 0.0
                         val avgLoss = if (losingTrades.isNotEmpty()) kotlin.math.abs(losingTrades.map { it.pnl }.average()) else 0.0
                         val expectancy = (winRate / 100.0 * avgWin) - ((1 - winRate / 100.0) * avgLoss)
-                        
+
                         val totalWins = winningTrades.sumOf { it.pnl }
                         val totalLosses = kotlin.math.abs(losingTrades.sumOf { it.pnl })
                         val profitFactor = if (totalLosses > 0) totalWins / totalLosses else if (totalWins > 0) Double.POSITIVE_INFINITY else 0.0
-                        
+
                         val equityCurve = mutableListOf(100.0)
                         var equity = 100.0
                         allTrades.forEach { t ->
                             equity *= (1 + t.pnl / 100.0)
                             equityCurve.add(equity)
                         }
-                        
+
                         var maxDrawdown = 0.0
                         var peak = equityCurve[0]
                         for (e in equityCurve) {
@@ -309,7 +326,7 @@ fun BacktestScreen() {
                             inSampleMetrics = null,
                             outOfSampleMetrics = null
                         )
-                        
+
                         isRunning = false
                         progress = ""
                     }
@@ -340,6 +357,11 @@ fun BacktestScreen() {
                     )
                     Text(analyzedInfo, fontSize = 10.sp, color = LY)
 
+                    // 🚀 Sprint 14 (Commit 6B): خط صداقت اجرا (منبع + هزینه + قواعد fill)
+                    if (provInfo.isNotEmpty()) {
+                        Text(provInfo, fontSize = 9.sp, color = LGr, lineHeight = 14.sp)
+                    }
+
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                         Text("تعداد: ${m.totalTrades}", fontSize = 11.sp, color = LGr)
                         Text("✅ برد: ${m.wins}", fontSize = 11.sp, color = LG)
@@ -350,15 +372,13 @@ fun BacktestScreen() {
                     Text("وین‌ریت: ${String.format(Locale.US, "%.1f%%", m.winRate)}", fontWeight = FontWeight.Bold, color = if (m.winRate >= 55) LG else LR)
                     Text("میانگین PnL: ${String.format(Locale.US, "%+.2f%%", m.avgPnl)}", fontWeight = FontWeight.Bold, color = if (m.avgPnl >= 0) LG else LR)
                     Text("مجموع PnL: ${String.format(Locale.US, "%+.2f%%", m.totalPnl)}", fontWeight = FontWeight.Bold, color = if (m.totalPnl >= 0) LG else LR)
-                    
+
                     // نمایش معیارهای جدید
                     Text("میانگین سود: ${String.format(Locale.US, "%+.2f%%", m.avgWin)}", fontSize = 11.sp, color = LG)
                     Text("میانگین ضرر: ${String.format(Locale.US, "%+.2f%%", m.avgLoss)}", fontSize = 11.sp, color = LR)
                     Text("امید ریاضی: ${String.format(Locale.US, "%+.2f%%", m.expectancy)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.expectancy > 0) LG else LR)
                     Text("Profit Factor: ${String.format(Locale.US, "%.2f", m.profitFactor)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.profitFactor >= 1.5) LG else LR)
                     Text("📉 Max Drawdown: ${String.format(Locale.US, "%.2f%%", m.maxDrawdown)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.maxDrawdown < 20) LG else LR)
-
-                    Text("💰 کارمزد: 0.1% + Slippage: 0.05% هر طرف", fontSize = 10.sp, color = LGr)
                 }
             }
 
