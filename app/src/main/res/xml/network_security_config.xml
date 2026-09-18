@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 🚀 Sprint 14 (Commit 7B): همهٔ ترافیک باید HTTPS باشد.
+     جلوگیری از downgrade به cleartext (MITM).
+     cert pinning اضافه نکرده‌ایم: هزینهٔ maintenance بالا + چرخش کلید صرافی‌ها -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- 🚀 Sprint 14: debug build می‌تواند traffic-inspector داشته باشد
+         (فقط در variant debug؛ release هرگز) -->
+    <!--
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+    -->
+</network-security-config>
