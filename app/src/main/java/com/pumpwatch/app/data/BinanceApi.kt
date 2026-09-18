@@ -8,6 +8,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
@@ -156,6 +157,13 @@ object ExchangeHttp {
 
 object MultiExchange {
 
+    // 🚀 Sprint 14 (مرحله ۲ / Commit 5): ثبت منبع واقعی کندل‌ها per symbol
+    // fallback قبلاً بی‌صدا بود؛ حالا نمودار می‌تواند صادقانه بگوید داده از کجا آمد.
+    private val klineSourceRef = ConcurrentHashMap<String, String>()
+
+    fun lastKlineSource(symbolUpper: String): String =
+        klineSourceRef[symbolUpper] ?: "UNKNOWN"
+
     // همهٔ صرافی‌ها از همان coordinator مشترک استفاده می‌کنند
     private fun client(): OkHttpClient = ExchangeHttp.client()
 
@@ -185,7 +193,8 @@ object MultiExchange {
             val list = r.result?.list
             if (!list.isNullOrEmpty()) {
                 val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
-                if (out.isNotEmpty()) return out
+                // 🚀 Sprint 14 (Commit 5): ثبت منبع برنده
+                if (out.isNotEmpty()) { klineSourceRef[symbolUpper] = "BYBIT"; return out }
             }
         } catch (_: Exception) { }
 
@@ -195,7 +204,8 @@ object MultiExchange {
             val list = r.data
             if (!list.isNullOrEmpty()) {
                 val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
-                if (out.isNotEmpty()) return out
+                // 🚀 Sprint 14 (Commit 5): ثبت منبع برنده
+                if (out.isNotEmpty()) { klineSourceRef[symbolUpper] = "OKX"; return out }
             }
         } catch (_: Exception) { }
 
@@ -204,7 +214,8 @@ object MultiExchange {
             val list = gate.candlesticks("${symbolUpper}_USDT", gateInterval(interval), limit)
             if (list.isNotEmpty()) {
                 val out = list.mapNotNull { a -> candle(a, 0, 5, 3, 4, 2, 1, false) }
-                if (out.isNotEmpty()) return out
+                // 🚀 Sprint 14 (Commit 5): ثبت منبع برنده
+                if (out.isNotEmpty()) { klineSourceRef[symbolUpper] = "GATE"; return out }
             }
         } catch (_: Exception) { }
 
@@ -282,6 +293,10 @@ object BinanceClient {
             val step = intervalMs(interval)
             return MultiExchange.fetchKlines(sym, interval, limit).map { c -> toJsonArray(c, step) }
         }
+
+        /** 🚀 Sprint 14 (Commit 5): منبع واقعی آخرین کندل‌های این نماد */
+        fun lastSource(symbol: String): String =
+            MultiExchange.lastKlineSource(symbol.uppercase().removeSuffix("USDT"))
 
         /** internal و pure — برای تست رگرسیون شکل آرایه */
         internal fun toJsonArray(c: BinanceCandle, stepMs: Long): JsonArray =
