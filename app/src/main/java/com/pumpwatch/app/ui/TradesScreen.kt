@@ -50,6 +50,7 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.klineSourceLabel
 import com.pumpwatch.app.data.sourceLabel
 import com.pumpwatch.app.engine.ScoringEngine
 import com.pumpwatch.app.engine.WhaleFlowEngine
@@ -629,7 +630,15 @@ fun TradesScreen() {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
                             Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                            Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                            Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                        }
+                        // 🚀 Sprint 14 (مرحله ۲ / Commit 6A): منبع واقعی کندل‌های امتیازدهی
+                        // فقط برای پیک‌های CEX — پیک‌های DEX کندل صرافی ندارند و برچسب دروغ نمی‌گیرند
+                        if (!pk.isDex) {
+                            Text(
+                                "🕯️ کندل‌ها: ${klineSourceLabel(BinanceClient.api.lastSource(pk.symbol))} • موتور امتیاز: ScoringEngine v1",
+                                fontSize = 8.sp, color = TGray
+                            )
                         }
                         realWhale[pk.symbol]?.let { rw ->
                             Text(
