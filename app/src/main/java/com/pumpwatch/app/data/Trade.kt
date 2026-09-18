@@ -2,6 +2,19 @@ package com.pumpwatch.app.data
 
 // ---------- مدل معامله شبیه‌سازی ----------
 
+/**
+ * 🚀 Sprint 14 (مرحله ۳ / Commit 7C): مدل نسخه‌دار با فیلدهای provenance
+ *
+ * نسخه ۲ (Sprint 14):
+ * - venue: منبع داده (Binance/Bybit/OKX/Gate/CoinGecko)
+ * - contract: آدرس قرارداد (برای DEX tokens)
+ * - slippagePct: اسلیپیج واقعی در زمان fill
+ * - feePct: کارمزد واقعی صرافی
+ * - fillTime: زمان واقعی fill (نه closeTime کندل سیگنال)
+ * - ledgerVersion: نسخهٔ ledger برای migration
+ *
+ * همهٔ فیلدهای جدید default دارند → backward compatible
+ */
 data class Trade(
     val id: String,              // UUID
     val coinId: String,
@@ -23,7 +36,14 @@ data class Trade(
     // 🚀 Sprint 13 (F6a-ext): فیلدهای جدید با default (backward compatible)
     val source: String = "manual",   // "scanner" | "manual" | "backtest"
     val note: String = "",
-    val sizeUsd: Double = 100.0
+    val sizeUsd: Double = 100.0,
+    // 🚀 Sprint 14 (مرحله ۳ / Commit 7C): provenance و نسخه‌بندی
+    val venue: String = "unknown",           // منبع داده
+    val contract: String? = null,            // آدرس قرارداد (DEX)
+    val slippagePct: Double = 0.1,           // اسلیپیج واقعی
+    val feePct: Double = 0.1,                // کارمزد واقعی
+    val fillTime: Long? = null,              // زمان واقعی fill (next-bar)
+    val ledgerVersion: Int = 2               // نسخهٔ ledger (برای migration)
 ) {
     // محاسبه PnL لحظه‌ای
     fun unrealizedPnl(): Double {
@@ -31,7 +51,7 @@ data class Trade(
         val diff = currentPrice - entryPrice
         val pct = if (side == "PUMP") diff / entryPrice * 100
                   else -diff / entryPrice * 100
-        return pct - 0.1 // کارمزد 0.1%
+        return pct - feePct  // 🚀 Sprint 14: استفاده از feePct واقعی
     }
 
     // محاسبه PnL نهایی (معامله بسته‌شده)
@@ -40,7 +60,7 @@ data class Trade(
         val diff = exitPrice - entryPrice
         val pct = if (side == "PUMP") diff / entryPrice * 100
                   else -diff / entryPrice * 100
-        return pct - 0.2 // کارمزد ورود + خروج
+        return pct - (feePct * 2) - slippagePct  // 🚀 Sprint 14: fee + slippage واقعی
     }
 
     // 🚀 Sprint 13 (F6a-ext): PnL دلاری (برای ژورنال)
