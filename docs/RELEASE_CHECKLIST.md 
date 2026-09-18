@@ -1,0 +1,40 @@
+# Release checklist — do not ship until every box is ticked
+
+## A. Build & signing
+- [ ] versionName/versionCode bumped in app/build.gradle.kts
+- [ ] release build with minify (R8) enabled; proguard rules verified
+- [ ] AAB signed via Play App Signing (keystore backed up offline)
+- [ ] zero secrets/keys inside AAB (scan: strings + resources)
+
+## B. Compliance (Play Console)
+- [ ] Privacy policy URL live and matching docs/PRIVACY_POLICY.md
+- [ ] Data Safety form filled from docs/DATA_SAFETY.md (re-verify after any new SDK)
+- [ ] Financial features declaration: non-custodial, no real orders,
+      no withdrawal permission, paper-only simulation
+- [ ] Content rating questionnaire completed
+- [ ] Store listing copy = docs/STORE_LISTING.md (no forbidden claims:
+      no "guaranteed profit", no "real-time" without server, no "insider")
+- [ ] Target SDK meets current Play requirement (35+)
+- [ ] Tester instructions for reviewers (how to see paper trading & alerts)
+
+## C. Quality gates (closed testing, ≥7 days, ≥5 real devices)
+- [ ] crash-free sessions ≥ 99%
+- [ ] ANR rate ≈ 0
+- [ ] zero signals displayed without source + timestamp
+- [ ] zero "safe" labels where GoPlus status is EMPTY/FAILED
+- [ ] zero chart shown without venue/synthesis disclosure
+- [ ] notification denied path: no crash, honest banner shown
+- [ ] offline path: disk-cache data labeled as cached, never "live"
+- [ ] migration path tested: install old build → update → ledger intact & encrypted
+
+## D. Rollout & rollback
+- [ ] staged rollout: 5% → 20% → 50% → 100% (≥48h per step)
+- [ ] stop criteria defined: crash spike, stale data unlabeled,
+      wrong contract/pool deep links, misleading alert
+- [ ] rollback build kept ready + changelog drafted for hotfix
+- [ ] review monitoring plan (first 14 days), no rating manipulation
+
+## E. Honesty audit (our own law)
+- [ ] every UI number answers: from where? about which asset? when?
+      what is missing? where is the evidence?
+- [ ] CHANGELOG open-decisions list resolved (app label, support email)
