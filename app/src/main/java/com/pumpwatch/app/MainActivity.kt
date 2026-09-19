@@ -65,6 +65,7 @@ import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.ServedFrom
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.data.platformContractOf
+import com.pumpwatch.app.store.WatchlistScheduler
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -85,7 +86,6 @@ private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
 private val ContractBlue = Color(0xFF40C4FF)
 private val ContractGold = Color(0xFFFFC107)
-// 🚀 Sprint 14 (Commit 6D): رنگ‌های بج تازگی
 private val FreshGreen = Color(0xFF00E676)
 private val FreshYellow = Color(0xFFFFC107)
 private val FreshRed = Color(0xFFFF5252)
@@ -120,12 +120,16 @@ class MainActivity : ComponentActivity() {
 
         MonitorScheduler.start(this)
         scheduleSignalScanner()
+        // 🚀 Sprint 15 (فاز ۲ / Commit 13): شروع Worker بررسی هشدارهای واچ‌لیست (هر ۱۵ دقیقه)
+        WatchlistScheduler.start(this)
 
         setContent {
             PumpWatchTheme {
                 MainApp(onModeChanged = {
                     MonitorScheduler.start(this)
                     scheduleSignalScanner()
+                    // 🚀 Commit 13: با تغییر مود هم Scheduler واچ‌لیست تازه می‌ماند
+                    WatchlistScheduler.start(this)
                 })
             }
         }
@@ -291,7 +295,6 @@ private fun ContractRow(ctx: Context, contract: String?) {
 
 /**
  * 🚀 Sprint 14 (Commit 6D): بج تازگی دادهٔ بازار
- * نمایش صادقانهٔ اینکه داده از کجا آمده (شبکه/کش/دیسک) و چقدر تازه است
  */
 @Composable
 private fun FreshnessBadge(meta: MarketMeta) {
@@ -324,9 +327,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
-    // 🚀 Sprint 10 (V3e): نقشهٔ کانترکت‌ها
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
-    // 🚀 Sprint 14 (Commit 6D): متادیتای تازگی داده
     var meta by remember { mutableStateOf(MarketMeta(0L, ServedFrom.UNKNOWN, 0)) }
     val scope = rememberCoroutineScope()
 
@@ -348,9 +349,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                         NetErr.log("MarketScreen", "coingecko/coins/markets?page=1..4", null, e)
                     }
                 }
-                // 🚀 Sprint 14 (Commit 6D): خواندن متادیتای تازگی بعد از load
                 meta = ApiClient.marketMeta()
-                // 🚀 Sprint 10 (V3e): کش ۲۴ ساعته — فقط بار اول واقعی می‌گیرد
                 platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
             } catch (e: Exception) {
                 NetErr.log("MarketScreen", "coingecko/coins/markets", null, e)
@@ -377,7 +376,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
         ) {
             Text("قیمت لحظه‌ای", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(8.dp))
-            // 🚀 Sprint 14 (Commit 6D): بج تازگی داده
             FreshnessBadge(meta)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { load() }) { Text("بروزرسانی") }
@@ -415,7 +413,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(shown) { coin ->
-                    // 🚀 Sprint 10 (V3e): استخراج کانترکت از platformMap برای هر کوین
                     val contract = platformContractOf(platformMap, coin.id)
                     CoinCard(coin = coin, contract = contract, onClick = { onCoinClick(coin) })
                 }
@@ -441,7 +438,6 @@ fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    // 🚀 Sprint 10 (V3e): رنگ سفید نماد — خوانا روی کارت تیره
                     Text(
                         "#$rank  ${coin.symbol.uppercase(Locale.US)}",
                         fontWeight = FontWeight.Bold,
@@ -474,7 +470,6 @@ fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
                     )
                 }
             }
-            // 🚀 Sprint 10 (V3e): ردیف کانترکت پایین هر کارت
             ContractRow(context, contract)
         }
     }
