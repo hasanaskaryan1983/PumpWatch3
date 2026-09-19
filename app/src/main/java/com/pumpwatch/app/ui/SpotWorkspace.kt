@@ -28,10 +28,12 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.worker.SignalNavigator
 
 /**
- * 🚀 Sprint 15 (فاز ۲ / Commit 13): تب واچ‌لیست اضافه شد
- * - ناوبری: ۱۱ تب (۶+۵)
- * - نوتیفیکیشن‌ها به تب هشدار می‌روند (نه تب حذف‌شده)
- * - تب ربات (دستیار) طبق خواستهٔ کاربر حفظ شد
+ * 🚀 Sprint 15 (فاز ۲ / Commit 14b):
+ * - حذف تب برترین‌ها (TopPicksScreen)
+ * - برگشت ادغام: نهنگ و میم دوباره جدا می‌شوند
+ * - ناوبری: ۱۰ تب (۵+۵ تمیز)
+ *
+ * واچ‌لیست نسخهٔ گروه‌بندی‌شده (۱۰ ردیف × ۵۰ ارز) = Commit 17
  */
 enum class SpotTab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
@@ -39,7 +41,6 @@ enum class SpotTab(val title: String, val emoji: String) {
     WHALE("نهنگ", "🐳"),
     ASSISTANT("دستیار", "🤖"),
     BACKTEST("بک‌تست", "🧪"),
-    TOP("برترین", "🏆"),
     MEME("میم", "🐸"),
     TRADES("معامله", "📈"),
     WALLETS("کیف پول", "👛"),
@@ -56,8 +57,6 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(SpotTab.MARKET) }
 
-    // 🚀 Sprint 11 (C2b): گوش‌دادن به SignalNavigator برای باز کردن تب مرتبط
-    // از نوتیفیکیشن (چه fresh start، چه resume از background)
     LaunchedEffect(Unit) {
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
@@ -75,7 +74,6 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 SpotTab.WHALE -> WhaleRadarScreen()
                 SpotTab.ASSISTANT -> AssistantScreen()
                 SpotTab.BACKTEST -> BacktestScreen()
-                SpotTab.TOP -> TopPicksScreen("SPOT")
                 SpotTab.MEME -> MemeRadarScreen()
                 SpotTab.TRADES -> TradesScreen()
                 SpotTab.WALLETS -> WalletScreen()
@@ -90,12 +88,12 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    SpotTab.entries.take(6).forEach { tab ->
+                    SpotTab.entries.take(5).forEach { tab ->
                         SpotNavItem(tab, selectedTab == tab) { selectedTab = tab }
                     }
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    SpotTab.entries.drop(6).forEach { tab ->
+                    SpotTab.entries.drop(5).forEach { tab ->
                         SpotNavItem(tab, selectedTab == tab) { selectedTab = tab }
                     }
                 }
