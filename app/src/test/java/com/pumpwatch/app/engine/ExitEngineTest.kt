@@ -8,8 +8,9 @@ import org.junit.Test
 /**
  * 🚀 Sprint 15 (فاز ۱ / Commit 10): تست‌های pure موتور خروج
  *
- * درس: live باید نزدیک به closes.last() باشد مگر اینکه واقعاً
- * در حال تست اسپایک باشیم. وگرنه آشکارساز VOL_SPIKE شلیک می‌کند.
+ * درس: تست‌های trailing/chandelier باید target = null بگذارند تا
+ * چک تارگت، منطق چلندر را دور نزند. تست‌های STOP/TARGET/VOL_SPIKE
+ * هر کدام در سناریوی خودشان هدف خود را دارند.
  */
 class ExitEngineTest {
 
@@ -45,7 +46,7 @@ class ExitEngineTest {
         assertEquals(130.0, d.exitPrice!!, 0.0001)
     }
 
-    // ---------- ۳) اسپایک نوسان (این تست *خودش* اسپایک را چک می‌کند) ----------
+    // ---------- ۳) اسپایک نوسان ----------
 
     @Test
     fun volatility_spike_closes_immediately() {
@@ -88,42 +89,43 @@ class ExitEngineTest {
         assertTrue(d.newStop!! >= 100.0)
     }
 
-    // ---------- ۷) BE و نردبان تریل (اصلاح‌شده) ----------
+    // ---------- ۷) BE و نردبان تریل ----------
 
     @Test
     fun breakeven_locked_after_one_r() {
-        // 🚀 fix: live = closes.last() تا اسپایک شلیک نکند
         val closes = rising(30)  // 100..129
         val d = ExitEngine.decide(ctx(closes = closes, live = 129.0))
-        // profitR = 2.9, atr = 1.0 => TRAIL, stop >= 100 (BE)
         assertEquals("TRAIL", d.action)
         assertTrue("after +1R stop must be >= entry", d.newStop!! >= 100.0)
     }
 
     @Test
     fun chandelier_ratchets_tighter_as_profit_grows() {
-        // 🚀 fix: live = closes.last() برای هر دو سناریو
+        // 🚀 fix: target = null تا چک تارگت منطق چلندر را دور نزند
+        // سناریو ۱: profitR = 2.4 → k = 2.0
         val closes1 = rising(25)  // 100..124
-        val d1 = ExitEngine.decide(ctx(closes = closes1, live = 124.0))
-        // profitR = 2.4 => k = 2.0
-        val closes2 = rising(36)  // 100..135
-        val d2 = ExitEngine.decide(ctx(closes = closes2, live = 135.0))
-        // profitR = 3.5 => k = 1.5 (تریل سفت‌تر)
+        val d1 = ExitEngine.decide(ctx(closes = closes1, live = 124.0, target = null))
+        // senario 2: profitR = 3.0 → k = 1.5 (تریل سفت‌تر)
+        val closes2 = rising(31)  // 100..130
+        val d2 = ExitEngine.decide(ctx(closes = closes2, live = 130.0, target = null))
         assertEquals("TRAIL", d1.action)
         assertEquals("TRAIL", d2.action)
-        assertTrue("higher profit must give tighter (higher) stop for longs", d2.newStop!! > d1.newStop!!)
+        // chandelier(1.5) = 130 - 1.5 = 128.5
+        // chandelier(2.0) = 124 - 2.0 = 122.0
+        assertTrue(
+            "higher profit must give tighter (higher) stop for longs",
+            d2.newStop!! > d1.newStop!!
+        )
     }
 
-    // ---------- ۸) تقارن شورت (اصلاح‌شده) ----------
+    // ---------- ۸) تقارن شورت ----------
 
     @Test
     fun short_side_is_mirror() {
         val closes = MutableList(30) { 100.0 - it * 1.0 }  // 100..71
-        // 🚀 fix: live = 71 (آخرین close)، نه 85 (که اسپایک بود)
         val d = ExitEngine.decide(
-            ctx(side = "DUMP", entry = 100.0, stop = 110.0, target = 70.0, closes = closes, live = 71.0)
+            ctx(side = "DUMP", entry = 100.0, stop = 110.0, target = null, closes = closes, live = 71.0)
         )
-        // profitR = 2.9 => BE, stop <= 100
         assertEquals("TRAIL", d.action)
         assertTrue("short stop must ratchet down to <= entry", d.newStop!! <= 100.0)
     }
