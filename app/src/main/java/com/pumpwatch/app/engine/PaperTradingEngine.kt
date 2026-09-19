@@ -19,7 +19,6 @@ object PaperTradingEngine {
             .toSet()
         if (sig.coinId in openIds) return
 
-        // 🚀 Sprint 14 (Commit 7C): provenance کامل حفظ شد — venue و fillTime واقعی
         val venue = BinanceClient.api.lastSource(sig.symbol)
         val fillTime = System.currentTimeMillis()
 
@@ -46,7 +45,7 @@ object PaperTradingEngine {
             fillTime = fillTime,
             slippagePct = 0.1,
             feePct = 0.1,
-            ledgerVersion = 2
+            ledgerVersion = 3
         )
         TradeStore.upsert(ctx, trade)
     }
@@ -58,11 +57,9 @@ object PaperTradingEngine {
 
         for (t in trades) {
             try {
-                // 🚀 Commit 10: دو روز کندل ساعتی برای تاریخچهٔ آشکارسازها
                 val chart = ScanClient.api.chart(t.coinId, days = 2, interval = "hourly")
                 val pts = chart.prices
                 val latestPrice = pts.lastOrNull()?.get(1) ?: continue
-                // فقط کندل‌های بستهٔ بعد از ورود
                 val closes = pts
                     .filter { it[0].toLong() >= t.entryTime && it[0].toLong() < System.currentTimeMillis() - 3_600_000L }
                     .map { it[1] }
@@ -75,8 +72,7 @@ object PaperTradingEngine {
     }
 
     /**
-     * 🚀 Sprint 15 (Commit 10): خروج کاملاً به ExitEngine سپرده شد.
-     * ratchet یک‌طرفه: استاپ لانگ فقط بالا، استاپ شورت فقط پایین.
+     * 🚀 Sprint 15 (Commit 11): هندل PARTIAL (نیمی بسته، نیمی باز)
      */
     private fun updateTrade(t: Trade, price: Double, closes: List<Double>): Trade {
         val dec = ExitEngine.decide(
@@ -87,9 +83,21 @@ object PaperTradingEngine {
                 currentStop = t.currentStop,
                 target = t.target2,
                 closes = closes,
-                livePrice = price
+                livePrice = price,
+                partialClose = t.partialClose   // 🚀 Commit 11
             )
         )
+
+        // 🚀 Commit 11: PARTIAL action
+        if (dec.action == "PARTIAL") {
+            return t.copy(
+                currentPrice = price,
+                partialClose = true,
+                partialClosePrice = dec.exitPrice ?: price,
+                partialCloseTime = System.currentTimeMillis(),
+                partialCloseReason = dec.reason ?: "TP1"
+            )
+        }
 
         var newStop = dec.newStop ?: t.currentStop
         if (t.side == "PUMP") {
