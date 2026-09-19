@@ -13,13 +13,12 @@ object TradeStore {
     private const val KEY_TRADES_ENCRYPTED = "trades_v2_encrypted"
     private const val KEY_ENABLED = "paper_enabled"
     private const val KEY_MIGRATED = "migrated_to_v2"
+    private const val KEY_MIGRATED_V3 = "migrated_to_v3"
     private const val MAX_HISTORY = 200
 
     private val gson = Gson()
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, 0)
-
-    // ---------- تنظیمات ----------
 
     fun isEnabled(ctx: Context): Boolean =
         prefs(ctx).getBoolean(KEY_ENABLED, false)
@@ -28,20 +27,9 @@ object TradeStore {
         prefs(ctx).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 
-    // ---------- 🚀 Sprint 14 (Commit 7C-fix): sanitizer مهاجرت ----------
-
     /**
-     * 🚀 Sprint 14 (مرحله ۳ / Commit 7C-fix):
-     *
-     * تلهٔ Gson: وقتی JSON قدیمی فیلدی ندارد، Gson constructor کاتلین را
-     * صدا نمی‌زند و default value ها اعمال نمی‌شوند — فیلد null/0 می‌ماند.
-     * پس هر trade قدیمی باید از این sanitizer عبور کند تا:
-     *  ۱) null ها به default امن تبدیل شوند (جلوگیری از NPE و PnL غلط)
-     *  ۲) feePct=0.1 تنظیم شود تا PnL دقیقاً معادل فرمول قدیمی (۰.۲٪ رفت‌وبرگشت) بماند
-     *  ۳) slippagePct=0.0 بماند (مدل قدیمی slippage نداشت → برابری دقیق)
-     *  ۴) ledgerVersion=2 شود
-     *
-     * pure function — قابل تست روی JVM
+     * 🚀 Sprint 15 (Commit 11): sanitizer مهاجرت نسخه ۱/۲ به ۳
+     * درس Gson: فیلدهای غایب null می‌شوند، پس Boolean غایب → null → false
      */
     internal fun upgradeLegacy(t: Trade): Trade = t.copy(
         source = (t.source as String?) ?: "manual",
@@ -52,32 +40,34 @@ object TradeStore {
         slippagePct = if (t.slippagePct > 0.0) t.slippagePct else 0.0,
         feePct = if (t.feePct > 0.0) t.feePct else 0.1,
         fillTime = t.fillTime,
-        ledgerVersion = 2
+        partialClose = t.partialClose,               // null => false
+        partialClosePrice = t.partialClosePrice,
+        partialCloseTime = t.partialCloseTime,
+        partialCloseReason = t.partialCloseReason as String?,
+        ledgerVersion = 3
     )
 
-    // ---------- Migration خودکار ----------
-
-    /**
-     * 🚀 Sprint 14 (مرحله ۳ / Commit 7C): migration از plain text به رمزنگاری‌شده
-     * فقط یک بار اجرا می‌شود (flag KEY_MIGRATED)
-     */
     private fun migrateIfNeeded(ctx: Context) {
-        if (prefs(ctx).getBoolean(KEY_MIGRATED, false)) return
-
-        val oldTrades = loadLegacy(ctx)
-        if (oldTrades.isNotEmpty()) {
-            // 🚀 Commit 7C-fix: عبور از sanitizer قبل از رمزنگاری
-            val upgraded = oldTrades.map { upgradeLegacy(it) }
-            saveEncrypted(ctx, upgraded)
+        // V1 → V2 (legacy)
+        if (!prefs(ctx).getBoolean(KEY_MIGRATED, false)) {
+            val oldTrades = loadLegacy(ctx)
+            if (oldTrades.isNotEmpty()) {
+                val upgraded = oldTrades.map { upgradeLegacy(it) }
+                saveEncrypted(ctx, upgraded)
+            }
+            prefs(ctx).edit().putBoolean(KEY_MIGRATED, true).apply()
         }
-
-        prefs(ctx).edit().putBoolean(KEY_MIGRATED, true).apply()
+        // V2 → V3 (partial close fields)
+        if (!prefs(ctx).getBoolean(KEY_MIGRATED_V3, false)) {
+            val cur = loadEncrypted(ctx)
+            if (cur.isNotEmpty()) {
+                val upgraded = cur.map { upgradeLegacy(it) }
+                saveEncrypted(ctx, upgraded)
+            }
+            prefs(ctx).edit().putBoolean(KEY_MIGRATED_V3, true).apply()
+        }
     }
 
-    /**
-     * خواندن از legacy storage (plain text)
-     * فقط برای migration استفاده می‌شود
-     */
     private fun loadLegacy(ctx: Context): List<Trade> {
         val json = prefs(ctx).getString(KEY_TRADES, null) ?: return emptyList()
         return try {
@@ -87,8 +77,6 @@ object TradeStore {
             emptyList()
         }
     }
-
-    // ---------- ذخیره‌سازی رمزنگاری‌شده ----------
 
     private fun saveEncrypted(ctx: Context, trades: List<Trade>) {
         val json = gson.toJson(trades)
@@ -105,8 +93,6 @@ object TradeStore {
         }
     }
 
-    // ---------- API عمومی ----------
-
     fun save(ctx: Context, trades: List<Trade>) {
         migrateIfNeeded(ctx)
         saveEncrypted(ctx, trades)
@@ -116,8 +102,6 @@ object TradeStore {
         migrateIfNeeded(ctx)
         return loadEncrypted(ctx)
     }
-
-    // ---------- اضافه/بروزرسانی ----------
 
     fun upsert(ctx: Context, trade: Trade) {
         migrateIfNeeded(ctx)
@@ -141,17 +125,16 @@ object TradeStore {
         prefs(ctx).edit()
             .remove(KEY_TRADES)
             .remove(KEY_MIGRATED)
+            .remove(KEY_MIGRATED_V3)
             .apply()
     }
-
-    // ---------- آمار ----------
 
     fun stats(ctx: Context): TradeStats {
         val all = load(ctx)
         val open = all.filter { it.status == "OPEN" }
         val closed = all.filter { it.status == "CLOSED" }
-        val wins = closed.count { it.realizedPnl() > 0 }
-        val totalPnl = closed.sumOf { it.realizedPnl() } + open.sumOf { it.unrealizedPnl() }
+        val wins = closed.count { it.totalRealizedPnl() > 0 }   // 🚀 Commit 11
+        val totalPnl = closed.sumOf { it.totalRealizedPnl() } + open.sumOf { it.unrealizedPnl() }
         val winRate = if (closed.isEmpty()) 0.0 else wins * 100.0 / closed.size
         return TradeStats(
             openCount = open.size,
@@ -163,35 +146,27 @@ object TradeStore {
         )
     }
 
-    // ---------- 🚀 Sprint 13 (F6a-ext): آمار تفکیکی + R-multiple ----------
-
-    /**
-     * آمار پیشرفته: PnL دلاری + R-multiple میانگین + تفکیک منبع
-     * مصرف‌کننده: ژورنال (F6d)
-     */
     fun advancedStats(ctx: Context): AdvancedTradeStats {
         val all = load(ctx)
         val closed = all.filter { it.status == "CLOSED" }
-        val wins = closed.filter { it.realizedPnl() > 0 }
-        val losses = closed.filter { it.realizedPnl() <= 0 }
-        val pnlUsd = closed.sumOf { it.realizedPnlUsd() }
+        val wins = closed.filter { it.totalRealizedPnl() > 0 }
+        val losses = closed.filter { it.totalRealizedPnl() <= 0 }
+        val pnlUsd = closed.sumOf { it.totalRealizedPnlUsd() }   // 🚀 Commit 11
         val rMultiples = closed.mapNotNull { it.rMultiple() }
         val avgR = if (rMultiples.isEmpty()) 0.0 else rMultiples.average()
         val bestR = rMultiples.maxOrNull() ?: 0.0
         val worstR = rMultiples.minOrNull() ?: 0.0
 
-        // تفکیک منبع
         val bySource = all.groupBy { it.source }.mapValues { (_, list) ->
             val c = list.filter { it.status == "CLOSED" }
             SourceBreakdown(
                 count = list.size,
                 closedCount = c.size,
-                winCount = c.count { it.realizedPnl() > 0 },
-                pnlUsd = c.sumOf { it.realizedPnlUsd() }
+                winCount = c.count { it.totalRealizedPnl() > 0 },
+                pnlUsd = c.sumOf { it.totalRealizedPnlUsd() }
             )
         }
 
-        // Max drawdown: بدترین افت متوالی روی PnL تجمعی
         val maxDD = maxDrawdown(closed)
 
         return AdvancedTradeStats(
@@ -208,10 +183,6 @@ object TradeStore {
         )
     }
 
-    /**
-     * Max drawdown محاسبه‌شده از منحنی PnL تجمعی (درصد)
-     * Pure function — قابل تست
-     */
     private fun maxDrawdown(closedTrades: List<Trade>): Double {
         if (closedTrades.isEmpty()) return 0.0
         val sorted = closedTrades.sortedBy { it.exitTime ?: 0L }
@@ -219,7 +190,7 @@ object TradeStore {
         var peak = 100.0
         var maxDD = 0.0
         for (t in sorted) {
-            equity += t.realizedPnl()
+            equity += t.totalRealizedPnl()   // 🚀 Commit 11
             if (equity > peak) peak = equity
             val dd = (peak - equity) / peak * 100.0
             if (dd > maxDD) maxDD = dd
@@ -237,7 +208,6 @@ data class TradeStats(
     val totalPnl: Double
 )
 
-// 🚀 Sprint 13 (F6a-ext): آمار پیشرفته برای ژورنال
 data class AdvancedTradeStats(
     val totalClosed: Int,
     val wins: Int,
