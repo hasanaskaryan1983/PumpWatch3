@@ -27,6 +27,12 @@ import com.pumpwatch.app.MarketScreen
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.worker.SignalNavigator
 
+/**
+ * 🚀 Sprint 15 (فاز ۲ / Commit 13): تب واچ‌لیست اضافه شد
+ * - ناوبری: ۱۱ تب (۶+۵)
+ * - نوتیفیکیشن‌ها به تب هشدار می‌روند (نه تب حذف‌شده)
+ * - تب ربات (دستیار) طبق خواستهٔ کاربر حفظ شد
+ */
 enum class SpotTab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
     ALERTS("هشدار", "🔔"),
@@ -35,11 +41,10 @@ enum class SpotTab(val title: String, val emoji: String) {
     BACKTEST("بک‌تست", "🧪"),
     TOP("برترین", "🏆"),
     MEME("میم", "🐸"),
-    LOG("سیگنال", "📓"),
     TRADES("معامله", "📈"),
     WALLETS("کیف پول", "👛"),
-    // 🚀 Sprint 14 (مرحله ۳ / Commit 7D): مرکز حریم خصوصی
-    PRIVACY("حریم", "🔒")
+    PRIVACY("حریم", "🔒"),
+    WATCHLIST("واچ‌لیست", "⭐")
 }
 
 private val SpotAccent = Color(0xFF00E676)
@@ -51,12 +56,12 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(SpotTab.MARKET) }
 
-    // 🚀 Sprint 11 (C2b): گوش‌دادن به SignalNavigator برای باز کردن تب سیگنال
+    // 🚀 Sprint 11 (C2b): گوش‌دادن به SignalNavigator برای باز کردن تب مرتبط
     // از نوتیفیکیشن (چه fresh start، چه resume از background)
     LaunchedEffect(Unit) {
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
-                selectedTab = SpotTab.LOG
+                selectedTab = SpotTab.ALERTS
                 SignalNavigator.consume(context)
             }
         }
@@ -72,11 +77,10 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 SpotTab.BACKTEST -> BacktestScreen()
                 SpotTab.TOP -> TopPicksScreen("SPOT")
                 SpotTab.MEME -> MemeRadarScreen()
-                SpotTab.LOG -> SignalLogScreen()
                 SpotTab.TRADES -> TradesScreen()
                 SpotTab.WALLETS -> WalletScreen()
-                // 🚀 Sprint 14 (Commit 7D)
                 SpotTab.PRIVACY -> PrivacyCenterScreen()
+                SpotTab.WATCHLIST -> WatchlistScreen()
             }
         }
 
@@ -86,12 +90,12 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    SpotTab.entries.take(5).forEach { tab ->
+                    SpotTab.entries.take(6).forEach { tab ->
                         SpotNavItem(tab, selectedTab == tab) { selectedTab = tab }
                     }
                 }
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    SpotTab.entries.drop(5).forEach { tab ->
+                    SpotTab.entries.drop(6).forEach { tab ->
                         SpotNavItem(tab, selectedTab == tab) { selectedTab = tab }
                     }
                 }
