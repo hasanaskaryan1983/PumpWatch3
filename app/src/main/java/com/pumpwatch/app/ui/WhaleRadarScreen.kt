@@ -136,7 +136,6 @@ private val ALL_CHAINS = listOf(
     "genshiro" to "Genshiro 🎯",
     "calamari" to "Calamari 🦑",
     "manta" to "Manta 🦈",
-    // 🚀 Sprint 11 (C3): هم‌پوشانی پوشش با رادار میم
     "sei" to "SEI 🌊",
     "robinhood" to "Robinhood 🪽"
 )
@@ -430,7 +429,7 @@ private fun MethodCard() {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("🛡️ معیارهای اعتماد PumpDump", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = WBlue)
             Text(
-                "تحلیل دلخواه: فقط ۱۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰۰۰ + DEX • شکار میم‌کوین‌ها: تمام شبکه‌های DEX • نتایج تا اسکن دستی بعدی حفظ می‌شن",
+                "تحلیل دلخواه: ۱۰۰۰ ارز برتر CoinGecko • نهنگ‌ها چی می‌خرن: رتبه ۱-۱۰۰۰ + DEX • شکار میم‌کوین‌ها: تمام شبکه‌های DEX • نتایج تا اسکن دستی بعدی حفظ می‌شن",
                 fontSize = 10.sp, color = WGray, lineHeight = 16.sp
             )
             Text(
@@ -480,7 +479,6 @@ private fun LeaderCard(l: WhalePick, index: Int, leaderTf: String, bFlows: Map<S
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(chainEmoji(l.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
-                // 🚀 Sprint 10 (V3a): رنگ سفید — قبلاً پیش‌فرض مشکی روی کارت تیره بود
                 Text(l.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                 Text("(${l.chainName})", fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.weight(1f))
@@ -554,7 +552,6 @@ private fun FreshCard(f: WhalePick, index: Int) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(chainEmoji(f.chain), fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
-                // 🚀 Sprint 10 (V3a): رنگ سفید
                 Text(f.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                 Text("(${f.chainName})", fontSize = 10.sp, color = WGray)
                 Spacer(Modifier.weight(1f))
@@ -610,9 +607,10 @@ fun WhaleRadarScreen() {
             analysisError = null
             try {
                 val coins = ApiClient.getTop1000Coins()
+                // 🚀 Sprint 15 (Commit 15): ۱۰۰ → ۱۰۰۰ ارز برتر
                 val coin = coins.firstOrNull {
-                    it.symbol.equals(symbol, true) && it.market_cap_rank != null && it.market_cap_rank <= 100
-                } ?: throw Exception("not in top 100")
+                    it.symbol.equals(symbol, true) && it.market_cap_rank != null && it.market_cap_rank <= 1000
+                } ?: throw Exception("not in top 1000")
 
                 val days: Int; val chunk: Int; val take: Int; val th: Double
                 when (tf) {
@@ -702,7 +700,8 @@ fun WhaleRadarScreen() {
                 analysis = AnalysisData(shown, zone, flows, chg, poolName, source)
             } catch (e: Exception) {
                 analysis = null
-                analysisError = "ارز در ۱۰۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰ تای برتر مجاز است)"
+                // 🚀 Sprint 15 (Commit 15): پیام خطا ۱۰۰ → ۱۰۰۰
+                analysisError = "ارز در ۱۰۰۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰۰ تای برتر مجاز است)"
             }
             analyzing = false
         }
@@ -859,7 +858,8 @@ fun WhaleRadarScreen() {
             item {
                 Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🔍 تحلیل نهنگی ارز دلخواه (فقط ۱۰۰ ارز برتر CoinGecko)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        // 🚀 Sprint 15 (Commit 15): عنوان ۱۰۰ → ۱۰۰۰
+                        Text("🔍 تحلیل نهنگی ارز دلخواه (۱۰۰۰ ارز برتر CoinGecko)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextField(
@@ -1023,7 +1023,6 @@ fun WhaleRadarScreen() {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(chainEmoji(m.chain), fontSize = 18.sp)
                                 Spacer(Modifier.width(6.dp))
-                                // 🚀 Sprint 10 (V3a): رنگ سفید
                                 Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                                 Text("(${m.chainName})", fontSize = 10.sp, color = WGray)
                                 Spacer(Modifier.weight(1f))
