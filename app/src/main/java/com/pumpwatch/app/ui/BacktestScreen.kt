@@ -21,6 +21,8 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.KlineCache as SharedKlineCache
 import com.pumpwatch.app.data.klineSourceLabel
 import com.pumpwatch.app.engine.BacktestEngine
+import com.pumpwatch.app.engine.Bar
+import com.pumpwatch.app.engine.ExitComparator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -34,10 +36,6 @@ private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
 
-/**
- * 🚀 P1-1: حذف cache موازی محلی — حالا از KlineCache مرکزی (thread-safe, TTL=60s) استفاده می‌کنیم.
- * امضای تابع حفظ شد تا هیچ فراخوانی در این فایل نشکند.
- */
 private suspend fun getKlinesCached(symbol: String, interval: String, limit: Int): List<JsonArray> {
     return try {
         SharedKlineCache.klines(symbol, interval, limit)
@@ -79,6 +77,29 @@ private val RANGES = listOf(
     "51-100" to (50 until 100)
 )
 
+// 🚀 Sprint 15 (Commit 12b): نتیجهٔ مقایسهٔ A/B
+private data class ABResult(
+    val symbol: String,
+    val legacyR: Double,
+    val engineR: Double,
+    val legacyReason: String,
+    val engineReason: String,
+    val enginePartial: Boolean
+)
+
+private data class ABSummary(
+    val total: Int,
+    val legacyAvgR: Double,
+    val engineAvgR: Double,
+    val legacyWins: Int,
+    val engineWins: Int,
+    val legacyPF: Double,
+    val enginePF: Double,
+    val deltaR: Double,
+    val deltaWinRate: Double,
+    val deltaPF: Double
+)
+
 @Composable
 fun BacktestScreen() {
     val ctx = LocalContext.current
@@ -95,8 +116,13 @@ fun BacktestScreen() {
     var selectedHorizon by remember { mutableStateOf("۱ ماه") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var analyzedInfo by remember { mutableStateOf("") }
-    // 🚀 Sprint 14 (مرحله ۲ / Commit 6B): خط صداقتِ اجرای بک‌تست
     var provInfo by remember { mutableStateOf("") }
+
+    // 🚀 Sprint 15 (Commit 12b): state های A/B
+    var abResults by remember { mutableStateOf<List<ABResult>>(emptyList()) }
+    var abSummary by remember { mutableStateOf<ABSummary?>(null) }
+    var abRunning by remember { mutableStateOf(false) }
+    var abProgress by remember { mutableStateOf("") }
 
     Column(
         Modifier
@@ -113,8 +139,6 @@ fun BacktestScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                // 🚀 Sprint 14 (Commit 6B): برچسب‌ها مطابق موتور واقعی شدند
-                // (قبلاً: «خروج روی CLOSE کندل» و «کارمزد 0.2%» — هر دو نادرست)
                 if (isFutures) "⚡ فیوچرز: ورود next-bar + خروج intrabar با اولویت استاپ | هزینهٔ رفت‌وبرگشت: ۲×(کارمزد صرافی + ۰.۰۵٪ اسلیپیج)"
                 else "🏦 اسپات: امتیاز ≥۰ + هفتگی مثبت + OBV مثبت | ورود next-bar + خروج intrabar | هزینهٔ رفت‌وبرگشت: ۰.۳٪",
                 fontSize = 11.sp,
@@ -197,7 +221,6 @@ fun BacktestScreen() {
                     errorMsg = null
                     scope.launch {
                         val allTrades = mutableListOf<BacktestEngine.Trade>()
-                        // 🚀 Sprint 14 (Commit 6B): ثبت منبع واقعی کندل‌ها در طول اجرا
                         val sourcesUsed = mutableSetOf<String>()
 
                         val allCoins = withContext(Dispatchers.IO) {
@@ -233,7 +256,6 @@ fun BacktestScreen() {
                                 val klines = withContext(Dispatchers.IO) {
                                     getKlinesCached("${symbol}USDT", tf.interval, tf.limit)
                                 }
-                                // 🚀 Sprint 14 (Commit 6B): منبع واقعی کندل این نماد
                                 sourcesUsed.add(klineSourceLabel(BinanceClient.api.lastSource(symbol)))
                                 if (klines.size >= 60) {
                                     analyzed++
@@ -250,7 +272,6 @@ fun BacktestScreen() {
                                 val klines = withContext(Dispatchers.IO) {
                                     getKlinesCached("${symbol}USDT", "1d", 300)
                                 }
-                                // 🚀 Sprint 14 (Commit 6B): منبع واقعی کندل این نماد
                                 sourcesUsed.add(klineSourceLabel(BinanceClient.api.lastSource(symbol)))
                                 if (klines.size >= 210) {
                                     analyzed++
@@ -268,14 +289,11 @@ fun BacktestScreen() {
                         analyzedInfo = "ارزهای تحلیل‌شده: $analyzed از ${coinsToTest.size}"
                         results = allTrades
 
-                        // 🚀 Sprint 14 (Commit 6B): ساخت خط صداقت اجرا
                         provInfo = "🕯️ منابع کندل: ${sourcesUsed.sorted().joinToString("، ")} • " +
                                 (if (isFutures) "هزینهٔ رفت‌وبرگشت: ۲×(کارمزد صرافی + ۰.۰۵٪ اسلیپیج)"
                                 else "هزینهٔ رفت‌وبرگشت: ۰.۳٪ (۰.۱٪ کارمزد + ۰.۰۵٪ اسلیپیج هر طرف)") +
                                 " • ورود: next-bar • خروج: intrabar با اولویت استاپ"
 
-                        // محاسبه metrics با استفاده از تابع computeMetrics در BacktestEngine
-                        // اما چون private است، اینجا دوباره محاسبه می‌کنیم
                         val wins = allTrades.count { it.result == "WIN" }
                         val losses = allTrades.count { it.result == "LOSS" }
                         val expired = allTrades.count { it.result == "EXP" }
@@ -348,6 +366,197 @@ fun BacktestScreen() {
 
         if (isRunning) Text(progress, color = LGr, fontSize = 12.sp)
 
+        // 🚀 Sprint 15 (Commit 12b): دکمهٔ مقایسهٔ A/B
+        if (!isRunning && selectedRanges.isNotEmpty()) {
+            Button(
+                onClick = {
+                    if (!abRunning) {
+                        abRunning = true
+                        abResults = emptyList()
+                        abSummary = null
+                        scope.launch {
+                            val allCoins = withContext(Dispatchers.IO) {
+                                try {
+                                    ApiClient.getTop1000Coins()
+                                        .sortedByDescending { it.total_volume ?: 0.0 }
+                                        .take(100)
+                                } catch (e: Exception) {
+                                    emptyList()
+                                }
+                            }
+
+                            val allIndices = mutableSetOf<Int>()
+                            selectedRanges.forEach { label ->
+                                RANGES.find { it.first == label }?.second?.forEach { allIndices.add(it) }
+                            }
+                            val coinsToTest = allIndices.mapNotNull { idx -> allCoins.getOrNull(idx)?.let { idx to it } }
+
+                            val abList = mutableListOf<ABResult>()
+                            var processed = 0
+
+                            for ((idx, coin) in coinsToTest) {
+                                val symbol = coin.symbol.uppercase(Locale.US)
+                                abProgress = "مقایسه $symbol (${processed + 1}/${coinsToTest.size})..."
+
+                                val tf = if (isFutures) FUT_TIMEFRAMES.find { it.label == selectedTf } ?: FUT_TIMEFRAMES[2]
+                                         else Tf(selectedHorizon, "1d", 100, 0, SPOT_HORIZONS.find { it.first == selectedHorizon }?.second ?: 30)
+                                val klines = withContext(Dispatchers.IO) {
+                                    getKlinesCached("${symbol}USDT", tf.interval, tf.limit)
+                                }
+
+                                if (klines.size >= 60) {
+                                    val bars = klines.map { k ->
+                                        Bar(k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble)
+                                    }
+                                    // فرض ورود در بار 20 (بعد از گرم‌شدن اندیکاتورها)
+                                    val entryBar = 20
+                                    if (entryBar < bars.size - 10) {
+                                        val entry = bars[entryBar].c
+                                        val stop = entry * 0.95  // 5% stop
+                                        val t1 = entry * 1.10   // 10% target1
+                                        val t2 = entry * 1.20   // 20% target2
+                                        val side = "PUMP"
+
+                                        val postBars = bars.subList(entryBar + 1, bars.size)
+                                        val legacy = ExitComparator.replayLegacy(postBars, side, entry, stop, t1, t2)
+                                        val engine = ExitComparator.replayEngine(postBars, side, entry, stop, t1, t2)
+
+                                        abList.add(
+                                            ABResult(
+                                                symbol = symbol,
+                                                legacyR = legacy.realizedR,
+                                                engineR = engine.realizedR,
+                                                legacyReason = legacy.exitReason,
+                                                engineReason = engine.exitReason,
+                                                enginePartial = engine.partialTaken
+                                            )
+                                        )
+                                    }
+                                }
+                                processed++
+                                delay(100)
+                            }
+
+                            abResults = abList
+                            abSummary = if (abList.isNotEmpty()) {
+                                val legacyAvgR = abList.map { it.legacyR }.average()
+                                val engineAvgR = abList.map { it.engineR }.average()
+                                val legacyWins = abList.count { it.legacyR > 0 }
+                                val engineWins = abList.count { it.engineR > 0 }
+                                val legacyTotalWins = abList.filter { it.legacyR > 0 }.sumOf { it.legacyR }
+                                val legacyTotalLosses = kotlin.math.abs(abList.filter { it.legacyR < 0 }.sumOf { it.legacyR })
+                                val engineTotalWins = abList.filter { it.engineR > 0 }.sumOf { it.engineR }
+                                val engineTotalLosses = kotlin.math.abs(abList.filter { it.engineR < 0 }.sumOf { it.engineR })
+                                val legacyPF = if (legacyTotalLosses > 0) legacyTotalWins / legacyTotalLosses else if (legacyTotalWins > 0) Double.POSITIVE_INFINITY else 0.0
+                                val enginePF = if (engineTotalLosses > 0) engineTotalWins / engineTotalLosses else if (engineTotalWins > 0) Double.POSITIVE_INFINITY else 0.0
+
+                                ABSummary(
+                                    total = abList.size,
+                                    legacyAvgR = legacyAvgR,
+                                    engineAvgR = engineAvgR,
+                                    legacyWins = legacyWins,
+                                    engineWins = engineWins,
+                                    legacyPF = legacyPF,
+                                    enginePF = enginePF,
+                                    deltaR = engineAvgR - legacyAvgR,
+                                    deltaWinRate = (engineWins * 100.0 / abList.size) - (legacyWins * 100.0 / abList.size),
+                                    deltaPF = enginePF - legacyPF
+                                )
+                            } else null
+
+                            abRunning = false
+                            abProgress = ""
+                        }
+                    }
+                },
+                enabled = !abRunning,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = LY.copy(alpha = 0.3f))
+            ) {
+                if (abRunning) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    if (abRunning) "در حال مقایسه..." else "🔬 مقایسهٔ A/B سیاست‌های خروج",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        if (abRunning) Text(abProgress, color = LGr, fontSize = 12.sp)
+
+        // 🚀 Sprint 15 (Commit 12b): کارت مقایسهٔ A/B
+        abSummary?.let { s ->
+            Surface(color = LC, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "📊 مقایسهٔ سیاست‌های خروج (${s.total} ترید)",
+                        fontWeight = FontWeight.Bold, fontSize = 13.sp, color = LBlue
+                    )
+
+                    Text("LEGACY (قبل از Commit 10):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LGr)
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
+                        Text("بردها: ${s.legacyWins}", fontSize = 10.sp, color = LG)
+                        Text("وین‌ریت: ${String.format(Locale.US, "%.1f%%", s.legacyWins * 100.0 / s.total)}", fontSize = 10.sp, color = if (s.legacyWins * 100.0 / s.total >= 50) LG else LR)
+                        Text("PF: ${String.format(Locale.US, "%.2f", s.legacyPF)}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("میانگین R: ${String.format(Locale.US, "%+.2f", s.legacyAvgR)}", fontSize = 10.sp, color = if (s.legacyAvgR >= 0) LG else LR)
+                    }
+
+                    Text("ENGINE (الان):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = LBlue)
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
+                        Text("بردها: ${s.engineWins}", fontSize = 10.sp, color = LG)
+                        Text("وین‌ریت: ${String.format(Locale.US, "%.1f%%", s.engineWins * 100.0 / s.total)}", fontSize = 10.sp, color = if (s.engineWins * 100.0 / s.total >= 50) LG else LR)
+                        Text("PF: ${String.format(Locale.US, "%.2f", s.enginePF)}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("میانگین R: ${String.format(Locale.US, "%+.2f", s.engineAvgR)}", fontSize = 10.sp, color = if (s.engineAvgR >= 0) LG else LR)
+                    }
+
+                    HorizontalDivider(color = LGr.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 4.dp))
+
+                    Text("🎯 بهبود:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = LY)
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
+                        Text(
+                            "ΔR: ${String.format(Locale.US, "%+.2f", s.deltaR)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (s.deltaR > 0) LG else LR
+                        )
+                        Text(
+                            "Δوین‌ریت: ${String.format(Locale.US, "%+.1f%%", s.deltaWinRate)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (s.deltaWinRate > 0) LG else LR
+                        )
+                        Text(
+                            "ΔPF: ${String.format(Locale.US, "%+.2f", s.deltaPF)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (s.deltaPF > 0) LG else LR
+                        )
+                    }
+
+                    if (s.deltaR > 0 || s.deltaWinRate > 0 || s.deltaPF > 0) {
+                        Text(
+                            "✅ سیاست جدید بهتر است",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = LG,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    } else {
+                        Text(
+                            "⚠️ سیاست جدید مزیت قابل‌توجهی ندارد (روی این داده‌ها)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = LY,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         metrics?.let { m ->
             Surface(color = LC, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -357,7 +566,6 @@ fun BacktestScreen() {
                     )
                     Text(analyzedInfo, fontSize = 10.sp, color = LY)
 
-                    // 🚀 Sprint 14 (Commit 6B): خط صداقت اجرا (منبع + هزینه + قواعد fill)
                     if (provInfo.isNotEmpty()) {
                         Text(provInfo, fontSize = 9.sp, color = LGr, lineHeight = 14.sp)
                     }
@@ -373,7 +581,6 @@ fun BacktestScreen() {
                     Text("میانگین PnL: ${String.format(Locale.US, "%+.2f%%", m.avgPnl)}", fontWeight = FontWeight.Bold, color = if (m.avgPnl >= 0) LG else LR)
                     Text("مجموع PnL: ${String.format(Locale.US, "%+.2f%%", m.totalPnl)}", fontWeight = FontWeight.Bold, color = if (m.totalPnl >= 0) LG else LR)
 
-                    // نمایش معیارهای جدید
                     Text("میانگین سود: ${String.format(Locale.US, "%+.2f%%", m.avgWin)}", fontSize = 11.sp, color = LG)
                     Text("میانگین ضرر: ${String.format(Locale.US, "%+.2f%%", m.avgLoss)}", fontSize = 11.sp, color = LR)
                     Text("امید ریاضی: ${String.format(Locale.US, "%+.2f%%", m.expectancy)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.expectancy > 0) LG else LR)
@@ -409,7 +616,7 @@ fun BacktestScreen() {
             }
         }
 
-        if (!isRunning && results.isEmpty()) {
+        if (!isRunning && results.isEmpty() && !abRunning && abResults.isEmpty()) {
             Text("بازه‌ها رو انتخاب کن و شروع رو بزن", color = LGr, modifier = Modifier.padding(24.dp))
         }
     }
