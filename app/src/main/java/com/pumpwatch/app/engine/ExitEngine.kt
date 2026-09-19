@@ -5,34 +5,30 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 🚀 Sprint 15 (فاز ۱ / Commit 10): موتور خروج حرفه‌ای — pure و قابل‌تست
+ * 🚀 Sprint 15 (Commit 11): موتور خروج با Take-profit پله‌ای
  *
- * فلسفه: اندیکاتورها کالا هستند؛ برتری در خروج ساخته می‌شود.
- *  - شروع حرکت: +1R => استاپ به سر‌به‌سر + شروع تریل
- *  - تغییر جهت سریع: دو آشکارساز حالتی روی کندل بسته
- *      (۱) قیمت زیر/بالای EMA9  (۲) RSI عبور از ۵۰ پس از ≥۵۵
- *    هر دو = بستن فوری • یکی = سفت‌کردن تریل
- *  - تریل پلکانی Chandelier: k = 2.5 → 2.0 → 1.5 با رشد سود
- *  - اضطراری: اسپایک مخالف > 2.5×ATR = بستن آنی
- *  - معاملهٔ مرده: ۲۴ کندل بدون +1R = توقف زمانی
- * اولویت: STOP → TARGET → VOL_SPIKE → MOMENTUM_RSI → TIME → TRAIL
+ * Priority: STOP -> TARGET -> VOL_SPIKE -> PARTIAL (TP1) -> MOMENTUM_RSI -> TIME -> TRAIL
+ *
+ * PARTIAL: اگر profitR >= 1.0 و هنوز partial نشده، نیمی از معامله بسته می‌شود.
+ * اگر قبل از +1R اسپایک شود، کل معامله بسته می‌شود (VOL_SPIKE اولویت بالاتر).
  */
 
 data class ExitContext(
-    val side: String,             // "PUMP" = لانگ | "DUMP" = شورت
+    val side: String,
     val entry: Double,
     val initialStop: Double,
     val currentStop: Double,
     val target: Double?,
-    val closes: List<Double>,     // کندل‌های بسته منذ ورود (قدیمی→جدید)
-    val livePrice: Double
+    val closes: List<Double>,
+    val livePrice: Double,
+    val partialClose: Boolean = false   // 🚀 Commit 11: آیا نیمی قبلاً بسته شده؟
 )
 
 data class ExitDecision(
-    val action: String,           // HOLD | TRAIL | CLOSE
+    val action: String,                 // HOLD | TRAIL | PARTIAL | CLOSE
     val newStop: Double?,
     val exitPrice: Double?,
-    val reason: String?           // STOP | TARGET | VOL_SPIKE | MOMENTUM_RSI | TIME | TRAIL | TIGHTEN
+    val reason: String?                 // STOP | TARGET | VOL_SPIKE | TP1 | MOMENTUM_RSI | TIME | TRAIL | TIGHTEN
 )
 
 object ExitEngine {
@@ -48,14 +44,14 @@ object ExitEngine {
         val risk = abs(ctx.entry - ctx.initialStop)
         if (risk <= 0.0 || ctx.entry <= 0.0) return ExitDecision("HOLD", null, null, null)
 
-        // ۱) استاپ سخت (بدترین سطح بین اولیه و فعلی)
+        // ۱) استاپ سخت
         val stopLevel = if (isLong) max(ctx.initialStop, ctx.currentStop)
         else if (ctx.currentStop > 0.0) min(ctx.initialStop, ctx.currentStop)
         else ctx.initialStop
         if (isLong && ctx.livePrice <= stopLevel) return ExitDecision("CLOSE", stopLevel, stopLevel, "STOP")
         if (!isLong && ctx.livePrice >= stopLevel) return ExitDecision("CLOSE", stopLevel, stopLevel, "STOP")
 
-        // ۲) تارگت (fill صادقانه روی خود تارگت)
+        // ۲) تارگت
         val tg = ctx.target
         if (tg != null && tg > 0.0) {
             if (isLong && ctx.livePrice >= tg) return ExitDecision("CLOSE", null, tg, "TARGET")
@@ -66,32 +62,36 @@ object ExitEngine {
         val profitR = if (isLong) (ctx.livePrice - ctx.entry) / risk
         else (ctx.entry - ctx.livePrice) / risk
 
-        // ۳) اسپایک نوسان مخالف = خروج آنی
+        // ۳) اسپایک نوسان (اولویت بالاتر از PARTIAL: کل ترید بسته می‌شود)
         val lastClose = ctx.closes.lastOrNull() ?: ctx.livePrice
         val move = if (isLong) ctx.livePrice - lastClose else lastClose - ctx.livePrice
         if (atr > 0.0 && -move > VOL_SPIKE_ATR * atr) {
             return ExitDecision("CLOSE", null, ctx.livePrice, "VOL_SPIKE")
         }
 
+        // ۴) 🚀 Commit 11: PARTIAL در +1R (اگر هنوز partial نشده)
+        if (profitR >= 1.0 && !ctx.partialClose) {
+            return ExitDecision("PARTIAL", null, ctx.livePrice, "TP1")
+        }
+
         if (ctx.closes.size < MIN_BARS) return ExitDecision("HOLD", null, null, null)
 
-        // ۴) آشکارسازهای تغییر جهت (فقط کندل بسته)
+        // ۵) آشکارسازهای تغییر جهت
         val e9 = ema(ctx.closes, 9)
         val rsi = rsi(ctx.closes, 14)
         val againstTrend = if (isLong) ctx.closes.last() < e9.last() else ctx.closes.last() > e9.last()
         val rsiLost = if (isLong) rsiFellBelow(rsi, RSI_LOSS, RSI_WAS) else rsiRoseAbove(rsi, RSI_LOSS, RSI_WAS)
 
-        // هر دو با هم = بستن فوری (قبل از توقف زمانی: تغییر جهت فوریت دارد)
         if (againstTrend && rsiLost) {
             return ExitDecision("CLOSE", null, ctx.livePrice, "MOMENTUM_RSI")
         }
 
-        // ۵) توقف زمانی: معاملهٔ مرده
+        // ۶) توقف زمانی
         if (ctx.closes.size >= MAX_BARS && profitR < 1.0) {
             return ExitDecision("CLOSE", null, ctx.livePrice, "TIME")
         }
 
-        // ۶) نردبان تریل: BE بعد از +1R سپس Chandelier با k نزولی
+        // ۷) نردبان تریل
         var stop = stopLevel
         if (profitR >= 1.0) {
             stop = if (isLong) max(stop, ctx.entry) else min(stop, ctx.entry)
@@ -113,8 +113,6 @@ object ExitEngine {
         val reason = if (againstTrend || rsiLost) "TIGHTEN" else "TRAIL"
         return ExitDecision("TRAIL", stop, null, reason)
     }
-
-    // ---------- توابع pure (قابل‌تست) ----------
 
     internal fun atrEstimate(closes: List<Double>): Double {
         if (closes.size < 2) return 0.0
