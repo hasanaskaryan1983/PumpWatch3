@@ -19,9 +19,9 @@ object PaperTradingEngine {
             .toSet()
         if (sig.coinId in openIds) return
 
-        // 🚀 Sprint 14 (مرحله ۳ / Commit 7C): ثبت venue و fillTime واقعی
+        // 🚀 Sprint 14 (Commit 7C): provenance کامل حفظ شد — venue و fillTime واقعی
         val venue = BinanceClient.api.lastSource(sig.symbol)
-        val fillTime = System.currentTimeMillis()  // در real-world: زمان fill کندل بعدی
+        val fillTime = System.currentTimeMillis()
 
         val trade = Trade(
             id = UUID.randomUUID().toString(),
@@ -44,8 +44,8 @@ object PaperTradingEngine {
             source = "scanner",
             venue = venue,
             fillTime = fillTime,
-            slippagePct = 0.1,   // پیش‌فرض ۰.۱٪
-            feePct = 0.1,        // پیش‌فرض ۰.۱٪
+            slippagePct = 0.1,
+            feePct = 0.1,
             ledgerVersion = 2
         )
         TradeStore.upsert(ctx, trade)
@@ -58,9 +58,15 @@ object PaperTradingEngine {
 
         for (t in trades) {
             try {
-                val chart = ScanClient.api.chart(t.coinId, days = 1, interval = "hourly")
-                val latestPrice = chart.prices.lastOrNull()?.get(1) ?: continue
-                val updated = updateTrade(t, latestPrice)
+                // 🚀 Commit 10: دو روز کندل ساعتی برای تاریخچهٔ آشکارسازها
+                val chart = ScanClient.api.chart(t.coinId, days = 2, interval = "hourly")
+                val pts = chart.prices
+                val latestPrice = pts.lastOrNull()?.get(1) ?: continue
+                // فقط کندل‌های بستهٔ بعد از ورود
+                val closes = pts
+                    .filter { it[0].toLong() >= t.entryTime && it[0].toLong() < System.currentTimeMillis() - 3_600_000L }
+                    .map { it[1] }
+                val updated = updateTrade(t, latestPrice, closes)
                 if (updated.status == "CLOSED") closed.add(updated)
                 TradeStore.upsert(ctx, updated)
             } catch (_: Exception) { }
@@ -68,49 +74,37 @@ object PaperTradingEngine {
         return closed
     }
 
-    private fun updateTrade(t: Trade, price: Double): Trade {
-        val isLong = t.side == "PUMP"
-        var newStop = t.currentStop
+    /**
+     * 🚀 Sprint 15 (Commit 10): خروج کاملاً به ExitEngine سپرده شد.
+     * ratchet یک‌طرفه: استاپ لانگ فقط بالا، استاپ شورت فقط پایین.
+     */
+    private fun updateTrade(t: Trade, price: Double, closes: List<Double>): Trade {
+        val dec = ExitEngine.decide(
+            ExitContext(
+                side = t.side,
+                entry = t.entryPrice,
+                initialStop = t.initialStop,
+                currentStop = t.currentStop,
+                target = t.target2,
+                closes = closes,
+                livePrice = price
+            )
+        )
 
-        if (isLong) {
-            if (price > t.entryPrice) {
-                val trailStop = price - (t.entryPrice - t.initialStop)
-                newStop = maxOf(newStop, trailStop)
-                if (price >= t.target1) newStop = maxOf(newStop, t.entryPrice)
-            }
+        var newStop = dec.newStop ?: t.currentStop
+        if (t.side == "PUMP") {
+            if (newStop < t.currentStop) newStop = t.currentStop
         } else {
-            if (price < t.entryPrice) {
-                val trailStop = price + (t.initialStop - t.entryPrice)
-                newStop = if (newStop == 0.0 || newStop > trailStop) trailStop else newStop
-                if (price <= t.target1) {
-                    newStop = if (newStop == 0.0 || newStop < t.entryPrice) t.entryPrice else newStop
-                }
-            }
+            if (t.currentStop > 0.0 && newStop > t.currentStop) newStop = t.currentStop
         }
 
-        var exitReason: String? = null
-        var exitPrice: Double? = null
-
-        when {
-            isLong && price <= newStop -> {
-                exitReason = if (newStop >= t.entryPrice) "BE" else "STOP"
-                exitPrice = newStop
-            }
-            !isLong && price >= newStop -> {
-                exitReason = if (newStop <= t.entryPrice) "BE" else "STOP"
-                exitPrice = newStop
-            }
-            isLong && price >= t.target2 -> { exitReason = "TARGET"; exitPrice = price }
-            !isLong && price <= t.target2 -> { exitReason = "TARGET"; exitPrice = price }
-        }
-
-        return if (exitReason != null && exitPrice != null) {
+        return if (dec.action == "CLOSE") {
             t.copy(
                 currentPrice = price,
                 currentStop = newStop,
                 exitTime = System.currentTimeMillis(),
-                exitPrice = exitPrice,
-                exitReason = exitReason,
+                exitPrice = dec.exitPrice ?: price,
+                exitReason = dec.reason ?: "STOP",
                 status = "CLOSED"
             )
         } else {
