@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,7 +39,6 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.abs
 
 private val FGreen = Color(0xFF00E676)
 private val FRed = Color(0xFFFF5252)
@@ -61,7 +61,6 @@ fun FuturesPaperScreen() {
 
     LaunchedEffect(Unit) {
         reload()
-        // چک‌کردن استاپ/تارگت تریدهای باز
         try {
             val closed = PaperTradingEngine.checkAndClose(context)
             if (closed.isNotEmpty()) msg = "🔔 ${closed.size} ترید بسته شد"
