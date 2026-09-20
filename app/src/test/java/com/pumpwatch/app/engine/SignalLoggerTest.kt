@@ -1,11 +1,16 @@
 package com.pumpwatch.app.engine
 
+import com.pumpwatch.app.ui.marginOfError   // 🚀 Commit 21-fix: تابع pure در فایل UI تعریف شده
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 🚀 Sprint 15 (فاز ۴ / Commit 21): تست‌های pure توابع accuracyStats
+ * 🚀 Sprint 15 (فاز ۴ / Commit 21-fix): تست‌های pure توابع accuracyStats
+ *
+ * درس: marginOfError در SignalAccuracyCard.kt (پکیج ui) تعریف شده؛
+ * تست در پکیج engine بدون import آن را نمی‌بیند. internal از source set
+ * تست قابل دسترسی است (friend module)، پس فقط import لازم بود.
  */
 class SignalLoggerTest {
 
@@ -55,7 +60,6 @@ class SignalLoggerTest {
             sig("PEPE", "BUY", "OPEN")
         )
         val s = SignalLogger.accuracyStats(logs)
-        // winRate = 2 / (2 + 1) * 100 = 66.666...
         assertEquals(66.666, s.winRate, 0.01)
     }
 
@@ -114,8 +118,7 @@ class SignalLoggerTest {
     }
 
     @Test
-    fun margin_of_error_zero_for_large_n() {
-        // برای n = 1000 و winRate = 60%، margin ≈ 3%
+    fun margin_of_error_small_for_large_n() {
         val margin = marginOfError(1000, 60.0).toDouble()
         assertTrue("margin should be small for large n: $margin", margin < 5.0)
         assertTrue("margin should be > 1 for n=1000", margin > 1.0)
@@ -123,7 +126,6 @@ class SignalLoggerTest {
 
     @Test
     fun margin_of_error_large_for_small_n() {
-        // برای n = 5، margin خیلی بزرگ است (صداقت)
         val margin = marginOfError(5, 60.0).toDouble()
         assertTrue("margin should be large for small n: $margin", margin > 20.0)
     }
