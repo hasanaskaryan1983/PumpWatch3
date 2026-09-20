@@ -6,21 +6,21 @@ plugins {
 
 android {
     namespace = "com.pumpwatch.app"
-    compileSdk = 35  // 🚀 Sprint 14 (Commit 9A): Play Store الزامی
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.pumpwatch.app"
         minSdk = 24
-        targetSdk = 35  // 🚀 Sprint 14 (Commit 9A): الزام Play Store
-        versionCode = 2  // 🚀 Sprint 14 (Commit 9A): bump برای release
-        versionName = "1.1.0"  // 🚀 Sprint 14 (Commit 9A): Sprint 14 release
+        targetSdk = 35
+        versionCode = 3
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true  // 🚀 Sprint 14 (Commit 9A): R8 فعال
-            isShrinkResources = true  // 🚀 Sprint 14 (Commit 9A): حذف منابع بلااستفاده
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -41,7 +41,6 @@ android {
         compose = true
     }
 
-    // پشتیبانی از منابع در تست‌ها
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
@@ -66,9 +65,8 @@ dependencies {
     // WorkManager (پایش خودکار پس‌زمینه)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
-    // ===== Unit Tests (فاز ۱: Gate parser + MACD هم‌تراز) =====
+    // ===== Unit Tests =====
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.0")
-    // 🚀 Sprint 9 (I2b): MockWebServer برای تست‌های e2e TonClient/SuiClient
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
