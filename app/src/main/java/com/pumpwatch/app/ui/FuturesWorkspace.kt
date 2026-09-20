@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.worker.SignalNavigator
 
 enum class FuturesTab(val title: String, val emoji: String) {
-    DASHBOARD("داشبورد", "🎛️"),
+    DASHBOARD("سیگنال‌ها", "🎯"),   // 🚀 Commit 18: تابلوی سیگنال
     SCANNER("اسکنر", "🔍"),
     CHART("نمودار", "📊"),
     ALERTS("هشدار", "🔔"),
@@ -69,23 +69,15 @@ fun FuturesWorkspace() {
                 FuturesTab.DASHBOARD -> FuturesDashboardScreen()
                 FuturesTab.SCANNER -> FuturesScannerScreen()
                 FuturesTab.CHART -> FuturesChartScreen()
-                // 🚀 Sprint 12 (F5): هشدارهای واقعی فیوچرز
                 FuturesTab.ALERTS -> FuturesAlertsScreen()
                 FuturesTab.BACKTEST -> FuturesPlaceholder(
                     emoji = "🧪",
                     title = "بک‌تست Futures",
                     description = "Leverage • Isolated margin • Liquidation • Funding • Fee • Slippage • Out-of-sample"
                 )
-                FuturesTab.PAPER -> FuturesPlaceholder(
-                    emoji = "📝",
-                    title = "Paper Trading Futures",
-                    description = "Long/Short • Leverage • Liquidation • Unrealized/Realized PnL • Maintenance margin"
-                )
-                FuturesTab.JOURNAL -> FuturesPlaceholder(
-                    emoji = "📓",
-                    title = "ژورنال عملکرد",
-                    description = "بهترین setup • بهترین timeframe • عملکرد بر اساس regime • Long vs Short • Drawdown متوالی"
-                )
+                // 🚀 Sprint 15 (فاز ۳ / Commit 19): Paper و Journal واقعی
+                FuturesTab.PAPER -> FuturesPaperScreen()
+                FuturesTab.JOURNAL -> FuturesJournalScreen()
             }
         }
 
