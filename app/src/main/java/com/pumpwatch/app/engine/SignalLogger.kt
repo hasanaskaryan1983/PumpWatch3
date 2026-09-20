@@ -55,6 +55,17 @@ data class LoggedSignal(
     }
 }
 
+// 🚀 Sprint 15 (فاز ۴ / Commit 21): کارنامهٔ دقت سیگنال‌ها
+data class SignalAccuracyStats(
+    val total: Int,
+    val wins: Int,
+    val losses: Int,
+    val expired: Int,
+    val open: Int,
+    val winRate: Double,       // wins / (wins + losses) * 100
+    val totalDecided: Int
+)
+
 // ---------- موتور لاگ + آپدیت زنده ----------
 object SignalLogger {
     private const val KEY = "signal_logs"
@@ -147,4 +158,31 @@ object SignalLogger {
         if (changed) save(ctx, out)
         out
     }
+
+    // 🚀 Sprint 15 (فاز ۴ / Commit 21): محاسبهٔ دقت سیگنال‌ها (pure)
+    fun accuracyStats(logs: List<LoggedSignal>): SignalAccuracyStats {
+        val open = logs.count { it.status == "OPEN" }
+        val wins = logs.count { it.status == "WIN" }
+        val losses = logs.count { it.status == "LOSS" }
+        val expired = logs.count { it.status == "EXP" }
+        val decided = wins + losses
+        val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
+        return SignalAccuracyStats(
+            total = logs.size,
+            wins = wins,
+            losses = losses,
+            expired = expired,
+            open = open,
+            winRate = winRate,
+            totalDecided = decided
+        )
+    }
+
+    // 🚀 Sprint 15 (Commit 21): دقت به تفکیک mode (SPOT / FUT)
+    fun accuracyByMode(logs: List<LoggedSignal>): Map<String, SignalAccuracyStats> =
+        logs.groupBy { it.mode }.mapValues { (_, list) -> accuracyStats(list) }
+
+    // 🚀 Sprint 15 (Commit 21): دقت به تفکیک side (BUY / SELL)
+    fun accuracyBySide(logs: List<LoggedSignal>): Map<String, SignalAccuracyStats> =
+        logs.groupBy { it.side }.mapValues { (_, list) -> accuracyStats(list) }
 }
