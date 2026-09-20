@@ -88,7 +88,7 @@ private val CHAINS = listOf(
     ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
     ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/", "evm"),
     ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/", "evm"),
-    ChainCfg("bsc", "BNB 🟡 🚫", "bsc", null, "evm"),
+    ChainCfg("bsc", "BNB 🟡 ", "bsc", null, "evm"),
     ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
     ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
     ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
@@ -1242,7 +1242,9 @@ private fun ChainForensicsSection(
                                         "method" to "getParsedTransaction",
                                         "params" to listOf(sg, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
                                     ))
-                                    val meta = tx?.result?.getAsJsonObject("meta") ?: return@async null
+                                    // 🚀 Commit 23-fix: اول JsonElement را به JsonObject تبدیل کن، بعد فیلد meta را بگیر
+                                    val resultObj = tx?.result?.asJsonObject ?: return@async null
+                                    val meta = resultObj.getAsJsonObject("meta") ?: return@async null
                                     fun bal(key: String): Map<String, Pair<String, Double>> {
                                         val out = mutableMapOf<String, Pair<String, Double>>()
                                         val arrB = meta.getAsJsonArray(key) ?: return out
@@ -1296,7 +1298,7 @@ private fun ChainForensicsSection(
                     wallets = list
                     coverage = "🕐 ${sample.size} از ${sigs.size} تراکنش بازه نمونه‌برداری شد • عمق RPC: از ${sdf.format(Date(rpcDepthFrom))} • آستانه نهنگ: ≥۱۰۰$ در هر تراکنش"
                 }
-                if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
+                if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰$ نبود)"
             } catch (t: Throwable) { err = "⚠️ خطا: ${t.message}" }
             loading = false; progress = ""
         }
@@ -1305,7 +1307,7 @@ private fun ChainForensicsSection(
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم، بدون واسطه API)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("فهرست تراکنش‌های حساب استخر را مستقیم از زنجیرهٔ سولانا در بازهٔ دلخواه تو می‌خواند و تا ۳۰۰ تراکنش را نمونه‌برداری می‌کند. پاسخ: کدام کیف‌ها در آن بازه تجمع کردند؟ (کار می‌کند حتی وقتی عمق ترید GeckoTerminal نمی‌رسد.)", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("فهرست تراکنش‌های حساب استخر را مستقیم از زنجیرهٔ سولانا در بازهٔ دلخواه تو می‌خواند و تا ۳۰ تراکنش را نمونه‌برداری می‌کند. پاسخ: کدام کیف‌ها در آن بازه تجمع کردند؟ (کار می‌کند حتی وقتی عمق ترید GeckoTerminal نمی‌رسد.)", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
