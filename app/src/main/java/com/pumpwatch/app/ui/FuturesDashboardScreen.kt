@@ -7,10 +7,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -33,31 +34,32 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceFutures
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.abs
 
 private val FuturesAccent = Color(0xFFFF5252)
 private val FuturesGreen = Color(0xFF00E676)
 private val FuturesGray = Color(0xFF8B949E)
 private val FuturesBlue = Color(0xFF40C4FF)
-private val FuturesCardA = Color(0xFF1A0E0E)
-private val FuturesCardB = Color(0xFF140B0B)
+private val FuturesGold = Color(0xFFFFC107)
+private val FuturesCard = Color(0xFF1A0E0E)
 
-// 🚀 Sprint 12 (F2): ردیف داشبورد — پایه = ۱۰۰ ارز برتر مارکت‌کپ
-private data class PerpRow(
+// 🚀 Sprint 15 (فاز ۳ / Commit 18): مدل سیگنال فیوچرز
+private data class FutSignal(
     val rank: Int,
-    val symbol: String,        // "BTCUSDT"
-    val base: String,          // "BTC"
-    val lastPrice: Double,
-    val changePct: Double,
+    val symbol: String,
+    val base: String,
+    val direction: String,     // "LONG" | "SHORT"
+    val score: Int,            // 0..100
+    val entry: Double,
+    val stopLoss: Double,
+    val target: Double,
+    val change24h: Double,
+    val fundingPct: Double?,
     val volumeUsd: Double,
-    val fundingPct: Double?,   // null = جفت perpetual ندارد
-    val hasPerp: Boolean,
-    val longPct: Double?       // فقط برای top 5
+    val reasons: List<String>
 )
 
 private fun fmtPrice(p: Double): String = when {
@@ -74,21 +76,80 @@ private fun fmtVol(v: Double): String = when {
     else -> String.format(Locale.US, "$%.0f", v)
 }
 
+/**
+ * 🚀 Commit 18: منطق سیگنال ساده (بدون FuturesScannerEngine)
+ * - شتاب ۲۴ ساعته > 5% → LONG
+ * - شتاب ۲۴ ساعته < -5% → SHORT
+ * - امتیاز = |شتاب ۲۴س| × 3 + فاندینگ extreme (۲۰) + نقدشوندگی (۱۵)
+ */
+private fun buildSignal(
+    rank: Int,
+    symbol: String,
+    base: String,
+    price: Double,
+    change24h: Double,
+    fundingPct: Double?,
+    volumeUsd: Double
+): FutSignal? {
+    val absChange = abs(change24h)
+    if (absChange < 5.0) return null // آستانه: حداقل ۵٪ حرکت
+
+    val direction = if (change24h > 0) "LONG" else "SHORT"
+    val reasons = mutableListOf<String>()
+
+    // امتیاز شتاب (حداکثر ۶۰)
+    var score = (absChange * 3.0).toInt().coerceAtMost(60)
+    reasons.add("شتاب ۲۴س: ${String.format(Locale.US, "%+.1f%%", change24h)}")
+
+    // امتیاز فاندینگ (حداکثر ۲۰)
+    if (fundingPct != null && abs(fundingPct) >= 0.03) {
+        score += 20
+        reasons.add("فاندینگ شدید: ${String.format(Locale.US, "%+.4f%%", fundingPct)}")
+    }
+
+    // امتیاز نقدشوندگی (حداکثر ۱۵)
+    if (volumeUsd >= 50_000_000) {
+        score += 15
+        reasons.add("نقدشوندگی بالا: ${fmtVol(volumeUsd)}")
+    }
+
+    // محاسبه SL و TP (ریسک/پاداش ۲:۱)
+    val slDistance = price * 0.02  // ۲٪
+    val tpDistance = price * 0.04 // ۴٪
+    val stopLoss = if (direction == "LONG") price - slDistance else price + slDistance
+    val target = if (direction == "LONG") price + tpDistance else price - tpDistance
+
+    return FutSignal(
+        rank = rank,
+        symbol = symbol,
+        base = base,
+        direction = direction,
+        score = score.coerceAtMost(100),
+        entry = price,
+        stopLoss = stopLoss,
+        target = target,
+        change24h = change24h,
+        fundingPct = fundingPct,
+        volumeUsd = volumeUsd,
+        reasons = reasons
+    )
+}
+
 @Composable
 fun FuturesDashboardScreen() {
     val scope = rememberCoroutineScope()
-    var rows by remember { mutableStateOf<List<PerpRow>>(emptyList()) }
+    var signals by remember { mutableStateOf<List<FutSignal>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var lastUpdate by remember { mutableStateOf("") }
-    var perpCount by remember { mutableStateOf(0) }
+    var statsText by remember { mutableStateOf("") }
 
     fun scan() {
         scope.launch {
             loading = true
             errorMsg = null
+            signals = emptyList()
             try {
-                // 🚀 Sprint 12 (F2): پایه = ۱۰۰ ارز برتر مارکت‌کپ CoinGecko
                 val coins = ApiClient.getTop100Coins()
 
                 val (tickerMap, premMap) = withContext(Dispatchers.IO) {
@@ -101,45 +162,36 @@ fun FuturesDashboardScreen() {
                     t to p
                 }
 
-                val built = coins.mapIndexed { idx, c ->
+                val allSignals = mutableListOf<FutSignal>()
+                var perpCount = 0
+
+                for ((idx, c) in coins.withIndex()) {
                     val fsym = c.symbol.uppercase(Locale.US) + "USDT"
                     val t = tickerMap[fsym]
+                    if (t == null) continue // جفت perpetual ندارد
+                    perpCount++
+
                     val prem = premMap[fsym]
-                    PerpRow(
+                    val price = t.lastPrice?.toDoubleOrNull() ?: c.current_price
+                    val change24h = t.priceChangePercent?.toDoubleOrNull()
+                        ?: (c.price_change_percentage_24h ?: 0.0)
+                    val fundingPct = prem?.lastFundingRate?.toDoubleOrNull()?.times(100.0)
+                    val volumeUsd = t.quoteVolume?.toDoubleOrNull() ?: c.total_volume
+
+                    val sig = buildSignal(
                         rank = c.market_cap_rank ?: (idx + 1),
                         symbol = fsym,
                         base = c.symbol.uppercase(Locale.US),
-                        // اول Binance؛ اگر جفت نبود fallback به CoinGecko
-                        lastPrice = t?.lastPrice?.toDoubleOrNull() ?: c.current_price,
-                        changePct = t?.priceChangePercent?.toDoubleOrNull()
-                            ?: (c.price_change_percentage_24h ?: 0.0),
-                        volumeUsd = t?.quoteVolume?.toDoubleOrNull() ?: c.total_volume,
-                        fundingPct = prem?.lastFundingRate?.toDoubleOrNull()?.times(100.0),
-                        hasPerp = t != null,
-                        longPct = null
+                        price = price,
+                        change24h = change24h,
+                        fundingPct = fundingPct,
+                        volumeUsd = volumeUsd
                     )
+                    if (sig != null) allSignals.add(sig)
                 }
 
-                perpCount = built.count { it.hasPerp }
-
-                // Long/Short فقط برای top 5 دارای perp (محدودیت API — صادقانه در هدر)
-                val top5 = built.filter { it.hasPerp }.take(5)
-                val lsUpdates = coroutineScope {
-                    top5.map { r ->
-                        async(Dispatchers.IO) {
-                            try {
-                                val list = BinanceFutures.api.lsRatio(r.symbol, "1h", 1)
-                                r.symbol to (list.firstOrNull()?.longAccount?.toDoubleOrNull()?.times(100.0))
-                            } catch (_: Exception) {
-                                r.symbol to null
-                            }
-                        }
-                    }.awaitAll()
-                }
-                val lsMap = lsUpdates.toMap()
-                rows = built.map { r ->
-                    if (lsMap.containsKey(r.symbol)) r.copy(longPct = lsMap[r.symbol]) else r
-                }
+                signals = allSignals.sortedByDescending { it.score }.take(20)
+                statsText = "${signals.size} سیگنال از $perpCount ارز perp در ۱۰۰ برتر"
 
                 val now = System.currentTimeMillis()
                 lastUpdate = String.format(
@@ -161,7 +213,7 @@ fun FuturesDashboardScreen() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "🎛️ داشبورد فیوچرز (۱۰۰ ارز برتر مارکت)",
+                "🎯 تابلوی سیگنال فیوچرز",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -172,9 +224,8 @@ fun FuturesDashboardScreen() {
         }
 
         Text(
-            "پایه: ۱۰۰ ارز برتر مارکت‌کپ CoinGecko • دادهٔ perp از Binance USDⓈ-M\n" +
-            "⏱ فاندینگ هر ۸ ساعت تسویه می‌شود • Long/Short فقط ۵ برتر (محدودیت API)\n" +
-            "🟢 فاندینگ منفی = شورت‌ها هزینه می‌دهند • 🔴 مثبت = لانگ‌ها هزینه می‌دهند • «spot» = جفت perpetual ندارد",
+            "🎯 سیگنال = شتاب ۲۴س ≥ ۵٪ + فاندینگ + نقدشوندگی • ورود/SL/TP با ریسک/پاداش ۲:۱\n" +
+            "⚠️ این سیگنال‌های ساده هستند — سیگنال‌های پیشرفته با موتور اسکنر در تب بعدی",
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             fontSize = 9.sp, color = FuturesGray, lineHeight = 15.sp
         )
@@ -187,120 +238,106 @@ fun FuturesDashboardScreen() {
             ) { CircularProgressIndicator(color = FuturesAccent) }
         } else if (errorMsg != null) {
             Text(errorMsg ?: "", color = FuturesAccent, modifier = Modifier.padding(24.dp))
-        } else if (rows.isEmpty()) {
-            Text("😴 داده‌ای نرسید — بعداً سر بزن", color = FuturesGray, modifier = Modifier.padding(24.dp))
+        } else if (signals.isEmpty()) {
+            Text(
+                "😴 هیچ سیگنالی فعال نیست — بازار در حالت عادی است. آرامش هم یک وضعیت بازار است.",
+                color = FuturesGray, modifier = Modifier.padding(24.dp), fontSize = 12.sp
+            )
         } else {
-            // ---------- خلاصهٔ بازار ----------
-            val posF = rows.count { (it.fundingPct ?: 0.0) >= 0.01 }
-            val negF = rows.count { (it.fundingPct ?: 0.0) <= -0.01 }
-            val avgChg = rows.map { it.changePct }.average()
-
-            Surface(
-                color = FuturesCardA,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("📊 خلاصه", fontSize = 9.sp, color = FuturesGray)
-                        Text("${rows.size} ارز", fontSize = 12.sp, fontWeight = FontWeight.Black, color = Color.White)
-                        Text("$perpCount با perp", fontSize = 8.sp, color = FuturesBlue)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🟢 فاندینگ منفی", fontSize = 8.sp, color = FuturesGray)
-                        Text("$negF", fontSize = 12.sp, fontWeight = FontWeight.Black, color = FuturesGreen)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🔴 فاندینگ مثبت", fontSize = 8.sp, color = FuturesGray)
-                        Text("$posF", fontSize = 12.sp, fontWeight = FontWeight.Black, color = FuturesAccent)
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("میانگین ۲۴س", fontSize = 8.sp, color = FuturesGray)
-                        Text(
-                            String.format(Locale.US, "%+.2f%%", avgChg),
-                            fontSize = 12.sp, fontWeight = FontWeight.Black,
-                            color = if (avgChg >= 0) FuturesGreen else FuturesAccent
-                        )
-                    }
-                }
-            }
-
+            Text(
+                statsText,
+                fontSize = 11.sp, color = FuturesGold, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
             Text(
                 "بروزرسانی: $lastUpdate",
                 fontSize = 9.sp, color = FuturesGray,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
             )
 
-            // ---------- هدر جدول ----------
-            Surface(color = FuturesCardB, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("#", fontSize = 9.sp, color = FuturesGray, modifier = Modifier.width(26.dp))
-                    Text("نماد", fontSize = 9.sp, color = FuturesGray, fontWeight = FontWeight.Bold, modifier = Modifier.width(64.dp))
-                    Text("قیمت", fontSize = 9.sp, color = FuturesGray, modifier = Modifier.weight(1f))
-                    Text("۲۴س", fontSize = 9.sp, color = FuturesGray, modifier = Modifier.width(56.dp))
-                    Text("فاندینگ", fontSize = 9.sp, color = FuturesGray, modifier = Modifier.width(64.dp))
-                    Text("حجم", fontSize = 9.sp, color = FuturesGray, modifier = Modifier.width(56.dp))
-                }
-            }
-
             LazyColumn(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                itemsIndexed(rows) { idx, r -> PerpRowCard(r, idx % 2 == 0) }
+                items(signals) { sig -> SignalCard(sig) }
             }
         }
     }
 }
 
 @Composable
-private fun PerpRowCard(r: PerpRow, isA: Boolean) {
-    val fundingColor = when {
-        r.fundingPct == null -> FuturesGray
-        r.fundingPct >= 0.01 -> FuturesAccent
-        r.fundingPct <= -0.01 -> FuturesGreen
-        else -> FuturesGray
-    }
+private fun SignalCard(sig: FutSignal) {
+    val dirColor = if (sig.direction == "LONG") FuturesGreen else FuturesAccent
+    val dirEmoji = if (sig.direction == "LONG") "🚀" else "🩸"
 
-    Surface(
-        color = if (isA) FuturesCardA else FuturesCardB,
-        shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("${r.rank}", fontSize = 10.sp, color = FuturesGray, modifier = Modifier.width(26.dp))
-            Column(modifier = Modifier.width(64.dp)) {
-                Text(r.base, fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
+    Surface(color = FuturesCard, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Row 1: نماد + جهت + امتیاز
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(dirEmoji, fontSize = 18.sp)
+                Spacer(Modifier.width(6.dp))
+                Text(sig.base, fontWeight = FontWeight.Black, fontSize = 16.sp, color = Color.White)
+                Text(" #${sig.rank}", fontSize = 10.sp, color = FuturesGray)
+                Spacer(Modifier.weight(1f))
                 Text(
-                    if (r.hasPerp) "PERP" else "spot",
-                    fontSize = 8.sp,
-                    color = if (r.hasPerp) FuturesBlue else FuturesGray
+                    "${sig.score}/100",
+                    fontSize = 14.sp, fontWeight = FontWeight.Black,
+                    color = if (sig.score >= 70) FuturesGreen else FuturesGold
                 )
             }
-            Text(fmtPrice(r.lastPrice), fontSize = 10.sp, color = Color.White, modifier = Modifier.weight(1f))
-            Text(
-                String.format(Locale.US, "%+.2f%%", r.changePct),
-                fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                color = if (r.changePct >= 0) FuturesGreen else FuturesAccent,
-                modifier = Modifier.width(56.dp)
-            )
-            Text(
-                if (r.fundingPct != null) String.format(Locale.US, "%+.4f%%", r.fundingPct) else "—",
-                fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                color = fundingColor,
-                modifier = Modifier.width(64.dp)
-            )
-            Text(fmtVol(r.volumeUsd), fontSize = 10.sp, color = FuturesGray, modifier = Modifier.width(56.dp))
+
+            // Row 2: جهت + شتاب
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = dirColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        "${sig.direction} ${sig.direction}",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        fontSize = 11.sp, fontWeight = FontWeight.Bold, color = dirColor
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "شتاب ۲۴س: ${String.format(Locale.US, "%+.1f%%", sig.change24h)}",
+                    fontSize = 10.sp, fontWeight = FontWeight.Bold, color = dirColor
+                )
+                Spacer(Modifier.weight(1f))
+                if (sig.fundingPct != null) {
+                    Text(
+                        "فاندینگ: ${String.format(Locale.US, "%+.4f%%", sig.fundingPct)}",
+                        fontSize = 9.sp, color = FuturesGray
+                    )
+                }
+            }
+
+            // Row 3: ورود / SL / TP
+            Surface(color = FuturesBlue.copy(alpha = 0.1f), shape = RoundedCornerShape(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("ورود", fontSize = 9.sp, color = FuturesGray)
+                        Text(fmtPrice(sig.entry), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("استاپ", fontSize = 9.sp, color = FuturesGray)
+                        Text(fmtPrice(sig.stopLoss), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FuturesAccent)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("تارگت", fontSize = 9.sp, color = FuturesGray)
+                        Text(fmtPrice(sig.target), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FuturesGreen)
+                    }
+                }
+            }
+
+            // Row 4: دلایل
+            Text(sig.reasons.joinToString(" • "), fontSize = 9.sp, color = FuturesGray, lineHeight = 14.sp)
+
+            // Row 5: حجم
+            Text("💧 حجم ۲۴س: ${fmtVol(sig.volumeUsd)}", fontSize = 9.sp, color = FuturesGray)
         }
     }
 }
