@@ -146,7 +146,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf("ALL") }
-    // 🚀 Sprint 10 (V3c): نقشهٔ کانترکت‌ها
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
 
     fun load() {
@@ -216,6 +215,12 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             modifier = Modifier.padding(horizontal = 16.dp),
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+        )
+
+        // 🚀 Sprint 15 (فاز ۴ / Commit 21): کارت کارنامهٔ دقت سیگنال‌ها
+        SignalAccuracyCard(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            accent = AGreen
         )
 
         Row(
@@ -297,7 +302,6 @@ private fun AlertSmartCard(
     val isPump = a.side == "PUMP"
     val sideColor = if (isPump) AGreen else ARed
     val c = a.coin
-    // 🚀 Sprint 10 (V3c): استخراج کانترکت از platformMap
     val contract = platformContractOf(platformMap, c.id)
 
     Surface(
@@ -316,7 +320,6 @@ private fun AlertSmartCard(
                 Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // 🚀 Sprint 10 (V3c): رنگ سفید برای خوانا بودن روی کارت تیره
                         Text(
                             c.symbol.uppercase(Locale.US),
                             fontWeight = FontWeight.Bold,
@@ -350,7 +353,6 @@ private fun AlertSmartCard(
                 }
             }
 
-            // 🚀 Sprint 10 (V3c): ردیف کانترکت زیر نام ارز
             ContractRow(ctx, contract)
 
             Row(
