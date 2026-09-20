@@ -28,14 +28,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.worker.SignalNavigator
 
+/**
+ * 🚀 Sprint 15 (فاز ۳ / Commit 20): ساختار نهایی فیوچرز = ۶ تب
+ *
+ * حذف: 📊 نمودار (CHART) — در Commit 18 نمودار داخل هر کارت سیگنال هست
+ * نگهداری: ۶ تب تمیز و هر کدام با ارزش مشخص
+ */
 enum class FuturesTab(val title: String, val emoji: String) {
-    DASHBOARD("سیگنال‌ها", "🎯"),   // 🚀 Commit 18: تابلوی سیگنال
+    DASHBOARD("سیگنال", "🎯"),
     SCANNER("اسکنر", "🔍"),
-    CHART("نمودار", "📊"),
     ALERTS("هشدار", "🔔"),
-    BACKTEST("بک‌تست", "🧪"),
     PAPER("Paper", "📝"),
-    JOURNAL("ژورنال", "📓")
+    JOURNAL("ژورنال", "📓"),
+    BACKTEST("بک‌تست", "🧪")
 }
 
 private val FuturesAccent = Color(0xFFFF5252)
@@ -49,7 +54,6 @@ fun FuturesWorkspace() {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(FuturesTab.DASHBOARD) }
 
-    // 🚀 Sprint 11 (C2b): کلیک روی نوتیفیکیشن → تب اسکنر
     LaunchedEffect(Unit) {
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
@@ -68,16 +72,14 @@ fun FuturesWorkspace() {
             when (selectedTab) {
                 FuturesTab.DASHBOARD -> FuturesDashboardScreen()
                 FuturesTab.SCANNER -> FuturesScannerScreen()
-                FuturesTab.CHART -> FuturesChartScreen()
                 FuturesTab.ALERTS -> FuturesAlertsScreen()
+                FuturesTab.PAPER -> FuturesPaperScreen()
+                FuturesTab.JOURNAL -> FuturesJournalScreen()
                 FuturesTab.BACKTEST -> FuturesPlaceholder(
                     emoji = "🧪",
                     title = "بک‌تست Futures",
                     description = "Leverage • Isolated margin • Liquidation • Funding • Fee • Slippage • Out-of-sample"
                 )
-                // 🚀 Sprint 15 (فاز ۳ / Commit 19): Paper و Journal واقعی
-                FuturesTab.PAPER -> FuturesPaperScreen()
-                FuturesTab.JOURNAL -> FuturesJournalScreen()
             }
         }
 
@@ -154,7 +156,7 @@ private fun FuturesPlaceholder(emoji: String, title: String, description: String
                 modifier = Modifier.padding(top = 8.dp)
             ) {
                 Text(
-                    "🚧 در Sprint بعدی پیاده‌سازی می‌شود",
+                    "🚧 در فاز بعدی پیاده‌سازی می‌شود",
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     fontSize = 11.sp,
                     color = FuturesAccentSoft
