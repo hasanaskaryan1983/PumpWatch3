@@ -1,6 +1,9 @@
 package com.pumpwatch.app.data
 
+import android.content.Context
 import com.google.gson.JsonElement
+import com.pumpwatch.app.store.SecureStorage
+import kotlinx.coroutines.delay
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -98,7 +101,8 @@ object Blockscout {
     }
 }
 
-// ---------- Solana RPC عمومی (دو سرور + فال‌بک خودکار) ----------
+// ---------- Solana RPC: سه لایهٔ هوشمند ----------
+// 🚀 Commit 26: RPC شخصی + چرخش خودکار + backoff روی 429
 interface SolanaRpcApi {
     @POST(".")
     suspend fun rpc(@Body body: Map<String, @JvmSuppressWildcards Any?>): SolanaRpcResponse
@@ -119,6 +123,7 @@ data class SolAmount(val uiAmountString: String?)
 data class SolanaRawResponse(val result: JsonElement?, val error: SolRpcError? = null)
 data class SolRpcError(val code: Int?, val message: String?)
 
+// 🚀 Commit 26: سه endpoint — شخصی (اختیاری)، عمومی ۱، عمومی ۲
 object SolanaRpc {
     val api: SolanaRpcApi by lazy {
         Retrofit.Builder()
@@ -137,18 +142,114 @@ object SolanaRpc2 {
     }
 }
 
-suspend fun solanaRaw(body: Map<String, @JvmSuppressWildcards Any?>, preferAlt: Boolean = false): SolanaRawResponse? {
-    val first = if (preferAlt) SolanaRpc2.api else SolanaRpc.api
-    val second = if (preferAlt) SolanaRpc.api else SolanaRpc2.api
-    val r1 = try { first.rpcRaw(body) } catch (_: Exception) { null }
-    if (r1 != null && r1.result != null) return r1
-    val r2 = try { second.rpcRaw(body) } catch (_: Exception) { null }
-    if (r2 != null && r2.result != null) return r2
-    return r2 ?: r1
+/**
+ * 🚀 Commit 26: کلاینت RPC با کلید شخصی.
+ * Helius رایگان = ۱۰۰ هزار درخواست/روز → ۴۲۹ عملاً صفر برای کاربر شخصی.
+ */
+private fun heliusClient(apiKey: String): SolanaRpcApi = Retrofit.Builder()
+    .baseUrl("https://mainnet.helius-rpc.com/?api-key=$apiKey")
+    .addConverterFactory(GsonConverterFactory.create())
+    .build().create(SolanaRpcApi::class.java)
+
+/**
+ * 🚀 Commit 26: ذخیره/خواندن کلید RPC شخصی (AES-GCM/Keystore)
+ */
+object RpcKeyStore {
+    private const val KEY = "solana_rpc_api_key"
+
+    fun get(ctx: Context): String? = try {
+        SecureStorage.read(ctx, KEY)?.takeIf { it.isNotBlank() }
+    } catch (_: Exception) { null }
+
+    fun set(ctx: Context, key: String) {
+        try { SecureStorage.write(ctx, KEY, key.trim()) } catch (_: Exception) { }
+    }
+
+    fun clear(ctx: Context) {
+        try { SecureStorage.write(ctx, KEY, "") } catch (_: Exception) { }
+    }
 }
 
-suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>): SolanaRpcResponse? {
-    val r1 = try { SolanaRpc.api.rpc(body) } catch (_: Exception) { null }
-    if (r1 != null && r1.result != null) return r1
-    return try { SolanaRpc2.api.rpc(body) } catch (_: Exception) { null }
+/**
+ * 🚀 Commit 26: چرخش هوشمند + backoff روی 429
+ *
+ * ترتیب تلاش:
+ *  ۱) کلید شخصی Helius (اگر ذخیره شده)
+ *  ۲) SolanaRpc عمومی (api.mainnet-beta.solana.com)
+ *  ۳) SolanaRpc2 عمومی (solana-rpc.publicnode.com)
+ *
+ * روی خطای 429 یا "Too many requests":
+ *  - تا ۳ بار تلاش مجدد با 2s/4s/8s تأخیر (exponential backoff)
+ *  - اگر همه endpointها 429 دادند → خطای قابل تشخیص (نه empty list)
+ */
+suspend fun solanaRaw(
+    body: Map<String, @JvmSuppressWildcards Any?>,
+    preferAlt: Boolean = false,
+    ctx: Context? = null
+): SolanaRawResponse? {
+    val personalKey = ctx?.let { RpcKeyStore.get(it) }
+
+    // ساخت لیست endpointها به ترتیب اولویت
+    val endpoints = mutableListOf<Pair<String, SolanaRpcApi>>()
+    if (!personalKey.isNullOrEmpty()) {
+        endpoints.add("helius" to heliusClient(personalKey))
+    }
+    endpoints.add("public1" to if (preferAlt) SolanaRpc2.api else SolanaRpc.api)
+    endpoints.add("public2" to if (preferAlt) SolanaRpc.api else SolanaRpc2.api)
+
+    var lastError: Exception? = null
+    for ((_, client) in endpoints) {
+        var waitMs = 2000L
+        for (attempt in 0 until 4) {
+            try {
+                val r = client.rpcRaw(body)
+                // پاسخ معتبر → برگشت
+                if (r.result != null) return r
+                // خطای RPC-level (مثلاً method not found) → رد کن به endpoint بعد
+                if (r.error != null) {
+                    val msg = r.error.message ?: ""
+                    if (msg.contains("429", true) || msg.contains("Too many requests", true)
+                        || msg.contains("rate", true)) {
+                        if (attempt < 3) { delay(waitMs); waitMs *= 2; continue }
+                        lastError = Exception("429: $msg")
+                    } else {
+                        lastError = Exception("RPC error: ${r.error.code} $msg")
+                    }
+                } else {
+                    // null result بدون error → رد کن به endpoint بعد
+                    lastError = Exception("null result")
+                }
+                break  // رفتن به endpoint بعد
+            } catch (e: Exception) {
+                val msg = e.message ?: ""
+                if (msg.contains("429") || msg.contains("Too many requests", true)) {
+                    if (attempt < 3) { delay(waitMs); waitMs *= 2; continue }
+                    lastError = Exception("429: $msg")
+                } else {
+                    lastError = e
+                }
+                break  // رفتن به endpoint بعد
+            }
+        }
+    }
+    // هیچ endpoint پاسخ معتبر نداد
+    return if (lastError != null) {
+        SolanaRawResponse(result = null, error = SolRpcError(code = 429, message = lastError.message ?: "no endpoint"))
+    } else null
+}
+
+suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>, ctx: Context? = null): SolanaRpcResponse? {
+    val personalKey = ctx?.let { RpcKeyStore.get(it) }
+    val endpoints = mutableListOf<SolanaRpcApi>()
+    if (!personalKey.isNullOrEmpty()) endpoints.add(heliusClient(personalKey))
+    endpoints.add(SolanaRpc.api)
+    endpoints.add(SolanaRpc2.api)
+
+    for (client in endpoints) {
+        try {
+            val r = client.rpc(body)
+            if (r.result != null) return r
+        } catch (_: Exception) { }
+    }
+    return null
 }
