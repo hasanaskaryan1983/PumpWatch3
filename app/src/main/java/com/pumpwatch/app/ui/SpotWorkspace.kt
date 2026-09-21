@@ -28,10 +28,11 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.worker.SignalNavigator
 
 /**
- * 🚀 Sprint 15 (فاز ۲ / Commit 14b):
+ * 🚀 Sprint 15 (فاز ۲ / Commit 14b + Commit 29):
  * - حذف تب برترین‌ها (TopPicksScreen)
  * - برگشت ادغام: نهنگ و میم دوباره جدا می‌شوند
- * - ناوبری: ۱۰ تب (۵+۵ تمیز)
+ * - ناوبری: ۹ تب (۵+۴ تمیز) — تب حریم به زیرتب کیف پول منتقل شد
+ * - Commit 29: حذف PRIVACY از SpotTab و انتقال به زیرتب 🔒 داخل WalletScreen
  *
  * واچ‌لیست نسخهٔ گروه‌بندی‌شده (۱۰ ردیف × ۵۰ ارز) = Commit 17
  */
@@ -44,7 +45,6 @@ enum class SpotTab(val title: String, val emoji: String) {
     MEME("میم", "🐸"),
     TRADES("معامله", "📈"),
     WALLETS("کیف پول", "👛"),
-    PRIVACY("حریم", "🔒"),
     WATCHLIST("واچ‌لیست", "⭐")
 }
 
@@ -77,7 +77,6 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 SpotTab.MEME -> MemeRadarScreen()
                 SpotTab.TRADES -> TradesScreen()
                 SpotTab.WALLETS -> WalletScreen()
-                SpotTab.PRIVACY -> PrivacyCenterScreen()
                 SpotTab.WATCHLIST -> WatchlistScreen()
             }
         }
