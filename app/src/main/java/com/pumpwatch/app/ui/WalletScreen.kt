@@ -93,7 +93,7 @@ private val CHAINS = listOf(
     ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
     ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
     ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
-    ChainCfg("avalanche", "Avalanche 🔺 🚫", "avalanche", null, "evm"),
+    ChainCfg("avalanche", "Avalanche 🔺 ", "avalanche", null, "evm"),
     ChainCfg("ton", "TON 🔵", "ton", null, "ton"),
     ChainCfg("sui", "SUI 💧", "sui", null, "sui"),
     ChainCfg("sei", "SEI 🌊 🚫", "sei", null, "evm"),
@@ -871,7 +871,7 @@ fun WalletScreen() {
         }
     }
 
-    // ================= هدر + ۴ تب =================
+    // ================= هدر + ۵ تب =================
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
         Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -879,6 +879,7 @@ fun WalletScreen() {
             FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
             FilterChip(selected = subTab == 2, onClick = { subTab = 2 }, label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
             FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
+            FilterChip(selected = subTab == 4, onClick = { subTab = 4 }, label = { Text("🔒 حریم", fontSize = 11.sp) })
         }
         if (infoText.isNotEmpty()) {
             Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
@@ -893,6 +894,7 @@ fun WalletScreen() {
     if (subTab == 1) FavoritesPage()
     if (subTab == 2) AlertsPage()
     if (subTab == 3) TrashPage()
+    if (subTab == 4) PrivacyCenterScreen()
 
     if (subTab == 0) Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
