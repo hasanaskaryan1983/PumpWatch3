@@ -172,7 +172,7 @@ suspend fun solanaRaw(
     }
 
     var lastError: Exception? = null
-    for ((_, client) in endpoints) {
+    for (client in endpoints) {  // 🚀 Commit 27-fix: بدون destructuring
         var waitMs = 2000L
         for (attempt in 0 until 4) {
             try {
@@ -214,7 +214,7 @@ suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>, ctx: Cont
     endpoints.add(SolanaRpc2.api)
     endpoints.add(SolanaRpc3.api)
 
-    for (client in endpoints) {
+    for (client in endpoints) {  // 🚀 Commit 27-fix: بدون destructuring
         try {
             val r = client.rpc(body)
             if (r.result != null) return r
