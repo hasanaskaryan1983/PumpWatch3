@@ -49,6 +49,7 @@ import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GtTrade
 import androidx.compose.material3.FilterChipDefaults
+import com.pumpwatch.app.data.RpcKeyStore
 import com.pumpwatch.app.data.SolanaRpc
 import com.pumpwatch.app.data.SuiClient
 import com.pumpwatch.app.data.TonClient
@@ -88,11 +89,11 @@ private val CHAINS = listOf(
     ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
     ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/", "evm"),
     ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/", "evm"),
-    ChainCfg("bsc", "BNB 🟡 ", "bsc", null, "evm"),
+    ChainCfg("bsc", "BNB 🟡 🚫", "bsc", null, "evm"),
     ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
     ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
     ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
-    ChainCfg("avalanche", "Avalanche 🔺 🚫", "avalanche", null, "evm"),
+    ChainCfg("avalanche", "Avalanche 🔺 ", "avalanche", null, "evm"),
     ChainCfg("ton", "TON 🔵", "ton", null, "ton"),
     ChainCfg("sui", "SUI 💧", "sui", null, "sui"),
     ChainCfg("sei", "SEI 🌊 🚫", "sei", null, "evm"),
@@ -1146,17 +1147,38 @@ fun WalletScreen() {
     }
 }
 
-// 🚀 Sprint 15 (Commit 23): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana، RPC مستقیم)
+// 🚀 Sprint 15 (Commit 24): تلاش مجدد با انتظار فزاینده وقتی RPC سهمیه‌اش پر می‌شود (429)
+private suspend fun <T> rpcBackoff(block: () -> T): T {
+    var wait = 2000L
+    for (attempt in 0 until 4) {
+        try {
+            return block()
+        } catch (e: Exception) {
+            val m = e.message ?: ""
+            if (m.contains("429") && attempt < 3) {
+                delay(wait)
+                wait *= 2
+            } else throw e
+        }
+    }
+    throw Exception("RPC بی‌پاسخ ماند")
+}
+
+// 🚀 Sprint 15 (Commit 23/24/26): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// Commit 26: کلید RPC شخصی + عبور ctx به solanaRaw برای چرخش هوشمند
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
     onInspect: (String) -> Unit,
     onStar: (String, String, Int, String) -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var symbol by remember { mutableStateOf("") }
     var fromText by remember { mutableStateOf("") }
     var toText by remember { mutableStateOf("") }
+    var rpcKey by remember { mutableStateOf("") }
+    var savedMsg by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
@@ -1164,9 +1186,12 @@ private fun ChainForensicsSection(
     var coverage by remember { mutableStateOf("") }
     var poolLabel by remember { mutableStateOf("") }
 
+    LaunchedEffect(Unit) { rpcKey = RpcKeyStore.get(context) ?: "" }
+
     fun run() {
         val sym = symbol.trim()
         if (sym.isEmpty()) { err = "❌ نماد ارز رو وارد کن"; return }
+        val appCtx = context
         scope.launch {
             loading = true; err = null; wallets = emptyList(); coverage = ""
             try {
@@ -1198,15 +1223,17 @@ private fun ChainForensicsSection(
                     val sigs = mutableListOf<Pair<String, Long>>()
                     var before: String? = null
                     var rpcDepthFrom = Long.MAX_VALUE
-                    for (page in 0 until 30) {
-                        progress = "📜 دریافت فهرست تراکنش‌ها: صفحه ${page + 1}..."
+                    for (page in 0 until 12) {
+                        progress = "📜 فهرست تراکنش‌ها: صفحه ${page + 1}/12 (آهسته و پایدار)..."
                         val opt = mutableMapOf<String, Any>("limit" to 1000)
                         if (before != null) opt["before"] = before!!
-                        val resp = solanaRaw(mapOf(
-                            "jsonrpc" to "2.0", "id" to 1,
-                            "method" to "getSignaturesForAddress",
-                            "params" to listOf(poolAddr, opt)
-                        ))
+                        val resp = rpcBackoff {
+                            solanaRaw(mapOf(
+                                "jsonrpc" to "2.0", "id" to 1,
+                                "method" to "getSignaturesForAddress",
+                                "params" to listOf(poolAddr, opt)
+                            ), ctx = appCtx)
+                        }
                         val arr = resp?.result?.asJsonArray ?: break
                         if (arr.size() == 0) break
                         var oldest = Long.MAX_VALUE
@@ -1220,29 +1247,30 @@ private fun ChainForensicsSection(
                         if (oldest < rpcDepthFrom) rpcDepthFrom = oldest
                         if (oldest == Long.MAX_VALUE || oldest < fromTs) break
                         before = arr.get(arr.size() - 1).asJsonObject.get("signature")?.asString ?: break
-                        delay(300)
+                        delay(600)
                     }
-                    if (sigs.isEmpty()) throw Exception("در این بازه تراکنشی روی حساب استخر نیست — سقف عمق RPC یا نوع استخر ناسازگار")
+                    if (sigs.isEmpty()) throw Exception("در این بازه تراکنشی روی حساب استخر نیست — بازه را کوتاه‌تر کن یا سهمیهٔ RPC پر است")
 
-                    val stride = maxOf(1, sigs.size / 300)
-                    val sample = sigs.filterIndexed { i, _ -> i % stride == 0 }.take(300)
+                    val stride = maxOf(1, sigs.size / 120)
+                    val sample = sigs.filterIndexed { i, _ -> i % stride == 0 }.take(120)
                     val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
 
                     class Agg { var usd = 0.0; var tok = 0.0; var first = Long.MAX_VALUE; var n = 0 }
                     val buys = mutableMapOf<String, Agg>()
                     val sells = mutableMapOf<String, Double>()
                     var parsed = 0
-                    sample.chunked(3).forEach { chunk ->
-                        progress = "🔬 تحلیل: ${parsed}/${sample.size}..."
+                    sample.chunked(2).forEach { chunk ->
+                        progress = "🔬 تحلیل: ${parsed}/${sample.size} (موازی ۲ — ضد ۴۲۹)..."
                         val parts = chunk.map { (sg, ts) ->
                             async(Dispatchers.IO) {
                                 try {
-                                    val tx = solanaRaw(mapOf(
-                                        "jsonrpc" to "2.0", "id" to 1,
-                                        "method" to "getParsedTransaction",
-                                        "params" to listOf(sg, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
-                                    ))
-                                    // 🚀 Commit 23-fix: اول JsonElement را به JsonObject تبدیل کن، بعد فیلد meta را بگیر
+                                    val tx = rpcBackoff {
+                                        solanaRaw(mapOf(
+                                            "jsonrpc" to "2.0", "id" to 1,
+                                            "method" to "getParsedTransaction",
+                                            "params" to listOf(sg, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
+                                        ), ctx = appCtx)
+                                    }
                                     val resultObj = tx?.result?.asJsonObject ?: return@async null
                                     val meta = resultObj.getAsJsonObject("meta") ?: return@async null
                                     fun bal(key: String): Map<String, Pair<String, Double>> {
@@ -1284,7 +1312,7 @@ private fun ChainForensicsSection(
                             }
                         }
                         parsed += chunk.size
-                        delay(300)
+                        delay(800)
                     }
 
                     val list = buys.map { (w, a) ->
@@ -1298,8 +1326,12 @@ private fun ChainForensicsSection(
                     wallets = list
                     coverage = "🕐 ${sample.size} از ${sigs.size} تراکنش بازه نمونه‌برداری شد • عمق RPC: از ${sdf.format(Date(rpcDepthFrom))} • آستانه نهنگ: ≥۱۰۰$ در هر تراکنش"
                 }
-                if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰$ نبود)"
-            } catch (t: Throwable) { err = "⚠️ خطا: ${t.message}" }
+                if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
+            } catch (t: Throwable) {
+                err = if ((t.message ?: "").contains("429"))
+                    "⚠️ سهمیهٔ RPC عمومی سولانا پر شد (429). این خرابی اپ نیست: سقف درخواست رایگان است. ۲-۳ دقیقه صبر کن و دوباره بزن، یا کلید رایگان Helius را پایین همین کارت ذخیره کن تا برای همیشه حل شود."
+                else "⚠️ خطا: ${t.message}"
+            }
             loading = false; progress = ""
         }
     }
@@ -1307,7 +1339,7 @@ private fun ChainForensicsSection(
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم، بدون واسطه API)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("فهرست تراکنش‌های حساب استخر را مستقیم از زنجیرهٔ سولانا در بازهٔ دلخواه تو می‌خواند و تا ۳۰ تراکنش را نمونه‌برداری می‌کند. پاسخ: کدام کیف‌ها در آن بازه تجمع کردند؟ (کار می‌کند حتی وقتی عمق ترید GeckoTerminal نمی‌رسد.)", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("تراکنش‌های حساب استخر را مستقیم از زنجیره در بازهٔ دلخواه تو می‌خواند (تا ۱۲ صفحه) و ۱۲۰ تراکنش را نمونه‌برداری می‌کند: کدام کیف‌ها تجمع کردند؟ کار می‌کند حتی وقتی عمق GeckoTerminal نمی‌رسد. ⏳ آهسته است و اگر 429 دیدی یعنی سهمیهٔ رایگان پر شده — صبر کن یا کلید بگذار.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -1328,6 +1360,28 @@ private fun ChainForensicsSection(
             if (progress.isNotEmpty()) Text(progress, fontSize = 10.sp, color = VBlue)
             if (coverage.isNotEmpty()) Text(coverage, fontSize = 9.sp, color = VGold, lineHeight = 14.sp)
             if (err != null) Text(err ?: "", fontSize = 10.sp, color = VGold)
+
+            Spacer(Modifier.height(8.dp))
+            Text("🔑 کلید RPC شخصی (اختیاری ولی توصیه‌شده):", fontSize = 10.sp, color = VGold, fontWeight = FontWeight.Bold)
+            TextField(value = rpcKey, onValueChange = { rpcKey = it },
+                placeholder = { Text("کلید Helius رایگان = helius.com/devs (۱۰۰k req/day)", fontSize = 9.sp) },
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(onClick = {
+                    RpcKeyStore.set(context, rpcKey)
+                    savedMsg = if (rpcKey.isBlank()) "✅ کلید حذف شد — از RPC عمومی استفاده می‌شود"
+                    else "✅ کلید ذخیره شد (AES-256-GCM/Keystore) — ۴۲۹ عملاً صفر"
+                }, colors = ButtonDefaults.buttonColors(containerColor = VGold),
+                    shape = RoundedCornerShape(6.dp)) { Text("💾 ذخیره", fontSize = 10.sp) }
+                if (rpcKey.isNotBlank()) {
+                    Button(onClick = {
+                        RpcKeyStore.clear(context); rpcKey = ""
+                        savedMsg = "✅ کلید حذف شد"
+                    }, colors = ButtonDefaults.buttonColors(containerColor = VCard),
+                        shape = RoundedCornerShape(6.dp)) { Text("🗑 پاک", fontSize = 10.sp) }
+                }
+            }
+            if (savedMsg.isNotEmpty()) Text(savedMsg, fontSize = 9.sp, color = VGreen, fontWeight = FontWeight.Bold)
         }
     }
 
