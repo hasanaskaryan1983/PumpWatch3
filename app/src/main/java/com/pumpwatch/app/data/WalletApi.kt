@@ -2,6 +2,7 @@ package com.pumpwatch.app.data
 
 import android.content.Context
 import com.google.gson.JsonElement
+import kotlinx.coroutines.delay
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -9,9 +10,8 @@ import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
-import kotlinx.coroutines.delay
 
-// ---------- GeckoTerminal ----------
+// ---------- GeckoTerminal: قیمت توکن + تریدهای استخر ----------
 interface GeckoPriceApi {
     @GET("networks/{network}/tokens/{address}")
     suspend fun tokenInfo(@Path("network") network: String, @Path("address") address: String): GtTokenInfo
@@ -38,7 +38,7 @@ object GeckoPrice {
     }
 }
 
-// ---------- Blockscout ----------
+// ---------- Blockscout: موجودی و تراکنش‌های EVM ----------
 interface BlockscoutApi {
     @GET("api")
     suspend fun tokenList(@Query("module") module: String, @Query("action") action: String, @Query("address") address: String): BsTokenList
@@ -47,9 +47,15 @@ interface BlockscoutApi {
 }
 
 data class BsTokenList(val status: String?, val result: List<BsToken>?)
-data class BsToken(val symbol: String?, val name: String?, val contractAddress: String?, val balance: String?, val decimals: String?)
+data class BsToken(
+    val symbol: String?, val name: String?, val contractAddress: String?, val balance: String?, val decimals: String?
+)
+
 data class BsTxList(val status: String?, val result: List<BsTx>?)
-data class BsTx(val timeStamp: String?, val tokenSymbol: String?, val value: String?, val from: String?, val to: String?, val contractAddress: String?, val tokenDecimal: String?)
+data class BsTx(
+    val timeStamp: String?, val tokenSymbol: String?, val value: String?, val from: String?,
+    val to: String?, val contractAddress: String?, val tokenDecimal: String?
+)
 
 object Blockscout {
     private val cache = mutableMapOf<String, BlockscoutApi>()
@@ -58,10 +64,11 @@ object Blockscout {
     }
 }
 
-// ---------- Solana RPC ----------
+// ---------- Solana RPC: کلید شخصی + سه endpoint عمومی ----------
 interface SolanaRpcApi {
     @POST(".")
     suspend fun rpc(@Body body: Map<String, @JvmSuppressWildcards Any?>): SolanaRpcResponse
+
     @POST(".")
     suspend fun rpcRaw(@Body body: Map<String, @JvmSuppressWildcards Any?>): SolanaRawResponse
 }
@@ -92,38 +99,77 @@ object SolanaRpc2 {
     }
 }
 
+// 🚀 Commit 27: endpoint عمومی سوم برای پخش بار وقتی کلید شخصی نیست
+object SolanaRpc3 {
+    val api: SolanaRpcApi by lazy {
+        Retrofit.Builder().baseUrl("https://solana.drpc.org/")
+            .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
+    }
+}
+
 private fun heliusClient(apiKey: String): SolanaRpcApi = Retrofit.Builder()
     .baseUrl("https://mainnet.helius-rpc.com/?api-key=$apiKey")
     .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
 
-// 🚀 Commit 26-fix: استفاده از SharedPreferences به جای SecureStorage برای رفع خطای کامپایل
+/**
+ * 🚀 Commit 27: کلید RPC شخصی + کش حافظه‌ای.
+ *
+ * چرا کش؟ چون موتورهای ۱/۵ و FavCenter و WalletHistory بدون ctx صدا می‌زنند؛
+ * با کش، به‌محض اینکه هر صفحه‌ای یک بار کلید را بخواند، همهٔ موتورها خودکار
+ * کلید را می‌بینند — بدون تغییر هیچ فایل دیگری.
+ */
 object RpcKeyStore {
     private const val PREFS = "pumpwatch_rpc_prefs"
     private const val KEY = "solana_rpc_api_key"
 
+    @Volatile
+    private var cached: String? = null
+
     fun get(ctx: Context): String? = try {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)?.takeIf { it.isNotBlank() }
-    } catch (_: Exception) { null }
+        val v = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY, null)?.takeIf { it.isNotBlank() }
+        cached = v
+        v
+    } catch (_: Exception) { cached }
+
+    /** برای صداهای بدون Context در لایهٔ data */
+    fun cachedKey(): String? = cached
 
     fun set(ctx: Context, key: String) {
-        try { ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, key.trim()).apply() } catch (_: Exception) { }
+        val trimmed = key.trim()
+        cached = trimmed.takeIf { it.isNotBlank() }
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, trimmed).apply()
+        } catch (_: Exception) { }
     }
 
     fun clear(ctx: Context) {
-        try { ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).apply() } catch (_: Exception) { }
+        cached = null
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).apply()
+        } catch (_: Exception) { }
     }
 }
 
+/**
+ * 🚀 Commit 26/27: چرخش هوشمند + backoff روی 429.
+ * ترتیب: کلید شخصی (اگر هست) → سه endpoint عمومی.
+ * اگر ctx نبود، از کش حافظه‌ای استفاده می‌کند → همهٔ موتورها پوشش می‌گیرند.
+ */
 suspend fun solanaRaw(
     body: Map<String, @JvmSuppressWildcards Any?>,
     preferAlt: Boolean = false,
     ctx: Context? = null
 ): SolanaRawResponse? {
-    val personalKey = ctx?.let { RpcKeyStore.get(it) }
-    val endpoints = mutableListOf<Pair<String, SolanaRpcApi>>()
-    if (!personalKey.isNullOrEmpty()) endpoints.add("helius" to heliusClient(personalKey))
-    endpoints.add("public1" to if (preferAlt) SolanaRpc2.api else SolanaRpc.api)
-    endpoints.add("public2" to if (preferAlt) SolanaRpc.api else SolanaRpc2.api)
+    val personalKey = ctx?.let { RpcKeyStore.get(it) } ?: RpcKeyStore.cachedKey()
+
+    val endpoints = mutableListOf<SolanaRpcApi>()
+    if (!personalKey.isNullOrEmpty()) endpoints.add(heliusClient(personalKey))
+    if (preferAlt) {
+        endpoints.add(SolanaRpc2.api); endpoints.add(SolanaRpc3.api); endpoints.add(SolanaRpc.api)
+    } else {
+        endpoints.add(SolanaRpc.api); endpoints.add(SolanaRpc2.api); endpoints.add(SolanaRpc3.api)
+    }
 
     var lastError: Exception? = null
     for ((_, client) in endpoints) {
@@ -160,11 +206,13 @@ suspend fun solanaRaw(
 }
 
 suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>, ctx: Context? = null): SolanaRpcResponse? {
-    val personalKey = ctx?.let { RpcKeyStore.get(it) }
+    val personalKey = ctx?.let { RpcKeyStore.get(it) } ?: RpcKeyStore.cachedKey()
+
     val endpoints = mutableListOf<SolanaRpcApi>()
     if (!personalKey.isNullOrEmpty()) endpoints.add(heliusClient(personalKey))
     endpoints.add(SolanaRpc.api)
     endpoints.add(SolanaRpc2.api)
+    endpoints.add(SolanaRpc3.api)
 
     for (client in endpoints) {
         try {
