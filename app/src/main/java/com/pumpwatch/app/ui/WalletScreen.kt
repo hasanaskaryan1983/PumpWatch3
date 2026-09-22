@@ -837,8 +837,8 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23/24/26/30/31/32/33/34): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
-// Commit 34: fallback نام‌محور همیشه فعال + اگر mint نبود مستقیم مسیر GT
+// 🚀 Sprint 15 (Commit 23..35): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// Commit 35: پاسخ خالی RPC = بلوک منطقه‌ای (نه «بازه خالی») → پروب + fallback قطعی به GT
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -876,7 +876,7 @@ private fun ChainForensicsSection(
                     try { if (fromText.trim().isNotEmpty()) fromTs = sdfIn.parse(fromText.trim())?.time ?: fromTs } catch (_: Exception) { }
                     try { if (toText.trim().isNotEmpty()) toTs = (sdfIn.parse(toText.trim())?.time ?: toTs) + 86400000L } catch (_: Exception) { }
 
-                    // ---------- Commit 33/34: یافتن استخر با تشخیص کامل ----------
+                    // ---------- یافتن استخر (Commit 33/34) ----------
                     val poolsResp = try {
                         GeckoTerminal.api.searchPools(sym)
                     } catch (_: Exception) {
@@ -891,7 +891,6 @@ private fun ChainForensicsSection(
                         ?: throw Exception("پاسخ GeckoTerminal برای «$sym» نامعتبر بود (data=null) — دوباره تلاش کن")
                     val withAttrs = poolsAll.filter { it.attributes != null }
                     var solanaPools = withAttrs.filter { it.relationships?.network?.data?.id == "solana" }
-                    // 🚀 Commit 34: fallback نام‌محور همیشه — وقتی فیلتر شبکه چیزی نیافت، از نام جفت («... / SOL») تشخیص بده
                     if (solanaPools.isEmpty()) {
                         solanaPools = withAttrs.filter {
                             val n = it.attributes?.name ?: ""
@@ -926,12 +925,27 @@ private fun ChainForensicsSection(
 
                     // ---------- مسیر ۱: RPC مستقیم زنجیره ----------
                     val sigs = mutableListOf<Pair<String, Long>>()
-                    // 🚀 Commit 34: بدون mint، فیلتر بالانس کار نمی‌کند → مستقیم برو روی مسیر GT
                     var rpcBlocked = mint.isEmpty()
                     var before: String? = null
                     var rpcDepthFrom = Long.MAX_VALUE
+
+                    // 🚀 Commit 35: پروب تک‌درخواستی — پاسخ خالی یعنی بلوک منطقه‌ای، نه بازهٔ خالی
+                    if (!rpcBlocked) {
+                        val probe = try {
+                            rpcBackoff {
+                                solanaRaw(mapOf(
+                                    "jsonrpc" to "2.0", "id" to 1,
+                                    "method" to "getSignaturesForAddress",
+                                    "params" to listOf(poolAddr, mapOf("limit" to 1))
+                                ), ctx = appCtx)
+                            }
+                        } catch (_: Exception) { null }
+                        if (probe == null || probe.result == null) rpcBlocked = true
+                    }
+
                     try {
                         for (page in 0 until 12) {
+                            if (rpcBlocked) break
                             progress = "📜 فهرست تراکنش‌ها: صفحه ${page + 1}/12 (آهسته و پایدار)..."
                             val opt = mutableMapOf<String, Any>("limit" to 1000)
                             if (before != null) opt["before"] = before!!
@@ -942,7 +956,9 @@ private fun ChainForensicsSection(
                                     "params" to listOf(poolAddr, opt)
                                 ), ctx = appCtx)
                             }
-                            val arr = resp?.result?.asJsonArray ?: break
+                            // 🚀 Commit 35: null = شکست خاموش RPC → علامت بلوک و خروج
+                            if (resp == null || resp.result == null) { rpcBlocked = true; break }
+                            val arr = resp.result.asJsonArray ?: break
                             if (arr.size() == 0) break
                             var oldest = Long.MAX_VALUE
                             for (el in arr) {
@@ -1040,9 +1056,9 @@ private fun ChainForensicsSection(
                         coverage = "⛓️ منبع: RPC مستقیم زنجیره • ${sample.size} از ${sigs.size} تراکنش نمونه‌برداری شد • عمق: از ${sdf.format(Date(rpcDepthFrom))} • آستانه: ≥۱۰۰$"
                         if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
                     } else {
-                        if (!rpcBlocked) throw Exception("در این بازه تراکنشی روی حساب استخر نیست — بازه را کوتاه‌تر کن")
+                        if (!rpcBlocked) throw Exception("در این بازه تراکنشی روی حساب استخر نیست (RPC سالم پاسخ داد) — بازه را کوتاه‌تر کن یا نماد را بررسی کن")
 
-                        // ---------- مسیر ۲: fallback به GeckoTerminal وقتی RPC بسته است یا mint نیست ----------
+                        // ---------- مسیر ۲: تریدهای GeckoTerminal ----------
                         progress = "🌍 تغییر خودکار به منبع تریدهای GeckoTerminal..."
                         val allTrades = mutableListOf<GtTrade>()
                         var cursor: Long? = null
@@ -1089,8 +1105,11 @@ private fun ChainForensicsSection(
                         }.sortedByDescending { it.boughtUsd }.take(10)
 
                         wallets = list
-                        coverage = "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما بسته است یا mint موجود نیست) • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
-                        if (wallets.isEmpty()) err = "😴 در این بازه کیفی با خرید ≥۱۰۰$ پیدا نشد (منبع GeckoTerminal)"
+                        coverage = "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما در دسترس نیست) • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
+                        if (wallets.isEmpty()) err = "😴 در این بازه کیفی با خرید ≥۱۰۰$ پیدا نشد (منبع GeckoTerminal)" +
+                            (if (gtDepthFrom < Long.MAX_VALUE && gtDepthFrom * 1000 > fromTs)
+                                " — عمق دادهٔ رایگان فقط تا ${sdf.format(Date(gtDepthFrom * 1000))} می‌رسد؛ بازه‌های قدیمی‌تر برای هیچ منبع رایگانی قابل دیدن نیستند (نیاز به backend/نود کامل)"
+                            else "")
                     }
                 }
             } catch (t: Throwable) {
@@ -1105,7 +1124,7 @@ private fun ChainForensicsSection(
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم + fallback منطقه‌ای)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("اول تراکنش‌ها را مستقیم از زنجیره می‌خواند؛ اگر RPC در منطقهٔ تو بسته باشد یا پاسخ GT اطلاعات شبکه نداشته باشد، از نام جفت («... / SOL») و تریدهای GeckoTerminal استفاده می‌کند. منبع و عمق داده همیشه در خط «پوشش» نوشته می‌شود.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("اول با یک پروب سریع بررسی می‌کند RPC از منطقهٔ تو در دسترس هست یا نه؛ اگر نبود، از نام جفت («... / SOL») و تریدهای GeckoTerminal استفاده می‌کند. منبع و «عمق واقعی داده» همیشه در خط پوشش نوشته می‌شود — دیگر هیچ خطای خاموشی وجود ندارد.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
