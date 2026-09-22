@@ -176,7 +176,7 @@ fun WalletScreen() {
 
     fun check() {
         val addr = address.trim().replace(Regex("[^A-Za-z0-9]"), "")
-        if (addr.isEmpty()) { error = "❌ آدرس کیف پول رو وارد کن"; return }
+        if (addr.isEmpty()) { error = "❌ آدرس کیف پول رو وارد کن؛ return }" }
         val cfg = chain
         scope.launch {
             loading = true; error = null; holdings = emptyList(); txs = emptyList()
@@ -808,9 +808,9 @@ fun WalletScreen() {
                     onCopy = { a ->
                         try {
                             (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", a))
-                                                    info = "📋 آدرس کپی شد"
-                                } catch (_: Exception) { }
-                            },
+                            info = "📋 آدرس کپی شد"
+                        } catch (_: Exception) { }
+                    },
                     onInspect = { a -> address = a; check() },
                     onStar = { a, s, sc, n -> saveStar(a, s, sc, n) }
                 )
@@ -838,8 +838,9 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23..37): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
-// Commit 37: پرکردن شکاف پوشش با GT + برچسب کف‌خر + خط جریان خرید/فروش
+// 🚀 Sprint 15 (Commit 23..38): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// Commit 38: صفحه‌بندی عمیق RPC (تا ۱۵۰ صفحه = ~۱۵۰٬۰۰ امضا) برای رسیدن به پنجرهٔ تجمع
+// + اصلاح timestamp صفر در مسیر GT + نمایش عمق و تعداد صفحه در پوشش
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -887,7 +888,7 @@ private fun ChainForensicsSection(
                     try { if (fromText.trim().isNotEmpty()) fromTs = sdfIn.parse(fromText.trim())?.time ?: fromTs } catch (_: Exception) { }
                     try { if (toText.trim().isNotEmpty()) toTs = (sdfIn.parse(toText.trim())?.time ?: toTs) + 86400000L } catch (_: Exception) { }
 
-                    // ---------- یافتن استخرهای نامزد (Commit 33/34/36) ----------
+                    // ---------- یافتن استخرهای نامزد ----------
                     val poolsResp = try {
                         GeckoTerminal.api.searchPools(sym)
                     } catch (_: Exception) {
@@ -933,6 +934,7 @@ private fun ChainForensicsSection(
                     var before: String? = null
                     var rpcDepthFrom = Long.MAX_VALUE
                     var newestSeen = 0L
+                    var pagesUsed = 0
 
                     if (!rpcBlocked) {
                         for (cand in candidates) {
@@ -961,7 +963,7 @@ private fun ChainForensicsSection(
                         }
                     }
 
-                    // ---------- مسیر ۱: RPC مستقیم ----------
+                    // ---------- مسیر ۱: RPC مستقیم با صفحه‌بندی عمیق (Commit 38) ----------
                     if (activeFound && !rpcBlocked) {
                         val rows = try { GeckoOhlcv.api.poolOhlcvHour("solana", poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
                         fun priceAt(ts: Long): Double {
@@ -970,13 +972,14 @@ private fun ChainForensicsSection(
                             val row = rows.minByOrNull { kotlin.math.abs(it[0].toLong() * 1000L - hourTs) } ?: return currentPrice
                             return row[4]
                         }
-                        // 🚀 Commit 37: کف بازه برای برچسب کف‌خر
                         val rowsIn = rows.filter { (it[0].toLong()) * 1000 in fromTs..toTs }
                         val periodLow = (if (rowsIn.size >= 3) rowsIn else rows).minOfOrNull { it[3] } ?: 0.0
 
                         try {
-                            for (page in 0 until 12) {
-                                progress = "📜 فهرست تراکنش‌ها: صفحه ${page + 1}/12 (آهسته و پایدار)..."
+                            // 🚀 Commit 38: سقف ۱۵۰ صفحه (هر صفحه ۱۰۰ امضا) → رسیدن به پنجرهٔ تجمع حتی در استخرهای پرحجم
+                            for (page in 0 until 150) {
+                                pagesUsed = page + 1
+                                progress = "📜 عقب‌رفتن تا شروع بازه: صفحه ${page + 1}/150 (هر صفحه ≈ ۱۰۰۰ امضا)..."
                                 val opt = mutableMapOf<String, Any>("limit" to 1000)
                                 if (before != null) opt["before"] = before!!
                                 val resp = rpcBackoff {
@@ -1019,7 +1022,7 @@ private fun ChainForensicsSection(
                             val sells = mutableMapOf<String, Double>()
                             var parsed = 0
                             sample.chunked(2).forEach { chunk ->
-                                progress = "🔬 تحلیل: ${parsed}/${sample.size} (موازی ۲ — ضد ۴۲۹)..."
+                                progress = "🔬 تحلیل کیف‌ها: ${parsed}/${sample.size} (موازی ۲ — ضد ۴۲)..."
                                 val parts = chunk.map { (sg, ts) ->
                                     async(Dispatchers.IO) {
                                         try {
@@ -1085,8 +1088,8 @@ private fun ChainForensicsSection(
 
                             wallets = list
                             flowLine = flowText(buys.values.sumOf { it.usd }, sells.values.sum())
-                            coverage = "⛓️ منبع: RPC مستقیم زنجیره • استخر: $poolLabel • ${sample.size} از ${sigs.size} تراکنش نمونه‌برداری شد • عمق: از ${sdf.format(Date(rpcDepthFrom))} • آستانه: ≥۱۰۰$"
-                            if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
+                            coverage = "⛓️ منبع: RPC مستقیم زنجیره • استخر: $poolLabel • ${sample.size} از ${sigs.size} تراکنش بازه نمونه‌برداری شد • عمق: از ${sdf.format(Date(rpcDepthFrom))} • صفحات: $pagesUsed • آستانه: ≥۱۰۰$"
+                            if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونهٔ بازه، خرید ≥۱۰۰$ نبود)"
                         }
                     }
 
@@ -1102,7 +1105,8 @@ private fun ChainForensicsSection(
                             val pg = try { GeckoPrice.api.poolTrades("solana", poolAddr, cursor)?.data } catch (_: Exception) { null } ?: break
                             if (pg.isEmpty()) break
                             allTrades.addAll(pg)
-                            val minTs = pg.mapNotNull { (num(it.attributes?.block_timestamp) ?: 0.0).toLong() }.minOrNull() ?: break
+                            // 🚀 Commit 38: نادیده‌گرفتن timestamp صفر/نامعتبر (باعث شکست زود و عمق غلط می‌شد)
+                            val minTs = pg.mapNotNull { val t = (num(it.attributes?.block_timestamp) ?: 0.0).toLong(); if (t > 0) t else null }.minOrNull() ?: break
                             if (minTs < gtDepthFrom) gtDepthFrom = minTs
                             if (minTs * 1000 <= fromTs) break
                             val next = minTs - 1
@@ -1144,7 +1148,7 @@ private fun ChainForensicsSection(
 
                         wallets = list
                         flowLine = flowText(buys.values.sumOf { it.usd }, sells.values.sum())
-                        coverage = (if (rpcBlocked) "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما بسته است)" else "🌍 منبع: تریدهای GeckoTerminal (عمق RPC به شروع بازه نمی‌رسید — استخر پرحجم)") +
+                        coverage = (if (rpcBlocked) "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما بسته است)" else "🌍 منبع: تریدهای GeckoTerminal (عمق RPC به شروع بازه نرسید)") +
                             " • استخر: $poolLabel • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
                         if (wallets.isEmpty()) err = "😴 در این بازه کیفی با خرید ≥۱۰۰$ پیدا نشد (منبع GeckoTerminal)" +
                             (if (gtDepthFrom < Long.MAX_VALUE && gtDepthFrom * 1000 > fromTs)
@@ -1152,7 +1156,7 @@ private fun ChainForensicsSection(
                             else "")
                     }
 
-                    // ---------- Commit 36: تشخیص دقیق پنجره وقتی هیچ‌چیز پیدا نشد ----------
+                    // ---------- تشخیص دقیق پنجره وقتی هیچ‌چیز پیدا نشد ----------
                     if (wallets.isEmpty() && !rpcBlocked && !coverageGap && err == null) {
                         val notes = windowNotes.joinToString(" | ")
                         val extra = when {
@@ -1176,7 +1180,7 @@ private fun ChainForensicsSection(
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم + fallback منطقه‌ای)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("استخر زندهٔ بازهٔ تو را پیدا می‌کند؛ اگر RPC بسته باشد یا عمقش نرسد، از تریدهای GeckoTerminal استفاده می‌کند. خط «جریان پنجره» می‌گوید نهنگ‌ها در این بازه خریدند یا فروختند؛ برچسب 🎯 یعنی کیف حوالی کفِ بازه خرید سنگین کرده. هر کیف: دکمهٔ بررسی کامل (موتور ۱/۵) و ❤️ برای پایش دائمی.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("استخر زندهٔ بازهٔ تو را پیدا می‌کند و تا ۱۵۰ صفحه (≈۱۵۰٬۰۰۰ امضا) عقب می‌رود تا به پنجرهٔ تجمع برسد — برای استخرهای پرحجم ممکن است ۲-۴ دقیقه طول بکشد. خط «جریان پنجره» می‌گوید نهنگ‌ها خریدند یا فروختند؛ برچسب 🎯 یعنی کیف حوالی کفِ بازه خرید سنگین کرده. هر کیف: «🔍 بررسی کامل» (موتور ۱/۵) و «❤️» برای پایش دائمی.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
