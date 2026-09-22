@@ -47,6 +47,7 @@ import com.pumpwatch.app.data.DexScreenerClient
 import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.GtTrade
 import androidx.compose.material3.FilterChipDefaults
 import com.pumpwatch.app.data.RpcKeyStore
 import com.pumpwatch.app.data.SolanaRpc
@@ -125,6 +126,12 @@ private data class SusWallet(
     val firstBuyText: String, val txCount: Int, val soldUsd: Double,
     val statusText: String, val multiplier: Double
 )
+
+private fun num(v: Any?): Double? = when (v) {
+    is Number -> v.toDouble()
+    is String -> v.toDoubleOrNull()
+    else -> null
+}
 
 private fun shortAddr(a: String): String = if (a.length > 12) "${a.take(6)}...${a.takeLast(4)}" else a
 
@@ -825,8 +832,8 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23/24/26/30): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
-// بدون کلید هم کار می‌کند: ۳ RPC عمومی + چرخش + backoff (مناسب مناطق تحریم)
+// 🚀 Sprint 15 (Commit 23/24/26/30/31): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// Commit 31: اگر RPC بسته شد (بلوک منطقه‌ای) → fallback خودکار به تریدهای GeckoTerminal
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -881,116 +888,179 @@ private fun ChainForensicsSection(
                         return row[4]
                     }
 
+                    class Agg { var usd = 0.0; var tok = 0.0; var first = Long.MAX_VALUE; var n = 0 }
+
+                    // ---------- مسیر ۱: RPC مستقیم زنجیره ----------
                     val sigs = mutableListOf<Pair<String, Long>>()
+                    var rpcBlocked = false
                     var before: String? = null
                     var rpcDepthFrom = Long.MAX_VALUE
-                    for (page in 0 until 12) {
-                        progress = "📜 فهرست تراکنش‌ها: صفحه ${page + 1}/12 (آهسته و پایدار)..."
-                        val opt = mutableMapOf<String, Any>("limit" to 1000)
-                        if (before != null) opt["before"] = before!!
-                        val resp = rpcBackoff {
-                            solanaRaw(mapOf(
-                                "jsonrpc" to "2.0", "id" to 1,
-                                "method" to "getSignaturesForAddress",
-                                "params" to listOf(poolAddr, opt)
-                            ), ctx = appCtx)
+                    try {
+                        for (page in 0 until 12) {
+                            progress = "📜 فهرست تراکنش‌ها: صفحه ${page + 1}/12 (آهسته و پایدار)..."
+                            val opt = mutableMapOf<String, Any>("limit" to 1000)
+                            if (before != null) opt["before"] = before!!
+                            val resp = rpcBackoff {
+                                solanaRaw(mapOf(
+                                    "jsonrpc" to "2.0", "id" to 1,
+                                    "method" to "getSignaturesForAddress",
+                                    "params" to listOf(poolAddr, opt)
+                                ), ctx = appCtx)
+                            }
+                            val arr = resp?.result?.asJsonArray ?: break
+                            if (arr.size() == 0) break
+                            var oldest = Long.MAX_VALUE
+                            for (el in arr) {
+                                val o = el.asJsonObject
+                                val ts = (o.get("blockTime")?.asLong ?: continue) * 1000L
+                                val sg = o.get("signature")?.asString ?: continue
+                                if (ts < oldest) oldest = ts
+                                if (ts in fromTs..toTs) sigs.add(sg to ts)
+                            }
+                            if (oldest < rpcDepthFrom) rpcDepthFrom = oldest
+                            if (oldest == Long.MAX_VALUE || oldest < fromTs) break
+                            before = arr.get(arr.size() - 1).asJsonObject.get("signature")?.asString ?: break
+                            delay(600)
                         }
-                        val arr = resp?.result?.asJsonArray ?: break
-                        if (arr.size() == 0) break
-                        var oldest = Long.MAX_VALUE
-                        for (el in arr) {
-                            val o = el.asJsonObject
-                            val ts = (o.get("blockTime")?.asLong ?: continue) * 1000L
-                            val sg = o.get("signature")?.asString ?: continue
-                            if (ts < oldest) oldest = ts
-                            if (ts in fromTs..toTs) sigs.add(sg to ts)
-                        }
-                        if (oldest < rpcDepthFrom) rpcDepthFrom = oldest
-                        if (oldest == Long.MAX_VALUE || oldest < fromTs) break
-                        before = arr.get(arr.size() - 1).asJsonObject.get("signature")?.asString ?: break
-                        delay(600)
+                    } catch (t: Throwable) {
+                        val m = t.message ?: ""
+                        if (m.contains("closed", true) || m.contains("refused", true) || m.contains("timeout", true) || m.contains("connect", true) || m.contains("429")) {
+                            rpcBlocked = true
+                        } else throw t
                     }
-                    if (sigs.isEmpty()) throw Exception("در این بازه تراکنشی روی حساب استخر نیست — بازه را کوتاه‌تر کن یا سهمیهٔ RPC پر است")
 
-                    val stride = maxOf(1, sigs.size / 120)
-                    val sample = sigs.filterIndexed { i, _ -> i % stride == 0 }.take(120)
-                    val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
+                    if (sigs.isNotEmpty()) {
+                        val stride = maxOf(1, sigs.size / 120)
+                        val sample = sigs.filterIndexed { i, _ -> i % stride == 0 }.take(120)
+                        val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
 
-                    class Agg { var usd = 0.0; var tok = 0.0; var first = Long.MAX_VALUE; var n = 0 }
-                    val buys = mutableMapOf<String, Agg>()
-                    val sells = mutableMapOf<String, Double>()
-                    var parsed = 0
-                    sample.chunked(2).forEach { chunk ->
-                        progress = "🔬 تحلیل: ${parsed}/${sample.size} (موازی ۲ — ضد ۴۲۹)..."
-                        val parts = chunk.map { (sg, ts) ->
-                            async(Dispatchers.IO) {
-                                try {
-                                    val tx = rpcBackoff {
-                                        solanaRaw(mapOf(
-                                            "jsonrpc" to "2.0", "id" to 1,
-                                            "method" to "getParsedTransaction",
-                                            "params" to listOf(sg, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
-                                        ), ctx = appCtx)
-                                    }
-                                    val resultObj = tx?.result?.asJsonObject ?: return@async null
-                                    val meta = resultObj.getAsJsonObject("meta") ?: return@async null
-                                    fun bal(key: String): Map<String, Pair<String, Double>> {
-                                        val out = mutableMapOf<String, Pair<String, Double>>()
-                                        val arrB = meta.getAsJsonArray(key) ?: return out
-                                        for (b in arrB) {
-                                            val o = b.asJsonObject
-                                            if (o.get("mint")?.asString != mint) continue
-                                            val owner = o.get("owner")?.asString ?: continue
-                                            val idx = o.get("accountIndex")?.asInt ?: -1
-                                            val amt = o.getAsJsonObject("uiTokenAmount")?.get("uiAmount")?.asDouble ?: 0.0
-                                            out["$idx|$owner"] = owner to amt
+                        val buys = mutableMapOf<String, Agg>()
+                        val sells = mutableMapOf<String, Double>()
+                        var parsed = 0
+                        sample.chunked(2).forEach { chunk ->
+                            progress = "🔬 تحلیل: ${parsed}/${sample.size} (موازی ۲ — ضد ۴۲۹)..."
+                            val parts = chunk.map { (sg, ts) ->
+                                async(Dispatchers.IO) {
+                                    try {
+                                        val tx = rpcBackoff {
+                                            solanaRaw(mapOf(
+                                                "jsonrpc" to "2.0", "id" to 1,
+                                                "method" to "getParsedTransaction",
+                                                "params" to listOf(sg, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
+                                            ), ctx = appCtx)
                                         }
-                                        return out
-                                    }
-                                    val pre = bal("preTokenBalances")
-                                    val post = bal("postTokenBalances")
+                                        val resultObj = tx?.result?.asJsonObject ?: return@async null
+                                        val meta = resultObj.getAsJsonObject("meta") ?: return@async null
+                                        fun bal(key: String): Map<String, Pair<String, Double>> {
+                                            val out = mutableMapOf<String, Pair<String, Double>>()
+                                            val arrB = meta.getAsJsonArray(key) ?: return out
+                                            for (b in arrB) {
+                                                val o = b.asJsonObject
+                                                if (o.get("mint")?.asString != mint) continue
+                                                val owner = o.get("owner")?.asString ?: continue
+                                                val idx = o.get("accountIndex")?.asInt ?: -1
+                                                val amt = o.getAsJsonObject("uiTokenAmount")?.get("uiAmount")?.asDouble ?: 0.0
+                                                out["$idx|$owner"] = owner to amt
+                                            }
+                                            return out
+                                        }
+                                        val pre = bal("preTokenBalances")
+                                        val post = bal("postTokenBalances")
+                                        val px = priceAt(ts)
+                                        val out = mutableListOf<Triple<String, Double, Long>>()
+                                        for ((k, pv) in post) {
+                                            val delta = pv.second - (pre[k]?.second ?: 0.0)
+                                            out.add(Triple(pv.first, delta * px, ts))
+                                        }
+                                        for ((k, pv) in pre) {
+                                            if (k !in post) out.add(Triple(pv.first, -pv.second * px, ts))
+                                        }
+                                        out
+                                    } catch (_: Exception) { null }
+                                }
+                            }.awaitAll().filterNotNull()
+                            for (list in parts) for ((owner, usd, ts) in list) {
+                                if (usd >= 100.0) {
+                                    val a = buys.getOrPut(owner) { Agg() }
                                     val px = priceAt(ts)
-                                    val out = mutableListOf<Triple<String, Double, Long>>()
-                                    for ((k, pv) in post) {
-                                        val delta = pv.second - (pre[k]?.second ?: 0.0)
-                                        out.add(Triple(pv.first, delta * px, ts))
-                                    }
-                                    for ((k, pv) in pre) {
-                                        if (k !in post) out.add(Triple(pv.first, -pv.second * px, ts))
-                                    }
-                                    out
-                                } catch (_: Exception) { null }
+                                    a.usd += usd; a.tok += if (px > 0) usd / px else 0.0; a.n++
+                                    if (ts < a.first) a.first = ts
+                                } else if (usd <= -100.0) {
+                                    sells[owner] = (sells[owner] ?: 0.0) + -usd
+                                }
                             }
-                        }.awaitAll().filterNotNull()
-                        for (list in parts) for ((owner, usd, ts) in list) {
-                            if (usd >= 100.0) {
-                                val a = buys.getOrPut(owner) { Agg() }
-                                val px = priceAt(ts)
-                                a.usd += usd; a.tok += if (px > 0) usd / px else 0.0; a.n++
-                                if (ts < a.first) a.first = ts
-                            } else if (usd <= -100.0) {
-                                sells[owner] = (sells[owner] ?: 0.0) + -usd
+                            parsed += chunk.size
+                            delay(800)
+                        }
+
+                        val list = buys.map { (w, a) ->
+                            val avg = if (a.tok > 0) a.usd / a.tok else 0.0
+                            val sold = sells[w] ?: 0.0
+                            SusWallet(w, a.usd, avg, if (a.first < Long.MAX_VALUE) sdf.format(Date(a.first)) else "—", a.n, sold,
+                                when { sold >= a.usd * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
+                                if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
+                        }.sortedByDescending { it.boughtUsd }.take(10)
+
+                        wallets = list
+                        coverage = "⛓️ منبع: RPC مستقیم زنجیره • ${sample.size} از ${sigs.size} تراکنش نمونه‌برداری شد • عمق: از ${sdf.format(Date(rpcDepthFrom))} • آستانه: ≥۱۰۰$"
+                        if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
+                    } else {
+                        if (!rpcBlocked) throw Exception("در این بازه تراکنشی روی حساب استخر نیست — بازه را کوتاه‌تر کن")
+
+                        // ---------- مسیر ۲ (Commit 31): fallback به GeckoTerminal وقتی RPC بسته است ----------
+                        progress = "🌍 RPC در منطقهٔ شما بسته است — تغییر خودکار به منبع GeckoTerminal..."
+                        val allTrades = mutableListOf<GtTrade>()
+                        var cursor: Long? = null
+                        var gtDepthFrom = Long.MAX_VALUE
+                        for (page in 0 until 40) {
+                            progress = "🌍 تریدهای GeckoTerminal: صفحه ${page + 1}/40..."
+                            val pg = try { GeckoPrice.api.poolTrades("solana", poolAddr, cursor)?.data } catch (_: Exception) { null } ?: break
+                            if (pg.isEmpty()) break
+                            allTrades.addAll(pg)
+                            val minTs = pg.mapNotNull { (num(it.attributes?.block_timestamp) ?: 0.0).toLong() }.minOrNull() ?: break
+                            if (minTs < gtDepthFrom) gtDepthFrom = minTs
+                            if (minTs * 1000 <= fromTs) break
+                            val next = minTs - 1
+                            if (next == cursor) break
+                            cursor = next
+                            delay(250)
+                        }
+                        val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
+                        val buys = mutableMapOf<String, Agg>()
+                        val sells = mutableMapOf<String, Double>()
+                        for (t in allTrades) {
+                            val a = t.attributes ?: continue
+                            val ts = (num(a.block_timestamp) ?: 0.0).toLong() * 1000
+                            if (ts < fromTs || ts > toTs) continue
+                            val wallet = a.tx_from_address ?: continue
+                            val vol = num(a.volume_in_usd) ?: continue
+                            val px = num(a.price_in_usd) ?: num(a.price) ?: continue
+                            if ((a.type ?: "").equals("buy", true)) {
+                                if (vol >= 100.0) {
+                                    val ag = buys.getOrPut(wallet) { Agg() }
+                                    ag.usd += vol; ag.tok += if (px > 0) vol / px else 0.0; ag.n++
+                                    if (ts < ag.first) ag.first = ts
+                                }
+                            } else {
+                                sells[wallet] = (sells[wallet] ?: 0.0) + vol
                             }
                         }
-                        parsed += chunk.size
-                        delay(800)
+                        val list = buys.map { (w, a) ->
+                            val avg = if (a.tok > 0) a.usd / a.tok else 0.0
+                            val sold = sells[w] ?: 0.0
+                            SusWallet(w, a.usd, avg, if (a.first < Long.MAX_VALUE) sdf.format(Date(a.first)) else "—", a.n, sold,
+                                when { sold >= a.usd * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
+                                if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
+                        }.sortedByDescending { it.boughtUsd }.take(10)
+
+                        wallets = list
+                        coverage = "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما بسته است) • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
+                        if (wallets.isEmpty()) err = "😴 در این بازه کیفی با خرید ≥۱۰۰$ پیدا نشد (منبع GeckoTerminal)"
                     }
-
-                    val list = buys.map { (w, a) ->
-                        val avg = if (a.tok > 0) a.usd / a.tok else 0.0
-                        val sold = sells[w] ?: 0.0
-                        SusWallet(w, a.usd, avg, if (a.first < Long.MAX_VALUE) sdf.format(Date(a.first)) else "—", a.n, sold,
-                            when { sold >= a.usd * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
-                            if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
-                    }.sortedByDescending { it.boughtUsd }.take(10)
-
-                    wallets = list
-                    coverage = "🕐 ${sample.size} از ${sigs.size} تراکنش بازه نمونه‌برداری شد • عمق RPC: از ${sdf.format(Date(rpcDepthFrom))} • آستانه نهنگ: ≥۱۰۰$ در هر تراکنش"
                 }
-                if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
             } catch (t: Throwable) {
                 err = if ((t.message ?: "").contains("429"))
-                    "⚠️ سهمیهٔ RPC عمومی پر شد (429). بدون کلید هم کار می‌کند: بازه را کوتاه‌تر کن (۳-۴ روز) و یکی‌دو دقیقه صبر کن. کلید شخصی فقط برای مناطق غیرتحریمی است."
+                    "⚠️ سهمیهٔ RPC عمومی پر شد (429). بازه را کوتاه‌تر کن و یکی‌دو دقیقه صبر کن."
                 else "⚠️ خطا: ${t.message}"
             }
             loading = false; progress = ""
@@ -999,8 +1069,8 @@ private fun ChainForensicsSection(
 
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم، بدون واسطه API)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("تراکنش‌های حساب استخر را مستقیم از زنجیره در بازهٔ دلخواه تو می‌خواند (تا ۱۲ صفحه) و ۱۲۰ تراکنش را نمونه‌برداری می‌کند: کدام کیف‌ها تجمع کردند؟ بدون کلید هم کار می‌کند (۳ RPC عمومی + چرخش). نکتهٔ مناطق تحریمی: بازهٔ کوتاه‌تر = موفقیت بیشتر.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم + fallback منطقه‌ای)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
+            Text("اول تراکنش‌ها را مستقیم از زنجیره می‌خواند؛ اگر RPC در منطقهٔ تو بسته باشد (connection closed)، خودکار به تریدهای GeckoTerminal سوئیچ می‌کند و نهنگ‌ها را از همان‌جا استخراج می‌کند. منبع همیشه در خط «پوشش» نوشته می‌شود.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -1031,7 +1101,7 @@ private fun ChainForensicsSection(
                 Button(onClick = {
                     RpcKeyStore.set(context, rpcKey)
                     savedMsg = if (rpcKey.isBlank()) "✅ کلید حذف شد — از RPC عمومی استفاده می‌شود"
-                    else "✅ کلید ذخیره شد — ۴۲۹ عملاً صفر"
+                    else "✅ کلید ذخیره شد — ۴۲ عملاً صفر"
                 }, colors = ButtonDefaults.buttonColors(containerColor = VGold),
                     shape = RoundedCornerShape(6.dp)) { Text("💾 ذخیره", fontSize = 10.sp) }
                 if (rpcKey.isNotBlank()) {
