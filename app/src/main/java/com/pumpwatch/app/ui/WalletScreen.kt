@@ -47,7 +47,6 @@ import com.pumpwatch.app.data.DexScreenerClient
 import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoPrice
 import com.pumpwatch.app.data.GeckoTerminal
-import com.pumpwatch.app.data.GtTrade
 import androidx.compose.material3.FilterChipDefaults
 import com.pumpwatch.app.data.RpcKeyStore
 import com.pumpwatch.app.data.SolanaRpc
@@ -126,28 +125,6 @@ private data class SusWallet(
     val firstBuyText: String, val txCount: Int, val soldUsd: Double,
     val statusText: String, val multiplier: Double
 )
-private data class HunterReport(
-    val poolName: String, val chainName: String, val bottomPrice: Double, val peakPrice: Double,
-    val currentPrice: Double, val pumpStartText: String, val risePct: Double,
-    val wallets: List<SusWallet>,
-    val coverageStartTs: Long = 0L
-)
-private data class InsiderSus(
-    val addr: String, val eventsCount: Int, val totalPreBuyUsd: Double,
-    val avgLeadMin: Long, val avgEntry: Double, val multiplier: Double,
-    val score: Int, val lastSeenText: String
-)
-private data class InsiderReport(
-    val poolName: String, val chainName: String, val eventsCount: Int,
-    val suspects: List<InsiderSus>,
-    val coverageStartTs: Long = 0L
-)
-
-private fun num(v: Any?): Double? = when (v) {
-    is Number -> v.toDouble()
-    is String -> v.toDoubleOrNull()
-    else -> null
-}
 
 private fun shortAddr(a: String): String = if (a.length > 12) "${a.take(6)}...${a.takeLast(4)}" else a
 
@@ -181,19 +158,6 @@ fun WalletScreen() {
     var error by remember { mutableStateOf<String?>(null) }
     var total by remember { mutableStateOf(0.0) }
     var info by remember { mutableStateOf("") }
-
-    var hunterSymbol by remember { mutableStateOf("") }
-    var huntFrom by remember { mutableStateOf("") }
-    var huntTo by remember { mutableStateOf("") }
-    var huntRange by remember { mutableStateOf("") }
-    var hunterLoading by remember { mutableStateOf(false) }
-    var hunterError by remember { mutableStateOf<String?>(null) }
-    var report by remember { mutableStateOf<HunterReport?>(null) }
-
-    var insiderSymbol by remember { mutableStateOf("") }
-    var insiderLoading by remember { mutableStateOf(false) }
-    var insiderError by remember { mutableStateOf<String?>(null) }
-    var iReport by remember { mutableStateOf<InsiderReport?>(null) }
 
     fun saveStar(addr: String, symbol: String, score: Int, note: String) {
         FavStore.load(context)
@@ -688,189 +652,6 @@ fun WalletScreen() {
         }
     }
 
-    fun hunt() {
-        val sym = hunterSymbol.trim()
-        if (sym.isEmpty()) { hunterError = "❌ نماد ارز رو وارد کن"; return }
-        scope.launch {
-            hunterLoading = true; hunterError = null; report = null
-            var fromTsOut = 0L
-            try {
-                val rep = withContext(Dispatchers.IO) {
-                    val sdfIn = SimpleDateFormat("yyyy/MM/dd", Locale.US)
-                    val now = System.currentTimeMillis()
-                    var fromTs = now - 7L * 86400000L
-                    var toTs = now
-                    var custom = false
-                    try { if (huntFrom.trim().isNotEmpty()) { fromTs = sdfIn.parse(huntFrom.trim())?.time ?: fromTs; custom = true } } catch (_: Exception) { }
-                    try { if (huntTo.trim().isNotEmpty()) { toTs = (sdfIn.parse(huntTo.trim())?.time ?: toTs) + 86400000L; custom = true } } catch (_: Exception) { }
-                    fromTsOut = fromTs
-                    huntRange = if (custom) "📅 بازه دلخواه: ${sdfIn.format(Date(fromTs))} تا ${sdfIn.format(Date(minOf(toTs, now)))}"
-                                else "📅 بازه پیش‌فرض: ۷ روز اخیر"
-
-                    val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
-                    val pool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
-                    val net = pool.relationships?.network?.data?.id ?: "solana"
-                    val chainName = CHAINS.firstOrNull { it.gt == net }?.label ?: net
-                    val poolAddr = pool.id?.substringAfter('_') ?: ""
-
-                    val rowsAll = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
-                    val rowsIn = rowsAll.filter { (it[0].toLong()) * 1000 in fromTs..toTs }
-                    val rows = if (rowsIn.size >= 10) rowsIn else rowsAll
-                    var bottomPrice = 0.0; var peakPrice = 0.0; var pumpTs = 0L
-                    if (rows.size >= 10) {
-                        val cut = rows.size * 2 / 3
-                        val bottomRow = rows.subList(0, cut).minByOrNull { it[4] }
-                        bottomPrice = bottomRow?.get(4) ?: 0.0
-                        pumpTs = (bottomRow?.get(0)?.toLong() ?: 0L) * 1000
-                        peakPrice = rows.maxOf { it[2] }
-                    }
-                    val currentPrice = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
-                    val risePct = if (bottomPrice > 0) (peakPrice - bottomPrice) / bottomPrice * 100 else 0.0
-
-                    val allTrades = mutableListOf<GtTrade>()
-                    var cursor: Long? = null
-                    var coverageStart = Long.MAX_VALUE
-                    for (page in 0 until 40) {
-                        val pg = try { GeckoPrice.api.poolTrades(net, poolAddr, cursor) } catch (_: Exception) { null }?.data ?: break
-                        if (pg.isEmpty()) break
-                        allTrades.addAll(pg)
-                        val minTs = pg.mapNotNull { a -> (num(a.attributes?.block_timestamp) ?: 0.0).toLong() }.minOrNull() ?: break
-                        coverageStart = minOf(coverageStart, minTs * 1000)
-                        if (minTs * 1000 <= fromTs) break
-                        val next = minTs - 1
-                        if (next == cursor) break
-                        cursor = next
-                        delay(250)
-                    }
-                    if (coverageStart == Long.MAX_VALUE) coverageStart = now
-
-                    val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
-
-                    val buyMap = mutableMapOf<String, MutableList<Triple<Double, Double, Long>>>()
-                    val sellMap = mutableMapOf<String, Double>()
-                    for (t in allTrades) {
-                        val a = t.attributes ?: continue
-                        val vol = num(a.volume_in_usd) ?: continue
-                        val px = num(a.price_in_usd) ?: num(a.price) ?: continue
-                        val ts = (num(a.block_timestamp) ?: 0.0).toLong() * 1000
-                        if (ts < fromTs || ts > toTs) continue
-                        val wallet = a.tx_from_address ?: continue
-                        if ((a.type ?: "").equals("buy", true)) {
-                            val isBottom = bottomPrice <= 0 || px <= bottomPrice * 1.3
-                            val isAccum = pumpTs > 0 && ts < pumpTs && px <= bottomPrice * 2.0
-                            if (isBottom || isAccum) buyMap.getOrPut(wallet) { mutableListOf() }.add(Triple(vol, px, ts))
-                        } else sellMap[wallet] = (sellMap[wallet] ?: 0.0) + vol
-                    }
-
-                    val suspects = buyMap.map { (wallet, list) ->
-                        val bought = list.sumOf { it.first }
-                        val avg = list.map { it.second }.average()
-                        val first = list.minOf { it.third }
-                        val sold = sellMap[wallet] ?: 0.0
-                        SusWallet(wallet, bought, avg, if (first > 0) sdf.format(Date(first)) else "—", list.size, sold,
-                            when { sold >= bought * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
-                            if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
-                    }.sortedByDescending { it.boughtUsd }.take(10)
-
-                    HunterReport(pool.attributes?.name ?: sym, chainName, bottomPrice, peakPrice, currentPrice,
-                        if (pumpTs > 0) sdf.format(Date(pumpTs)) else "—", risePct, suspects, coverageStart)
-                }
-                report = rep
-                if (rep.wallets.isEmpty()) {
-                    val sdfE = SimpleDateFormat("yyyy/MM/dd", Locale.US)
-                    hunterError = "😴 در این بازه کیف مشکوکی پیدا نشد" +
-                        if (rep.coverageStartTs > fromTsOut + 6 * 3600_000L)
-                            " — ⚠️ عمق ترید API رایگان فقط از ${sdfE.format(Date(rep.coverageStartTs))} به بعد است؛ تجمع قبل از آن اینجا نامرئی است (موتور ۶ = جنایت‌شناسی کامل زنجیره)"
-                        else ""
-                }
-            } catch (t: Throwable) { hunterError = "⚠️ خطا: ${t.message}" }
-            hunterLoading = false
-        }
-    }
-
-    fun huntInsider() {
-        val sym = insiderSymbol.trim()
-        if (sym.isEmpty()) { insiderError = "❌ نماد ارز رو وارد کن"; return }
-        scope.launch {
-            insiderLoading = true; insiderError = null; iReport = null
-            try {
-                val rep = withContext(Dispatchers.IO) {
-                    val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
-                    val pool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: throw Exception("استخری پیدا نشد")
-                    val net = pool.relationships?.network?.data?.id ?: "solana"
-                    val chainName = CHAINS.firstOrNull { it.gt == net }?.label ?: net
-                    val poolAddr = pool.id?.substringAfter('_') ?: ""
-
-                    val rows = try { GeckoOhlcv.api.poolOhlcvHour(net, poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
-
-                    val events = mutableListOf<Pair<Long, Double>>()
-                    for (i in 1 until rows.size) {
-                        val prev = rows[i - 1][4]
-                        val cur = rows[i][4]
-                        if (prev > 0) {
-                            val rise = (cur - prev) / prev * 100
-                            if (rise >= 8.0) events.add((rows[i][0].toLong()) * 1000 to rise)
-                        }
-                    }
-
-                    val earliest = events.minOfOrNull { it.first } ?: 0L
-                    val targetTs = if (earliest > 0) earliest - 3 * 3600_000L else 0L
-                    val trades = mutableListOf<GtTrade>()
-                    var cursor: Long? = null
-                    var coverageStart = Long.MAX_VALUE
-                    for (page in 0 until 40) {
-                        val pg = try { GeckoPrice.api.poolTrades(net, poolAddr, cursor) } catch (_: Exception) { null }?.data ?: break
-                        if (pg.isEmpty()) break
-                        trades.addAll(pg)
-                        val minTs = pg.mapNotNull { a -> (num(a.attributes?.block_timestamp) ?: 0.0).toLong() }.minOrNull() ?: break
-                        coverageStart = minOf(coverageStart, minTs * 1000)
-                        if (targetTs > 0 && minTs * 1000 <= targetTs) break
-                        val next = minTs - 1
-                        if (next == cursor) break
-                        cursor = next
-                        delay(250)
-                    }
-                    if (coverageStart == Long.MAX_VALUE) coverageStart = System.currentTimeMillis()
-
-                    val currentPrice = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
-                    val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
-
-                    class Acc { var events = mutableSetOf<Long>(); var vol = 0.0; var leads = mutableListOf<Long>(); var entries = mutableListOf<Double>(); var last = 0L }
-                    val per = mutableMapOf<String, Acc>()
-
-                    for ((evTs, _) in events) {
-                        for (t in trades) {
-                            val a = t.attributes ?: continue
-                            if (!(a.type ?: "").equals("buy", true)) continue
-                            val ts = (num(a.block_timestamp) ?: 0.0).toLong() * 1000
-                            if (ts < evTs - 3 * 3600 * 1000 || ts >= evTs) continue
-                            val wallet = a.tx_from_address ?: continue
-                            val vol = num(a.volume_in_usd) ?: continue
-                            val px = num(a.price_in_usd) ?: num(a.price) ?: continue
-                            val acc = per.getOrPut(wallet) { Acc() }
-                            acc.events.add(evTs); acc.vol += vol; acc.leads.add(evTs - ts); acc.entries.add(px); acc.last = maxOf(acc.last, ts)
-                        }
-                    }
-
-                    val suspects = per.map { (wallet, acc) ->
-                        val avgLead = acc.leads.average().toLong() / 60000
-                        val avgEntry = acc.entries.average()
-                        val leadBonus = if (avgLead in 30..180) 20 else if (avgLead < 30) 10 else 5
-                        val score = (acc.events.size * 30 + minOf(30, (acc.vol / 1000).toInt()) + leadBonus).coerceIn(0, 100)
-                        InsiderSus(wallet, acc.events.size, acc.vol, avgLead, avgEntry,
-                            if (avgEntry > 0 && currentPrice > 0) currentPrice / avgEntry else 0.0, score,
-                            if (acc.last > 0) sdf.format(Date(acc.last)) else "—")
-                    }.sortedByDescending { it.score }.take(10)
-
-                    InsiderReport(pool.attributes?.name ?: sym, chainName, events.size, suspects, coverageStart)
-                }
-                iReport = rep
-                if (rep.suspects.isEmpty()) insiderError = "😴 هیچ کیفی قبل از جهش‌ها خرید سنگین نکرده"
-            } catch (t: Throwable) { insiderError = "⚠️ خطا: ${t.message}" }
-            insiderLoading = false
-        }
-    }
-
     // ================= هدر + ۵ تب =================
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
@@ -911,7 +692,7 @@ fun WalletScreen() {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
-                    Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین خرید. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
+                    Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                 }
                 TextField(value = address, onValueChange = { address = it },
                     placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
@@ -955,7 +736,7 @@ fun WalletScreen() {
                             }
                             if (h.firstBuyTs != null) {
                                 Text(
-                                    "🕐 اولین خرید: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت خرید: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
+                                    "🕐 اولین مشاهده در داده موجود: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت تقریبی آن روز: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
                                     fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold
                                 )
                             }
@@ -1008,128 +789,6 @@ fun WalletScreen() {
             }
         }
 
-        // ================= موتور ۲ =================
-        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🕵️ موتور ۲: کی کف خرید قبل از پامپ؟ (شبکه خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VPurple, modifier = Modifier.weight(1f))
-                    Button(onClick = { infoText = "موتور ۲: نماد ارز + بازه تاریخ (پیش‌فرض ۷ روز) → کیف‌هایی که حوالی کف خرید سنگین کردن + سود/هودل. سوال: کی قبل از پامپ می‌دونست؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
-                }
-                TextField(value = hunterSymbol, onValueChange = { hunterSymbol = it },
-                    placeholder = { Text("نماد ارز پامپ‌شده...", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TextField(value = huntFrom, onValueChange = { huntFrom = it },
-                        placeholder = { Text("از تاریخ: 2025/08/01", fontSize = 10.sp) },
-                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
-                    TextField(value = huntTo, onValueChange = { huntTo = it },
-                        placeholder = { Text("تا تاریخ: 2025/08/20", fontSize = 10.sp) },
-                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
-                }
-                Text("بازه بررسی تریدها • خالی = ۷ روز اخیر • فرمت: yyyy/MM/dd • صفحات ترید خودکار تا ۴۰ صفحه به عقب ورق می‌خورن", fontSize = 8.sp, color = VGray)
-                if (huntRange.isNotEmpty()) Text(huntRange, fontSize = 9.sp, color = VGreen)
-                Button(onClick = { hunt() }, enabled = !hunterLoading,
-                    colors = ButtonDefaults.buttonColors(containerColor = VPurple),
-                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    if (hunterLoading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
-                    Text(" 🕵️ پیدا کن کیف‌های کف‌خر", fontSize = 12.sp)
-                }
-                if (hunterError != null) Text(hunterError ?: "", fontSize = 10.sp, color = VGold)
-            }
-        }
-
-        report?.let { r ->
-            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("🎯 ${r.poolName} • ${r.chainName}", fontWeight = FontWeight.Black, fontSize = 14.sp, color = VBlue)
-                    Text("کف: ${String.format(Locale.US, "$%.8f", r.bottomPrice)} • اوج: ${String.format(Locale.US, "$%.8f", r.peakPrice)} • الان: ${String.format(Locale.US, "$%.8f", r.currentPrice)}", fontSize = 10.sp, color = VGray)
-                    Text("🚀 رشد از کف: ${String.format(Locale.US, "%.0f%%", r.risePct)} • شروع: ${r.pumpStartText}", fontSize = 10.sp, color = VGreen, fontWeight = FontWeight.Bold)
-                    if (r.coverageStartTs > 0) Text("🕐 عمق ترید API رایگان: از ${SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US).format(Date(r.coverageStartTs))} به بعد — قبل از آن نامرئی است؛ برای تاریخچه کامل = موتور ۶", fontSize = 9.sp, color = VGold, lineHeight = 14.sp)
-                }
-            }
-            r.wallets.forEach { w ->
-                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🐋 ${shortAddr(w.addr)}", fontWeight = FontWeight.Black, fontSize = 13.sp, color = VGold)
-                            Spacer(Modifier.weight(1f))
-                            Text("${String.format(Locale.US, "%.1f", w.multiplier)}x", fontSize = 15.sp, fontWeight = FontWeight.Black, color = if (w.multiplier >= 2) VGreen else VGray)
-                        }
-                        Text("💵 خرید کف: ${String.format(Locale.US, "$%,.0f", w.boughtUsd)} • ورود: ${String.format(Locale.US, "$%.8f", w.avgEntry)}", fontSize = 10.sp, color = VGray)
-                        Text("🕐 اولین خرید: ${w.firstBuyText} • ${w.txCount} تراکنش", fontSize = 9.sp, color = VGray)
-                        Text(w.statusText, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            color = if (w.statusText.contains("هودل")) VGreen else if (w.statusText.contains("✅")) VGold else VRed)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(onClick = {
-                                try {
-                                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", w.addr))
-                                    info = "📋 آدرس کپی شد"
-                                } catch (_: Exception) { }
-                            }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("📋 کپی", fontSize = 9.sp) }
-                            Button(onClick = { address = w.addr; check() },
-                                colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
-                            Button(onClick = { saveStar(w.addr, r.poolName, (w.multiplier * 10).toInt(), "کف‌خر") },
-                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("❤️", fontSize = 9.sp) }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ================= موتور ۳ =================
-        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("📰 موتور : شکارچی اینسایدرهای خبری (الگوی ترامپ)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VOrange, modifier = Modifier.weight(1f))
-                    Button(onClick = { infoText = "موتور ۳: نماد ارز خبری → جهش‌های ≥۸٪ = لحظه خبر؛ کیف‌هایی که ۳۰دقیقه-۳ساعت قبلش خریدن = اینسایدر با امتیاز شک. سوال: کی با خبر معامله می‌کنه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
-                }
-                Text("جهش‌های ≥۸٪ = لحظه خبر • کیف‌هایی که ۳۰دقیقه تا ۳ساعت قبلش خریدن = مشکوک", fontSize = 9.sp, color = VGray)
-                TextField(value = insiderSymbol, onValueChange = { insiderSymbol = it },
-                    placeholder = { Text("نماد ارز خبرساز... (TRUMP, MAGA...)", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
-                Button(onClick = { huntInsider() }, enabled = !insiderLoading,
-                    colors = ButtonDefaults.buttonColors(containerColor = VOrange),
-                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    if (insiderLoading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
-                    Text(" 📰 پیدا کن اینسایدرها رو", fontSize = 12.sp)
-                }
-                if (insiderError != null) Text(insiderError ?: "", fontSize = 10.sp, color = VGold)
-            }
-        }
-
-        iReport?.let { r ->
-            Text("⚡ ${r.eventsCount} جهش خبری در ${r.chainName} — مظنون‌ها:" + if (r.coverageStartTs > 0) " (عمق ترید: از ${SimpleDateFormat("yyyy/MM/dd", Locale.US).format(Date(r.coverageStartTs))})" else "", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = VOrange)
-            r.suspects.forEach { w ->
-                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🕵️ ${shortAddr(w.addr)}", fontWeight = FontWeight.Black, fontSize = 13.sp, color = VOrange)
-                            Spacer(Modifier.weight(1f))
-                            Text("شک: ${w.score}/100", fontSize = 12.sp, fontWeight = FontWeight.Black, color = if (w.score >= 70) VRed else VGold)
-                        }
-                        Text("📰 قبل از ${w.eventsCount} جهش خبری خرید کرده!", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VRed)
-                        Text("💵 مجموع خرید قبل خبر: ${String.format(Locale.US, "$%,.0f", w.totalPreBuyUsd)} • میانگین فاصله: ${w.avgLeadMin} دقیقه قبل از جهش", fontSize = 9.sp, color = VGray)
-                        Text("ورود: ${String.format(Locale.US, "$%.8f", w.avgEntry)} • سود فعلی: ${String.format(Locale.US, "%.1f", w.multiplier)}x • آخرین: ${w.lastSeenText}", fontSize = 9.sp, color = VGray)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(onClick = {
-                                try {
-                                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", w.addr))
-                                    info = "📋 آدرس کپی شد"
-                                } catch (_: Exception) { }
-                            }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("📋 کپی", fontSize = 9.sp) }
-                            Button(onClick = { address = w.addr; check() },
-                                colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
-                            Button(onClick = { saveStar(w.addr, r.poolName, w.score, "اینسایدر خبری") },
-                                colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("❤️", fontSize = 9.sp) }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ================= موتور ۴: شکارچی تاریخی =================
-        HistoryHunterSection()
-
         // ================= موتور ۵: تاریخچه کیف =================
         WalletHistorySection()
 
@@ -1166,7 +825,8 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23/24/26): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// 🚀 Sprint 15 (Commit 23/24/26/30): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// بدون کلید هم کار می‌کند: ۳ RPC عمومی + چرخش + backoff (مناسب مناطق تحریم)
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -1330,7 +990,7 @@ private fun ChainForensicsSection(
                 if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
             } catch (t: Throwable) {
                 err = if ((t.message ?: "").contains("429"))
-                    "⚠️ سهمیهٔ RPC عمومی سولانا پر شد (429). این خرابی اپ نیست: سقف درخواست رایگان است. ۲-۳ دقیقه صبر کن و دوباره بزن، یا کلید رایگان Helius را پایین همین کارت ذخیره کن تا برای همیشه حل شود."
+                    "⚠️ سهمیهٔ RPC عمومی پر شد (429). بدون کلید هم کار می‌کند: بازه را کوتاه‌تر کن (۳-۴ روز) و یکی‌دو دقیقه صبر کن. کلید شخصی فقط برای مناطق غیرتحریمی است."
                 else "⚠️ خطا: ${t.message}"
             }
             loading = false; progress = ""
@@ -1340,7 +1000,7 @@ private fun ChainForensicsSection(
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم، بدون واسطه API)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("تراکنش‌های حساب استخر را مستقیم از زنجیره در بازهٔ دلخواه تو می‌خواند (تا ۱۲ صفحه) و ۱۲۰ تراکنش را نمونه‌برداری می‌کند: کدام کیف‌ها تجمع کردند؟ کار می‌کند حتی وقتی عمق GeckoTerminal نمی‌رسد. ⏳ آهسته است و اگر 429 دیدی یعنی سهمیهٔ رایگان پر شده — صبر کن یا کلید بگذار.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("تراکنش‌های حساب استخر را مستقیم از زنجیره در بازهٔ دلخواه تو می‌خواند (تا ۱۲ صفحه) و ۱۲۰ تراکنش را نمونه‌برداری می‌کند: کدام کیف‌ها تجمع کردند؟ بدون کلید هم کار می‌کند (۳ RPC عمومی + چرخش). نکتهٔ مناطق تحریمی: بازهٔ کوتاه‌تر = موفقیت بیشتر.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -1363,9 +1023,9 @@ private fun ChainForensicsSection(
             if (err != null) Text(err ?: "", fontSize = 10.sp, color = VGold)
 
             Spacer(Modifier.height(8.dp))
-            Text("🔑 کلید RPC شخصی (اختیاری ولی توصیه‌شده):", fontSize = 10.sp, color = VGold, fontWeight = FontWeight.Bold)
+            Text("🔑 کلید RPC شخصی (اختیاری — فقط برای کاربران مناطق غیرتحریمی):", fontSize = 10.sp, color = VGold, fontWeight = FontWeight.Bold)
             TextField(value = rpcKey, onValueChange = { rpcKey = it },
-                placeholder = { Text("کلید Helius رایگان = helius.com/devs (۱۰۰k req/day)", fontSize = 9.sp) },
+                placeholder = { Text("بدون کلید هم کار می‌کند — این فیلد اختیاری است", fontSize = 9.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Button(onClick = {
