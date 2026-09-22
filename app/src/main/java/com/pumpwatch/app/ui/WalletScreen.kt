@@ -125,7 +125,8 @@ private data class WalletTx(val dateText: String, val dateDay: String, val symbo
 private data class SusWallet(
     val addr: String, val boughtUsd: Double, val avgEntry: Double,
     val firstBuyText: String, val txCount: Int, val soldUsd: Double,
-    val statusText: String, val multiplier: Double
+    val statusText: String, val multiplier: Double,
+    val bottomTag: Boolean = false
 )
 
 private fun num(v: Any?): Double? = when (v) {
@@ -807,9 +808,9 @@ fun WalletScreen() {
                     onCopy = { a ->
                         try {
                             (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", a))
-                            info = "📋 آدرس کپی شد"
-                        } catch (_: Exception) { }
-                    },
+                                                    info = "📋 آدرس کپی شد"
+                                } catch (_: Exception) { }
+                            },
                     onInspect = { a -> address = a; check() },
                     onStar = { a, s, sc, n -> saveStar(a, s, sc, n) }
                 )
@@ -837,8 +838,8 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23..36): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
-// Commit 36: انتخاب استخر با پروب فعالیت واقعی + تشخیص دقیق پنجرهٔ زمانی
+// 🚀 Sprint 15 (Commit 23..37): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// Commit 37: پرکردن شکاف پوشش با GT + برچسب کف‌خر + خط جریان خرید/فروش
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -857,16 +858,26 @@ private fun ChainForensicsSection(
     var err by remember { mutableStateOf<String?>(null) }
     var wallets by remember { mutableStateOf<List<SusWallet>>(emptyList()) }
     var coverage by remember { mutableStateOf("") }
+    var flowLine by remember { mutableStateOf("") }
     var poolLabel by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { rpcKey = RpcKeyStore.get(context) ?: "" }
+
+    fun flowText(b: Double, s: Double): String {
+        val bias = when {
+            b > s * 1.3 -> "تجمع (خرید سنگین‌تر)"
+            s > b * 1.3 -> "توزیع (فروش سنگین‌تر)"
+            else -> "متعادل"
+        }
+        return "💹 جریان پنجره: خرید ${String.format(Locale.US, "$%,.0f", b)} در برابر فروش ${String.format(Locale.US, "$%,.0f", s)} → $bias"
+    }
 
     fun run() {
         val sym = symbol.trim()
         if (sym.isEmpty()) { err = "❌ نماد ارز رو وارد کن"; return }
         val appCtx = context
         scope.launch {
-            loading = true; err = null; wallets = emptyList(); coverage = ""
+            loading = true; err = null; wallets = emptyList(); coverage = ""; flowLine = ""
             try {
                 withContext(Dispatchers.IO) {
                     val sdfIn = SimpleDateFormat("yyyy/MM/dd", Locale.US)
@@ -876,7 +887,7 @@ private fun ChainForensicsSection(
                     try { if (fromText.trim().isNotEmpty()) fromTs = sdfIn.parse(fromText.trim())?.time ?: fromTs } catch (_: Exception) { }
                     try { if (toText.trim().isNotEmpty()) toTs = (sdfIn.parse(toText.trim())?.time ?: toTs) + 86400000L } catch (_: Exception) { }
 
-                    // ---------- یافتن استخرهای نامزد (Commit 33/34) ----------
+                    // ---------- یافتن استخرهای نامزد (Commit 33/34/36) ----------
                     val poolsResp = try {
                         GeckoTerminal.api.searchPools(sym)
                     } catch (_: Exception) {
@@ -907,7 +918,6 @@ private fun ChainForensicsSection(
                         )
                     }
 
-                    // ---------- Commit 36: پروب فعالیت برای انتخاب استخر زنده ----------
                     val candidates = solanaPools.sortedByDescending { it.attributes?.volume?.h24 ?: 0.0 }.take(5)
                     var poolAddr = candidates[0].id?.substringAfter('_') ?: ""
                     var mint = candidates[0].relationships?.base_token?.data?.id?.substringAfter('_') ?: ""
@@ -951,7 +961,7 @@ private fun ChainForensicsSection(
                         }
                     }
 
-                    // ---------- مسیر ۱: صفحه‌بندی تراکنش‌های استخر انتخاب‌شده ----------
+                    // ---------- مسیر ۱: RPC مستقیم ----------
                     if (activeFound && !rpcBlocked) {
                         val rows = try { GeckoOhlcv.api.poolOhlcvHour("solana", poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
                         fun priceAt(ts: Long): Double {
@@ -960,6 +970,9 @@ private fun ChainForensicsSection(
                             val row = rows.minByOrNull { kotlin.math.abs(it[0].toLong() * 1000L - hourTs) } ?: return currentPrice
                             return row[4]
                         }
+                        // 🚀 Commit 37: کف بازه برای برچسب کف‌خر
+                        val rowsIn = rows.filter { (it[0].toLong()) * 1000 in fromTs..toTs }
+                        val periodLow = (if (rowsIn.size >= 3) rowsIn else rows).minOfOrNull { it[3] } ?: 0.0
 
                         try {
                             for (page in 0 until 12) {
@@ -1066,17 +1079,20 @@ private fun ChainForensicsSection(
                                 val sold = sells[w] ?: 0.0
                                 SusWallet(w, a.usd, avg, if (a.first < Long.MAX_VALUE) sdf.format(Date(a.first)) else "—", a.n, sold,
                                     when { sold >= a.usd * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
-                                    if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
+                                    if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0,
+                                    bottomTag = periodLow > 0 && avg > 0 && avg <= periodLow * 1.3)
                             }.sortedByDescending { it.boughtUsd }.take(10)
 
                             wallets = list
+                            flowLine = flowText(buys.values.sumOf { it.usd }, sells.values.sum())
                             coverage = "⛓️ منبع: RPC مستقیم زنجیره • استخر: $poolLabel • ${sample.size} از ${sigs.size} تراکنش نمونه‌برداری شد • عمق: از ${sdf.format(Date(rpcDepthFrom))} • آستانه: ≥۱۰۰$"
                             if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
                         }
                     }
 
-                    // ---------- مسیر ۲: fallback به GeckoTerminal ----------
-                    if (wallets.isEmpty() && rpcBlocked) {
+                    // ---------- مسیر ۲: GeckoTerminal (بلوک منطقه‌ای یا شکاف پوشش) ----------
+                    val coverageGap = rpcDepthFrom > fromTs
+                    if (wallets.isEmpty() && (rpcBlocked || coverageGap)) {
                         progress = "🌍 تغییر خودکار به منبع تریدهای GeckoTerminal..."
                         val allTrades = mutableListOf<GtTrade>()
                         var cursor: Long? = null
@@ -1097,6 +1113,7 @@ private fun ChainForensicsSection(
                         val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
                         val buys = mutableMapOf<String, Agg>()
                         val sells = mutableMapOf<String, Double>()
+                        var minPx = Double.MAX_VALUE
                         for (t in allTrades) {
                             val a = t.attributes ?: continue
                             val ts = (num(a.block_timestamp) ?: 0.0).toLong() * 1000
@@ -1104,6 +1121,7 @@ private fun ChainForensicsSection(
                             val wallet = a.tx_from_address ?: continue
                             val vol = num(a.volume_in_usd) ?: continue
                             val px = num(a.price_in_usd) ?: num(a.price) ?: continue
+                            if (px < minPx) minPx = px
                             if ((a.type ?: "").equals("buy", true)) {
                                 if (vol >= 100.0) {
                                     val ag = buys.getOrPut(wallet) { Agg() }
@@ -1114,24 +1132,28 @@ private fun ChainForensicsSection(
                                 sells[wallet] = (sells[wallet] ?: 0.0) + vol
                             }
                         }
+                        val periodLowGt = if (minPx < Double.MAX_VALUE) minPx else 0.0
                         val list = buys.map { (w, a) ->
                             val avg = if (a.tok > 0) a.usd / a.tok else 0.0
                             val sold = sells[w] ?: 0.0
                             SusWallet(w, a.usd, avg, if (a.first < Long.MAX_VALUE) sdf.format(Date(a.first)) else "—", a.n, sold,
                                 when { sold >= a.usd * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
-                                if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
+                                if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0,
+                                bottomTag = periodLowGt > 0 && avg > 0 && avg <= periodLowGt * 1.3)
                         }.sortedByDescending { it.boughtUsd }.take(10)
 
                         wallets = list
-                        coverage = "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما در دسترس نیست) • استخر: $poolLabel • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
+                        flowLine = flowText(buys.values.sumOf { it.usd }, sells.values.sum())
+                        coverage = (if (rpcBlocked) "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما بسته است)" else "🌍 منبع: تریدهای GeckoTerminal (عمق RPC به شروع بازه نمی‌رسید — استخر پرحجم)") +
+                            " • استخر: $poolLabel • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
                         if (wallets.isEmpty()) err = "😴 در این بازه کیفی با خرید ≥۱۰۰$ پیدا نشد (منبع GeckoTerminal)" +
                             (if (gtDepthFrom < Long.MAX_VALUE && gtDepthFrom * 1000 > fromTs)
                                 " — عمق دادهٔ رایگان فقط تا ${sdf.format(Date(gtDepthFrom * 1000))} می‌رسد؛ بازه‌های قدیمی‌تر برای هیچ منبع رایگانی قابل دیدن نیستند (نیاز به backend/نود کامل)"
                             else "")
                     }
 
-                    // ---------- Commit 36: تشخیص دقیق پنجرهٔ زمانی وقتی هیچ‌چیز پیدا نشد ----------
-                    if (wallets.isEmpty() && !rpcBlocked && err == null) {
+                    // ---------- Commit 36: تشخیص دقیق پنجره وقتی هیچ‌چیز پیدا نشد ----------
+                    if (wallets.isEmpty() && !rpcBlocked && !coverageGap && err == null) {
                         val notes = windowNotes.joinToString(" | ")
                         val extra = when {
                             rpcDepthFrom < Long.MAX_VALUE && rpcDepthFrom > toTs -> " — فعالیت استخر از ${sdfIn.format(Date(rpcDepthFrom))} شروع می‌شود؛ بازهٔ تو قبل از آن است"
@@ -1154,7 +1176,7 @@ private fun ChainForensicsSection(
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم + fallback منطقه‌ای)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("بین استخرهای هم‌نام، آنی را انتخاب می‌کند که در بازهٔ تو واقعاً فعال بوده (پروب تک‌درخواستی). اگر RPC در منطقهٔ تو بسته باشد، به تریدهای GeckoTerminal می‌رود. اگر بازهٔ تو بیرون پنجرهٔ فعالیت استخر باشد، دقیقاً می‌گوید استخر از کی تا کی فعال بوده.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("استخر زندهٔ بازهٔ تو را پیدا می‌کند؛ اگر RPC بسته باشد یا عمقش نرسد، از تریدهای GeckoTerminal استفاده می‌کند. خط «جریان پنجره» می‌گوید نهنگ‌ها در این بازه خریدند یا فروختند؛ برچسب 🎯 یعنی کیف حوالی کفِ بازه خرید سنگین کرده. هر کیف: دکمهٔ بررسی کامل (موتور ۱/۵) و ❤️ برای پایش دائمی.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
@@ -1174,6 +1196,7 @@ private fun ChainForensicsSection(
             }
             if (progress.isNotEmpty()) Text(progress, fontSize = 10.sp, color = VBlue)
             if (coverage.isNotEmpty()) Text(coverage, fontSize = 9.sp, color = VGold, lineHeight = 14.sp)
+            if (flowLine.isNotEmpty()) Text(flowLine, fontSize = 10.sp, color = VBlue, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
             if (err != null) Text(err ?: "", fontSize = 10.sp, color = VGold)
 
             Spacer(Modifier.height(8.dp))
@@ -1214,10 +1237,11 @@ private fun ChainForensicsSection(
                     Text("🕐 اولین: ${w.firstBuyText} • ${w.txCount} تراکنش نهنگی • فروش: ${String.format(Locale.US, "$%,.0f", w.soldUsd)}", fontSize = 9.sp, color = VGray)
                     Text(w.statusText, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                         color = if (w.statusText.contains("هودل")) VGreen else if (w.statusText.contains("✅")) VGold else VRed)
+                    if (w.bottomTag) Text("🎯 کف‌خر سنگین: ورود حوالی کفِ بازه — کاندید کیف رانتی", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(onClick = { onCopy(w.addr) }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("📋 کپی", fontSize = 9.sp) }
                         Button(onClick = { onInspect(w.addr) }, colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
-                        Button(onClick = { onStar(w.addr, poolLabel, (w.multiplier * 10).toInt(), "نهنگ زنجیره") }, colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("❤️", fontSize = 9.sp) }
+                        Button(onClick = { onStar(w.addr, poolLabel, (w.multiplier * 10).toInt(), if (w.bottomTag) "کف‌خر 🎯" else "نهنگ زنجیره") }, colors = ButtonDefaults.buttonColors(containerColor = VGold), shape = RoundedCornerShape(6.dp)) { Text("❤️", fontSize = 9.sp) }
                     }
                 }
             }
