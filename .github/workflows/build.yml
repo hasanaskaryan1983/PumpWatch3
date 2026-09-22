@@ -4,6 +4,10 @@ on:
   push:
     branches: [ main ]
 
+# 🚀 Commit 32: توکن CI باید اجازهٔ ساخت/به‌روزرسانی Release داشته باشد
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -44,3 +48,16 @@ jobs:
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      # 🚀 Commit 32: انتشار APK در یک Release ثابت (برای دانلود آسان از موبایل)
+      # تگ latest-debug هر بار حذف و دوباره ساخته می‌شود تا لینک همیشه ثابت بماند
+      - name: Publish APK to GitHub Release (latest-debug)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-debug --yes --cleanup-tag || true
+          gh release create latest-debug \
+            app/build/outputs/apk/debug/app-debug.apk \
+            --title "Latest Debug APK (auto)" \
+            --notes "Auto-published from commit ${{ github.sha }} — run #${{ github.run_number }}" \
+            --target "${{ github.sha }}"
