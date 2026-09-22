@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -89,7 +90,7 @@ private val CHAINS = listOf(
     ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
     ChainCfg("eth", "Ethereum ⚪", "eth", "https://eth.blockscout.com/", "evm"),
     ChainCfg("base", "Base 🔵", "base", "https://base.blockscout.com/", "evm"),
-    ChainCfg("bsc", "BNB 🟡 🚫", "bsc", null, "evm"),
+    ChainCfg("bsc", "BNB 🟡 ", "bsc", null, "evm"),
     ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
     ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
     ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
@@ -659,159 +660,163 @@ fun WalletScreen() {
         }
     }
 
-    // ================= هدر + ۵ تب =================
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
-        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("⚙️ موتورها", fontSize = 11.sp) })
-            FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
-            FilterChip(selected = subTab == 2, onClick = { subTab = 2 }, label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
-            FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
-            FilterChip(selected = subTab == 4, onClick = { subTab = 4 }, label = { Text("🔒 حریم", fontSize = 11.sp) })
-        }
-        if (infoText.isNotEmpty()) {
-            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(infoText, fontSize = 10.sp, color = VGreen, modifier = Modifier.weight(1f))
-                    Button(onClick = { infoText = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("✖", fontSize = 10.sp) }
+    // 🚀 Commit 32: کل صفحه در یک Column واحد — جلوگیری از هم‌پوشانی داخل Box
+    Column(modifier = Modifier.fillMaxSize()) {
+        // ================= هدر + ۵ تب =================
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("⚙️ موتورها", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 2, onClick = { subTab = 2 }, label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 4, onClick = { subTab = 4 }, label = { Text("🔒 حریم", fontSize = 11.sp) })
+            }
+            if (infoText.isNotEmpty()) {
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(infoText, fontSize = 10.sp, color = VGreen, modifier = Modifier.weight(1f))
+                        Button(onClick = { infoText = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("✖", fontSize = 10.sp) }
+                    }
                 }
             }
         }
-    }
 
-    if (subTab == 1) FavoritesPage()
-    if (subTab == 2) AlertsPage()
-    if (subTab == 3) TrashPage()
-    if (subTab == 4) PrivacyCenterScreen()
-
-    if (subTab == 0) Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            CHAINS.forEach { c ->
-                FilterChip(selected = chain.key == c.key, onClick = { chain = c }, label = { Text(c.label, fontSize = 10.sp) })
-            }
-        }
-
-        // ================= موتور ۱ =================
-        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
-                    Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
-                }
-                TextField(value = address, onValueChange = { address = it },
-                    placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
-                Button(onClick = { check() }, enabled = !loading,
-                    colors = ButtonDefaults.buttonColors(containerColor = VBlue),
-                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    if (loading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
-                    Text(" بررسی کیف پول", fontSize = 12.sp)
-                }
-                if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = VGreen)
-            }
-        }
-
-        if (error != null) Text(error ?: "", fontSize = 10.sp, color = VRed)
-
-        if (holdings.isNotEmpty()) {
-            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text("💰 ارزش کل", fontSize = 10.sp, color = VGray)
-                    Text(String.format(Locale.US, "$%,.2f", total), fontSize = 20.sp, fontWeight = FontWeight.Black, color = VGreen)
-                }
-            }
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
+        when (subTab) {
+            1 -> Box(modifier = Modifier.weight(1f)) { FavoritesPage() }
+            2 -> Box(modifier = Modifier.weight(1f)) { AlertsPage() }
+            3 -> Box(modifier = Modifier.weight(1f)) { TrashPage() }
+            4 -> Box(modifier = Modifier.weight(1f)) { PrivacyCenterScreen() }
+            else -> Column(
+                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(holdings) { h ->
-                    Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    if (h.price != null && h.price > 0) {
-                                        Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
-                                    } else {
-                                        Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CHAINS.forEach { c ->
+                        FilterChip(selected = chain.key == c.key, onClick = { chain = c }, label = { Text(c.label, fontSize = 10.sp) })
+                    }
+                }
+
+                // ================= موتور ۱ =================
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                            Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
+                        }
+                        TextField(value = address, onValueChange = { address = it },
+                            placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                        Button(onClick = { check() }, enabled = !loading,
+                            colors = ButtonDefaults.buttonColors(containerColor = VBlue),
+                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            if (loading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                            Text(" بررسی کیف پول", fontSize = 12.sp)
+                        }
+                        if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = VGreen)
+                    }
+                }
+
+                if (error != null) Text(error ?: "", fontSize = 10.sp, color = VRed)
+
+                if (holdings.isNotEmpty()) {
+                    Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("💰 ارزش کل", fontSize = 10.sp, color = VGray)
+                            Text(String.format(Locale.US, "$%,.2f", total), fontSize = 20.sp, fontWeight = FontWeight.Black, color = VGreen)
+                        }
+                    }
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
+                    ) {
+                        items(holdings) { h ->
+                            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(h.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            if (h.price != null && h.price > 0) {
+                                                Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
+                                            } else {
+                                                Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
                                     }
-                                }
-                                Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
-                            }
-                            if (h.firstBuyTs != null) {
-                                Text(
-                                    "🕐 اولین مشاهده در داده موجود: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت تقریبی آن روز: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
-                                    fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold
-                                )
-                            }
-                            if (h.contract != null) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("کانترکت: ${h.contract}", fontSize = 8.sp, color = VGray, modifier = Modifier.weight(1f))
-                                    Button(onClick = {
-                                        try {
-                                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("contract", h.contract))
-                                            info = "📋 کانترکت کپی شد — توی CoinGecko پیست کن تا اشتباهی نخری"
-                                        } catch (_: Exception) { }
-                                    }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) {
-                                        Text("📋 کپی", fontSize = 9.sp)
+                                    if (h.firstBuyTs != null) {
+                                        Text(
+                                            "🕐 اولین مشاهده در داده موجود: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت تقریبی آن روز: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
+                                            fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    if (h.contract != null) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("کانترکت: ${h.contract}", fontSize = 8.sp, color = VGray, modifier = Modifier.weight(1f))
+                                            Button(onClick = {
+                                                try {
+                                                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("contract", h.contract))
+                                                    info = "📋 کانترکت کپی شد — توی CoinGecko پیست کن تا اشتباهی نخری"
+                                                } catch (_: Exception) { }
+                                            }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) {
+                                                Text("📋 کپی", fontSize = 9.sp)
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
-        }
 
-        if (txs.isNotEmpty()) {
-            Text("📜 تاریخچه معاملات:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)
-            ) {
-                items(txs) { t ->
-                    Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
-                            Spacer(Modifier.width(6.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("${if (t.incoming) "خرید/ورود" else "فروش/خروج"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                if (t.priceUsd != null && t.priceUsd!! > 0) {
-                                    Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
-                                    Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * t.priceUsd!!)}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
-                                } else {
-                                    Text("قیمت اون روز: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
-                                    Text("ارزش: ❓", fontSize = 10.sp, color = VGray)
+                if (txs.isNotEmpty()) {
+                    Text("📜 تاریخچه معاملات:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)
+                    ) {
+                        items(txs) { t ->
+                            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
+                                    Spacer(Modifier.width(6.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("${if (t.incoming) "خرید/ورود" else "فروش/خروج"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("تاریخ: ${t.dateText} • مقدار: ${String.format(Locale.US, "%.4f", t.amount)}", fontSize = 9.sp, color = VGray)
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        if (t.priceUsd != null && t.priceUsd!! > 0) {
+                                            Text("قیمت اون روز: ${String.format(Locale.US, "$%.6f", t.priceUsd)}", fontSize = 9.sp, color = VGold)
+                                            Text("ارزش: ${String.format(Locale.US, "$%.2f", t.amount * t.priceUsd!!)}", fontSize = 10.sp, color = if (t.incoming) VGreen else VRed)
+                                        } else {
+                                            Text("قیمت اون روز: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                                            Text("ارزش: ❓", fontSize = 10.sp, color = VGray)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+
+                // ================= موتور ۵: تاریخچه کیف =================
+                WalletHistorySection()
+
+                // ================= موتور ۶: جنایت‌شناسی کامل زنجیره =================
+                ChainForensicsSection(
+                    onCopy = { a ->
+                        try {
+                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", a))
+                            info = "📋 آدرس کپی شد"
+                        } catch (_: Exception) { }
+                    },
+                    onInspect = { a -> address = a; check() },
+                    onStar = { a, s, sc, n -> saveStar(a, s, sc, n) }
+                )
+
+                Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = VGold)
             }
         }
-
-        // ================= موتور ۵: تاریخچه کیف =================
-        WalletHistorySection()
-
-        // ================= موتور ۶: جنایت‌شناسی کامل زنجیره =================
-        ChainForensicsSection(
-            onCopy = { a ->
-                try {
-                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("addr", a))
-                    info = "📋 آدرس کپی شد"
-                } catch (_: Exception) { }
-            },
-            onInspect = { a -> address = a; check() },
-            onStar = { a, s, sc, n -> saveStar(a, s, sc, n) }
-        )
-
-        Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = VGold)
     }
 }
 
@@ -832,8 +837,8 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23/24/26/30/31): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
-// Commit 31: اگر RPC بسته شد (بلوک منطقه‌ای) → fallback خودکار به تریدهای GeckoTerminal
+// 🚀 Sprint 15 (Commit 23/24/26/30/31/32): موتور ۶
+// Commit 32: تفکیک «شکست اتصال GeckoTerminal» از «واقعاً استخر سولانا نیست» + یک retry
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -871,10 +876,22 @@ private fun ChainForensicsSection(
                     try { if (fromText.trim().isNotEmpty()) fromTs = sdfIn.parse(fromText.trim())?.time ?: fromTs } catch (_: Exception) { }
                     try { if (toText.trim().isNotEmpty()) toTs = (sdfIn.parse(toText.trim())?.time ?: toTs) + 86400000L } catch (_: Exception) { }
 
-                    val pools = GeckoTerminal.api.searchPools(sym).data?.filter { it.attributes != null } ?: emptyList()
+                    // 🚀 Commit 32: retry یک‌بار + پیام دقیق به‌جای «استخر پیدا نشد» مبهم
+                    val poolsResp = try {
+                        GeckoTerminal.api.searchPools(sym)
+                    } catch (_: Exception) {
+                        delay(1500)
+                        try {
+                            GeckoTerminal.api.searchPools(sym)
+                        } catch (t: Throwable) {
+                            throw Exception("اتصال به GeckoTerminal برقرار نشد (شبکه/Rate) — یک دقیقه صبر کن و دوباره بزن. علت: ${t.message}")
+                        }
+                    }
+                    val pools = poolsResp.data?.filter { it.attributes != null }
+                        ?: throw Exception("پاسخ GeckoTerminal برای «$sym» نامعتبر/خالی بود — دوباره تلاش کن")
                     val pool = pools.filter { it.relationships?.network?.data?.id == "solana" }
                         .maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 }
-                        ?: throw Exception("استخر Solana برای این ارز پیدا نشد")
+                        ?: throw Exception("استخر Solana برای این نماد پیدا نشد (ممکن است استخر فقط روی شبکهٔ دیگری باشد)")
                     val poolAddr = pool.id?.substringAfter('_') ?: ""
                     val mint = pool.relationships?.base_token?.data?.id?.substringAfter('_') ?: ""
                     val currentPrice = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
