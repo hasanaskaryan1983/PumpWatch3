@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -28,13 +29,9 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.worker.SignalNavigator
 
 /**
- * 🚀 Sprint 15 (فاز ۲ / Commit 14b + Commit 29):
- * - حذف تب برترین‌ها (TopPicksScreen)
- * - برگشت ادغام: نهنگ و میم دوباره جدا می‌شوند
- * - ناوبری: ۹ تب (۵+۴ تمیز) — تب حریم به زیرتب کیف پول منتقل شد
- * - Commit 29: حذف PRIVACY از SpotTab و انتقال به زیرتب 🔒 داخل WalletScreen
- *
- * واچ‌لیست نسخهٔ گروه‌بندی‌شده (۱۰ ردیف × ۵۰ ارز) = Commit 17
+ * 🚀 Sprint 15 (Commit 29 + 32):
+ * - ۹ تب (حریم به زیرتب کیف پول منتقل شد)
+ * - Commit 32: navigationBarsPadding → ناوبری پایین دیگر زیر دکمه‌های گوشی نمی‌رود
  */
 enum class SpotTab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
@@ -66,7 +63,8 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    // 🚀 Commit 32: padding برای نوار ناوبری سیستم (edge-to-edge)
+    Column(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
                 SpotTab.MARKET -> MarketScreen(onCoinClick = onCoinClick)
