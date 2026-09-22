@@ -701,7 +701,7 @@ fun WalletScreen() {
                 Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                            Text("🔍 موتور : بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
                             Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                         }
                         TextField(value = address, onValueChange = { address = it },
@@ -837,8 +837,8 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23..35): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
-// Commit 35: پاسخ خالی RPC = بلوک منطقه‌ای (نه «بازه خالی») → پروب + fallback قطعی به GT
+// 🚀 Sprint 15 (Commit 23..36): موتور ۶ — جنایت‌شناسی کامل زنجیره (Solana)
+// Commit 36: انتخاب استخر با پروب فعالیت واقعی + تشخیص دقیق پنجرهٔ زمانی
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -876,7 +876,7 @@ private fun ChainForensicsSection(
                     try { if (fromText.trim().isNotEmpty()) fromTs = sdfIn.parse(fromText.trim())?.time ?: fromTs } catch (_: Exception) { }
                     try { if (toText.trim().isNotEmpty()) toTs = (sdfIn.parse(toText.trim())?.time ?: toTs) + 86400000L } catch (_: Exception) { }
 
-                    // ---------- یافتن استخر (Commit 33/34) ----------
+                    // ---------- یافتن استخرهای نامزد (Commit 33/34) ----------
                     val poolsResp = try {
                         GeckoTerminal.api.searchPools(sym)
                     } catch (_: Exception) {
@@ -897,168 +897,186 @@ private fun ChainForensicsSection(
                             n.contains("/ SOL", true) || n.contains("/SOL", true)
                         }
                     }
-                    val pool = solanaPools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 }
-                        ?: run {
-                            val nets = withAttrs.mapNotNull { it.relationships?.network?.data?.id }.distinct().take(6).joinToString(", ")
-                            val names = withAttrs.take(3).mapNotNull { it.attributes?.name }.joinToString(" | ")
-                            throw Exception(
-                                "استخر Solana پیدا نشد. GeckoTerminal ${poolsAll.size} استخر برگرداند" +
-                                (if (nets.isNotEmpty()) " روی شبکه‌ها: [$nets]" else " (بدون اطلاعات شبکه در پاسخ!)") +
-                                (if (names.isNotEmpty()) " — نمونه: $names" else "") +
-                                " • اگر این پیام تکرار شد، اسکرین‌شاتش را بفرست تا ریشه را دقیق بزنیم."
-                            )
-                        }
-                    val poolAddr = pool.id?.substringAfter('_') ?: ""
-                    val mint = pool.relationships?.base_token?.data?.id?.substringAfter('_') ?: ""
-                    val currentPrice = pool.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
-                    poolLabel = pool.attributes?.name ?: sym
-
-                    val rows = try { GeckoOhlcv.api.poolOhlcvHour("solana", poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
-                    fun priceAt(ts: Long): Double {
-                        if (rows.isEmpty()) return currentPrice
-                        val hourTs = (ts / 3600000L) * 3600000L
-                        val row = rows.minByOrNull { kotlin.math.abs(it[0].toLong() * 1000L - hourTs) } ?: return currentPrice
-                        return row[4]
+                    if (solanaPools.isEmpty()) {
+                        val nets = withAttrs.mapNotNull { it.relationships?.network?.data?.id }.distinct().take(6).joinToString(", ")
+                        val names = withAttrs.take(3).mapNotNull { it.attributes?.name }.joinToString(" | ")
+                        throw Exception(
+                            "استخر Solana پیدا نشد. GeckoTerminal ${poolsAll.size} استخر برگرداند" +
+                            (if (nets.isNotEmpty()) " روی شبکه‌ها: [$nets]" else " (بدون اطلاعات شبکه در پاسخ!)") +
+                            (if (names.isNotEmpty()) " — نمونه: $names" else "")
+                        )
                     }
+
+                    // ---------- Commit 36: پروب فعالیت برای انتخاب استخر زنده ----------
+                    val candidates = solanaPools.sortedByDescending { it.attributes?.volume?.h24 ?: 0.0 }.take(5)
+                    var poolAddr = candidates[0].id?.substringAfter('_') ?: ""
+                    var mint = candidates[0].relationships?.base_token?.data?.id?.substringAfter('_') ?: ""
+                    var currentPrice = candidates[0].attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
+                    poolLabel = candidates[0].attributes?.name ?: sym
 
                     class Agg { var usd = 0.0; var tok = 0.0; var first = Long.MAX_VALUE; var n = 0 }
 
-                    // ---------- مسیر ۱: RPC مستقیم زنجیره ----------
                     val sigs = mutableListOf<Pair<String, Long>>()
                     var rpcBlocked = mint.isEmpty()
+                    var activeFound = false
+                    val windowNotes = mutableListOf<String>()
                     var before: String? = null
                     var rpcDepthFrom = Long.MAX_VALUE
+                    var newestSeen = 0L
 
-                    // 🚀 Commit 35: پروب تک‌درخواستی — پاسخ خالی یعنی بلوک منطقه‌ای، نه بازهٔ خالی
                     if (!rpcBlocked) {
-                        val probe = try {
-                            rpcBackoff {
-                                solanaRaw(mapOf(
-                                    "jsonrpc" to "2.0", "id" to 1,
-                                    "method" to "getSignaturesForAddress",
-                                    "params" to listOf(poolAddr, mapOf("limit" to 1))
-                                ), ctx = appCtx)
+                        for (cand in candidates) {
+                            val addr = cand.id?.substringAfter('_') ?: continue
+                            val probe = try {
+                                rpcBackoff {
+                                    solanaRaw(mapOf(
+                                        "jsonrpc" to "2.0", "id" to 1,
+                                        "method" to "getSignaturesForAddress",
+                                        "params" to listOf(addr, mapOf("limit" to 1))
+                                    ), ctx = appCtx)
+                                }
+                            } catch (_: Exception) { null }
+                            if (probe == null || probe.result == null) { rpcBlocked = true; break }
+                            val a0 = probe.result.asJsonArray
+                            val newest = if (a0.size() > 0) (a0.get(0).asJsonObject.get("blockTime")?.asLong ?: 0L) * 1000L else 0L
+                            windowNotes.add("«${cand.attributes?.name ?: addr.take(6)}»: آخرین فعالیت ${if (newest > 0) sdfIn.format(Date(newest)) else "بدون تراکنش"}")
+                            if (newest >= fromTs) {
+                                poolAddr = addr
+                                mint = cand.relationships?.base_token?.data?.id?.substringAfter('_') ?: ""
+                                currentPrice = cand.attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
+                                poolLabel = cand.attributes?.name ?: sym
+                                activeFound = true
+                                break
                             }
-                        } catch (_: Exception) { null }
-                        if (probe == null || probe.result == null) rpcBlocked = true
-                    }
-
-                    try {
-                        for (page in 0 until 12) {
-                            if (rpcBlocked) break
-                            progress = "📜 فهرست تراکنش‌ها: صفحه ${page + 1}/12 (آهسته و پایدار)..."
-                            val opt = mutableMapOf<String, Any>("limit" to 1000)
-                            if (before != null) opt["before"] = before!!
-                            val resp = rpcBackoff {
-                                solanaRaw(mapOf(
-                                    "jsonrpc" to "2.0", "id" to 1,
-                                    "method" to "getSignaturesForAddress",
-                                    "params" to listOf(poolAddr, opt)
-                                ), ctx = appCtx)
-                            }
-                            // 🚀 Commit 35: null = شکست خاموش RPC → علامت بلوک و خروج
-                            if (resp == null || resp.result == null) { rpcBlocked = true; break }
-                            val arr = resp.result.asJsonArray ?: break
-                            if (arr.size() == 0) break
-                            var oldest = Long.MAX_VALUE
-                            for (el in arr) {
-                                val o = el.asJsonObject
-                                val ts = (o.get("blockTime")?.asLong ?: continue) * 1000L
-                                val sg = o.get("signature")?.asString ?: continue
-                                if (ts < oldest) oldest = ts
-                                if (ts in fromTs..toTs) sigs.add(sg to ts)
-                            }
-                            if (oldest < rpcDepthFrom) rpcDepthFrom = oldest
-                            if (oldest == Long.MAX_VALUE || oldest < fromTs) break
-                            before = arr.get(arr.size() - 1).asJsonObject.get("signature")?.asString ?: break
-                            delay(600)
                         }
-                    } catch (t: Throwable) {
-                        val m = t.message ?: ""
-                        if (m.contains("closed", true) || m.contains("refused", true) || m.contains("timeout", true) || m.contains("connect", true) || m.contains("429")) {
-                            rpcBlocked = true
-                        } else throw t
                     }
 
-                    if (sigs.isNotEmpty()) {
-                        val stride = maxOf(1, sigs.size / 120)
-                        val sample = sigs.filterIndexed { i, _ -> i % stride == 0 }.take(120)
-                        val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
+                    // ---------- مسیر ۱: صفحه‌بندی تراکنش‌های استخر انتخاب‌شده ----------
+                    if (activeFound && !rpcBlocked) {
+                        val rows = try { GeckoOhlcv.api.poolOhlcvHour("solana", poolAddr).data?.attributes?.ohlcv_list ?: emptyList() } catch (_: Exception) { emptyList<List<Double>>() }
+                        fun priceAt(ts: Long): Double {
+                            if (rows.isEmpty()) return currentPrice
+                            val hourTs = (ts / 3600000L) * 3600000L
+                            val row = rows.minByOrNull { kotlin.math.abs(it[0].toLong() * 1000L - hourTs) } ?: return currentPrice
+                            return row[4]
+                        }
 
-                        val buys = mutableMapOf<String, Agg>()
-                        val sells = mutableMapOf<String, Double>()
-                        var parsed = 0
-                        sample.chunked(2).forEach { chunk ->
-                            progress = "🔬 تحلیل: ${parsed}/${sample.size} (موازی ۲ — ضد ۴۲۹)..."
-                            val parts = chunk.map { (sg, ts) ->
-                                async(Dispatchers.IO) {
-                                    try {
-                                        val tx = rpcBackoff {
-                                            solanaRaw(mapOf(
-                                                "jsonrpc" to "2.0", "id" to 1,
-                                                "method" to "getParsedTransaction",
-                                                "params" to listOf(sg, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
-                                            ), ctx = appCtx)
-                                        }
-                                        val resultObj = tx?.result?.asJsonObject ?: return@async null
-                                        val meta = resultObj.getAsJsonObject("meta") ?: return@async null
-                                        fun bal(key: String): Map<String, Pair<String, Double>> {
-                                            val out = mutableMapOf<String, Pair<String, Double>>()
-                                            val arrB = meta.getAsJsonArray(key) ?: return out
-                                            for (b in arrB) {
-                                                val o = b.asJsonObject
-                                                if (o.get("mint")?.asString != mint) continue
-                                                val owner = o.get("owner")?.asString ?: continue
-                                                val idx = o.get("accountIndex")?.asInt ?: -1
-                                                val amt = o.getAsJsonObject("uiTokenAmount")?.get("uiAmount")?.asDouble ?: 0.0
-                                                out["$idx|$owner"] = owner to amt
+                        try {
+                            for (page in 0 until 12) {
+                                progress = "📜 فهرست تراکنش‌ها: صفحه ${page + 1}/12 (آهسته و پایدار)..."
+                                val opt = mutableMapOf<String, Any>("limit" to 1000)
+                                if (before != null) opt["before"] = before!!
+                                val resp = rpcBackoff {
+                                    solanaRaw(mapOf(
+                                        "jsonrpc" to "2.0", "id" to 1,
+                                        "method" to "getSignaturesForAddress",
+                                        "params" to listOf(poolAddr, opt)
+                                    ), ctx = appCtx)
+                                }
+                                if (resp == null || resp.result == null) { rpcBlocked = true; break }
+                                val arr = resp.result.asJsonArray ?: break
+                                if (arr.size() == 0) break
+                                if (page == 0) newestSeen = (arr.get(0).asJsonObject.get("blockTime")?.asLong ?: 0L) * 1000L
+                                var oldest = Long.MAX_VALUE
+                                for (el in arr) {
+                                    val o = el.asJsonObject
+                                    val ts = (o.get("blockTime")?.asLong ?: continue) * 1000L
+                                    val sg = o.get("signature")?.asString ?: continue
+                                    if (ts < oldest) oldest = ts
+                                    if (ts in fromTs..toTs) sigs.add(sg to ts)
+                                }
+                                if (oldest < rpcDepthFrom) rpcDepthFrom = oldest
+                                if (oldest == Long.MAX_VALUE || oldest < fromTs) break
+                                before = arr.get(arr.size() - 1).asJsonObject.get("signature")?.asString ?: break
+                                delay(600)
+                            }
+                        } catch (t: Throwable) {
+                            val m = t.message ?: ""
+                            if (m.contains("closed", true) || m.contains("refused", true) || m.contains("timeout", true) || m.contains("connect", true) || m.contains("429")) {
+                                rpcBlocked = true
+                            } else throw t
+                        }
+
+                        if (sigs.isNotEmpty()) {
+                            val stride = maxOf(1, sigs.size / 120)
+                            val sample = sigs.filterIndexed { i, _ -> i % stride == 0 }.take(120)
+                            val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
+
+                            val buys = mutableMapOf<String, Agg>()
+                            val sells = mutableMapOf<String, Double>()
+                            var parsed = 0
+                            sample.chunked(2).forEach { chunk ->
+                                progress = "🔬 تحلیل: ${parsed}/${sample.size} (موازی ۲ — ضد ۴۲۹)..."
+                                val parts = chunk.map { (sg, ts) ->
+                                    async(Dispatchers.IO) {
+                                        try {
+                                            val tx = rpcBackoff {
+                                                solanaRaw(mapOf(
+                                                    "jsonrpc" to "2.0", "id" to 1,
+                                                    "method" to "getParsedTransaction",
+                                                    "params" to listOf(sg, mapOf("encoding" to "jsonParsed", "maxSupportedTransactionVersion" to 0))
+                                                ), ctx = appCtx)
                                             }
-                                            return out
-                                        }
-                                        val pre = bal("preTokenBalances")
-                                        val post = bal("postTokenBalances")
+                                            val resultObj = tx?.result?.asJsonObject ?: return@async null
+                                            val meta = resultObj.getAsJsonObject("meta") ?: return@async null
+                                            fun bal(key: String): Map<String, Pair<String, Double>> {
+                                                val out = mutableMapOf<String, Pair<String, Double>>()
+                                                val arrB = meta.getAsJsonArray(key) ?: return out
+                                                for (b in arrB) {
+                                                    val o = b.asJsonObject
+                                                    if (o.get("mint")?.asString != mint) continue
+                                                    val owner = o.get("owner")?.asString ?: continue
+                                                    val idx = o.get("accountIndex")?.asInt ?: -1
+                                                    val amt = o.getAsJsonObject("uiTokenAmount")?.get("uiAmount")?.asDouble ?: 0.0
+                                                    out["$idx|$owner"] = owner to amt
+                                                }
+                                                return out
+                                            }
+                                            val pre = bal("preTokenBalances")
+                                            val post = bal("postTokenBalances")
+                                            val px = priceAt(ts)
+                                            val out = mutableListOf<Triple<String, Double, Long>>()
+                                            for ((k, pv) in post) {
+                                                val delta = pv.second - (pre[k]?.second ?: 0.0)
+                                                out.add(Triple(pv.first, delta * px, ts))
+                                            }
+                                            for ((k, pv) in pre) {
+                                                if (k !in post) out.add(Triple(pv.first, -pv.second * px, ts))
+                                            }
+                                            out
+                                        } catch (_: Exception) { null }
+                                    }
+                                }.awaitAll().filterNotNull()
+                                for (list in parts) for ((owner, usd, ts) in list) {
+                                    if (usd >= 100.0) {
+                                        val a = buys.getOrPut(owner) { Agg() }
                                         val px = priceAt(ts)
-                                        val out = mutableListOf<Triple<String, Double, Long>>()
-                                        for ((k, pv) in post) {
-                                            val delta = pv.second - (pre[k]?.second ?: 0.0)
-                                            out.add(Triple(pv.first, delta * px, ts))
-                                        }
-                                        for ((k, pv) in pre) {
-                                            if (k !in post) out.add(Triple(pv.first, -pv.second * px, ts))
-                                        }
-                                        out
-                                    } catch (_: Exception) { null }
+                                        a.usd += usd; a.tok += if (px > 0) usd / px else 0.0; a.n++
+                                        if (ts < a.first) a.first = ts
+                                    } else if (usd <= -100.0) {
+                                        sells[owner] = (sells[owner] ?: 0.0) + -usd
+                                    }
                                 }
-                            }.awaitAll().filterNotNull()
-                            for (list in parts) for ((owner, usd, ts) in list) {
-                                if (usd >= 100.0) {
-                                    val a = buys.getOrPut(owner) { Agg() }
-                                    val px = priceAt(ts)
-                                    a.usd += usd; a.tok += if (px > 0) usd / px else 0.0; a.n++
-                                    if (ts < a.first) a.first = ts
-                                } else if (usd <= -100.0) {
-                                    sells[owner] = (sells[owner] ?: 0.0) + -usd
-                                }
+                                parsed += chunk.size
+                                delay(800)
                             }
-                            parsed += chunk.size
-                            delay(800)
+
+                            val list = buys.map { (w, a) ->
+                                val avg = if (a.tok > 0) a.usd / a.tok else 0.0
+                                val sold = sells[w] ?: 0.0
+                                SusWallet(w, a.usd, avg, if (a.first < Long.MAX_VALUE) sdf.format(Date(a.first)) else "—", a.n, sold,
+                                    when { sold >= a.usd * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
+                                    if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
+                            }.sortedByDescending { it.boughtUsd }.take(10)
+
+                            wallets = list
+                            coverage = "⛓️ منبع: RPC مستقیم زنجیره • استخر: $poolLabel • ${sample.size} از ${sigs.size} تراکنش نمونه‌برداری شد • عمق: از ${sdf.format(Date(rpcDepthFrom))} • آستانه: ≥۱۰۰$"
+                            if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
                         }
+                    }
 
-                        val list = buys.map { (w, a) ->
-                            val avg = if (a.tok > 0) a.usd / a.tok else 0.0
-                            val sold = sells[w] ?: 0.0
-                            SusWallet(w, a.usd, avg, if (a.first < Long.MAX_VALUE) sdf.format(Date(a.first)) else "—", a.n, sold,
-                                when { sold >= a.usd * 0.5 -> "✅ سود رو گرفته"; sold > 0 -> "⚠️ بخشی رو فروخته"; else -> "💎 هنوز هودل می‌کنه" },
-                                if (avg > 0 && currentPrice > 0) currentPrice / avg else 0.0)
-                        }.sortedByDescending { it.boughtUsd }.take(10)
-
-                        wallets = list
-                        coverage = "⛓️ منبع: RPC مستقیم زنجیره • ${sample.size} از ${sigs.size} تراکنش نمونه‌برداری شد • عمق: از ${sdf.format(Date(rpcDepthFrom))} • آستانه: ≥۱۰۰$"
-                        if (wallets.isEmpty()) err = "😴 کیف نهنگی پیدا نشد (در تراکنش‌های نمونه، خرید ≥۱۰۰$ نبود)"
-                    } else {
-                        if (!rpcBlocked) throw Exception("در این بازه تراکنشی روی حساب استخر نیست (RPC سالم پاسخ داد) — بازه را کوتاه‌تر کن یا نماد را بررسی کن")
-
-                        // ---------- مسیر ۲: تریدهای GeckoTerminal ----------
+                    // ---------- مسیر ۲: fallback به GeckoTerminal ----------
+                    if (wallets.isEmpty() && rpcBlocked) {
                         progress = "🌍 تغییر خودکار به منبع تریدهای GeckoTerminal..."
                         val allTrades = mutableListOf<GtTrade>()
                         var cursor: Long? = null
@@ -1105,11 +1123,23 @@ private fun ChainForensicsSection(
                         }.sortedByDescending { it.boughtUsd }.take(10)
 
                         wallets = list
-                        coverage = "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما در دسترس نیست) • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
+                        coverage = "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما در دسترس نیست) • استخر: $poolLabel • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom * 1000)) else "—"} • آستانه: ≥۱۰۰$"
                         if (wallets.isEmpty()) err = "😴 در این بازه کیفی با خرید ≥۱۰۰$ پیدا نشد (منبع GeckoTerminal)" +
                             (if (gtDepthFrom < Long.MAX_VALUE && gtDepthFrom * 1000 > fromTs)
                                 " — عمق دادهٔ رایگان فقط تا ${sdf.format(Date(gtDepthFrom * 1000))} می‌رسد؛ بازه‌های قدیمی‌تر برای هیچ منبع رایگانی قابل دیدن نیستند (نیاز به backend/نود کامل)"
                             else "")
+                    }
+
+                    // ---------- Commit 36: تشخیص دقیق پنجرهٔ زمانی وقتی هیچ‌چیز پیدا نشد ----------
+                    if (wallets.isEmpty() && !rpcBlocked && err == null) {
+                        val notes = windowNotes.joinToString(" | ")
+                        val extra = when {
+                            rpcDepthFrom < Long.MAX_VALUE && rpcDepthFrom > toTs -> " — فعالیت استخر از ${sdfIn.format(Date(rpcDepthFrom))} شروع می‌شود؛ بازهٔ تو قبل از آن است"
+                            newestSeen > 0 && newestSeen < fromTs -> " — آخرین فعالیت استخر ${sdfIn.format(Date(newestSeen))} بوده؛ بازهٔ تو بعد از آن است"
+                            !activeFound -> " — به‌نظر می‌رسد بازهٔ تو قبل از ساخت/فعالیت همهٔ استخرهای این نماد است"
+                            else -> ""
+                        }
+                        err = "😴 در این بازه تراکنشی روی هیچ استخر نامزدی نیست. پنجرهٔ فعالیت استخرها: $notes$extra"
                     }
                 }
             } catch (t: Throwable) {
@@ -1124,7 +1154,7 @@ private fun ChainForensicsSection(
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم + fallback منطقه‌ای)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-            Text("اول با یک پروب سریع بررسی می‌کند RPC از منطقهٔ تو در دسترس هست یا نه؛ اگر نبود، از نام جفت («... / SOL») و تریدهای GeckoTerminal استفاده می‌کند. منبع و «عمق واقعی داده» همیشه در خط پوشش نوشته می‌شود — دیگر هیچ خطای خاموشی وجود ندارد.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
+            Text("بین استخرهای هم‌نام، آنی را انتخاب می‌کند که در بازهٔ تو واقعاً فعال بوده (پروب تک‌درخواستی). اگر RPC در منطقهٔ تو بسته باشد، به تریدهای GeckoTerminal می‌رود. اگر بازهٔ تو بیرون پنجرهٔ فعالیت استخر باشد، دقیقاً می‌گوید استخر از کی تا کی فعال بوده.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
