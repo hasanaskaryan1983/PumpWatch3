@@ -21,7 +21,7 @@ class ChainRegistryTest {
 
     @Test
     fun solanaAddress_tooShort_isInvalid() {
-        val addr = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgA" // 31 chars
+        val addr = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83T" // 30 chars — زیر حداقل 32
         assertFalse(ChainRegistry.isValidAddress("solana", addr))
     }
 
