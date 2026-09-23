@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
@@ -27,15 +29,9 @@ private val VGray = Color(0xFF8B949E)
 
 /**
  * 🚀 Commit 55 (فاز ۰ برنامهٔ اجرایی، §2.2): صفحهٔ صداقت و محدودیت‌ها.
- *
- * صداقت دربارهٔ:
- * - این اپ توصیهٔ مالی نیست
- * - دادهٔ آن‌چین عمومی، نه کامل
- * - تحلیل‌ها همبستگی‌اند، نه علیت
- * - مرزهای منابع رایگان (عمق تاریخچه، Rate limit)
  */
 @Composable
-fun RiskDisclosureScreen() {
+fun RiskDisclosureScreen(onBack: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -129,5 +125,13 @@ fun RiskDisclosureScreen() {
                 )
             }
         }
+
+        // دکمه بازگشت
+        Button(
+            onClick = onBack,
+            colors = ButtonDefaults.buttonColors(containerColor = VBlue),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("← بازگشت به حریم خصوصی", fontSize = 12.sp) }
     }
 }
