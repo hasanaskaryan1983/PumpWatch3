@@ -111,45 +111,9 @@ private fun heliusClient(apiKey: String): SolanaRpcApi = Retrofit.Builder()
     .baseUrl("https://mainnet.helius-rpc.com/?api-key=$apiKey")
     .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
 
-/**
- * 🚀 Commit 27: کلید RPC شخصی + کش حافظه‌ای.
- *
- * چرا کش؟ چون موتورهای ۱/۵ و FavCenter و WalletHistory بدون ctx صدا می‌زنند؛
- * با کش، به‌محض اینکه هر صفحه‌ای یک بار کلید را بخواند، همهٔ موتورها خودکار
- * کلید را می‌بینند — بدون تغییر هیچ فایل دیگری.
- */
-object RpcKeyStore {
-    private const val PREFS = "pumpwatch_rpc_prefs"
-    private const val KEY = "solana_rpc_api_key"
-
-    @Volatile
-    private var cached: String? = null
-
-    fun get(ctx: Context): String? = try {
-        val v = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY, null)?.takeIf { it.isNotBlank() }
-        cached = v
-        v
-    } catch (_: Exception) { cached }
-
-    /** برای صداهای بدون Context در لایهٔ data */
-    fun cachedKey(): String? = cached
-
-    fun set(ctx: Context, key: String) {
-        val trimmed = key.trim()
-        cached = trimmed.takeIf { it.isNotBlank() }
-        try {
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, trimmed).apply()
-        } catch (_: Exception) { }
-    }
-
-    fun clear(ctx: Context) {
-        cached = null
-        try {
-            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).apply()
-        } catch (_: Exception) { }
-    }
-}
+// 🚀 Commit 44: object RpcKeyStore از این فایل حذف شد و به
+// app/src/main/java/com/pumpwatch/app/data/RpcKeyStore.kt منتقل شد
+// (روی SecureStorage با رفتار fail-closed + کش حافظه‌ای cachedKey).
 
 /**
  * 🚀 Commit 26/27: چرخش هوشمند + backoff روی 429.
