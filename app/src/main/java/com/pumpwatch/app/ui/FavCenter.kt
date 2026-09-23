@@ -1,10 +1,12 @@
 package com.pumpwatch.app.ui
 
 import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -12,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -35,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.Blockscout
@@ -59,12 +61,10 @@ private val FGray = Color(0xFF8B949E)
 private val FCard = Color(0xFF1A2230)
 private val FG2 = Gson()
 
-// 🚀 P1-3: هم‌روندی اسکن کیف‌های مورد پسند
-private const val FAV_WALLET_PARALLELISM = 3   // چند کیف هم‌زمان (هر کیف خودش چند زنجیره می‌زند)
-private const val FAV_TOKEN_PARALLELISM = 5    // چند توکن هم‌زمان داخل هر زنجیره/کیف
-private const val FAV_CHUNK_DELAY_MS = 200L    // فاصله بین chunkها برای پرهیز از 429
+private const val FAV_WALLET_PARALLELISM = 3
+private const val FAV_TOKEN_PARALLELISM = 5
+private const val FAV_CHUNK_DELAY_MS = 200L
 
-// 🚀 Commit 45: پروندهٔ نهنگ — هر کیف شامل اطلاعات شکار است
 data class FavWallet(
     val addr: String,
     var note: String,
@@ -75,10 +75,9 @@ data class FavWallet(
     var unpricedCount: Int = 0,
     var snap: MutableMap<String, Double> = mutableMapOf(),
     var tokenCount: Int = 0,
-    // 🚀 Commit 45: فیلدهای پروندهٔ نهنگ (با default برای migration خودکار از داده‌های قدیمی)
-    val symbol: String = "",          // نماد ارزی که در آن شکار شد (مثلاً "CATE")
-    val role: String = "",            // نقش: "کف‌خر 🎯" / "نهنگ زنجیره" / ""
-    val huntedAtMs: Long = 0L         // زمان شکار (خودکار هنگام ❤️ زدن ثبت می‌شود)
+    val symbol: String = "",
+    val role: String = "",
+    val huntedAtMs: Long = 0L
 )
 
 data class WalletAlert(val addr: String, val ts: Long, val text: String, var read: Boolean = false)
@@ -95,7 +94,6 @@ private val FAV_EVM = listOf(
     "robinhood" to "https://robinhoodchain.blockscout.com/"
 )
 
-// P0-3: نتیجهٔ اسکن موجودی با تمایز بین قیمت شناخته‌شده و نامشخص
 private data class HoldingsSummary(
     val balances: Map<String, Double>,
     val totalUsd: Double,
@@ -103,7 +101,6 @@ private data class HoldingsSummary(
     val unpricedCount: Int
 )
 
-// 🚀 P1-3: نتیجهٔ جزئی هر توکن برای جمع‌آوری thread-safe بعد از awaitAll
 private data class FavTokenAgg(val sym: String, val amt: Double, val px: Double?)
 
 object FavStore {
@@ -123,7 +120,6 @@ object FavStore {
                 val old = p.getString("top_traders", "") ?: ""
                 if (old.isNotEmpty()) {
                     val olds: MutableList<SavedTraderOld>? = FG2.fromJson(old, object : TypeToken<MutableList<SavedTraderOld>>() {}.type)
-                    // 🚀 Commit 45: migration از فرمت قدیمی — symbol از note استخراج می‌شود
                     olds?.map {
                         FavWallet(
                             addr = it.addr,
@@ -154,7 +150,6 @@ object FavStore {
 
     fun unread(): Int = alerts.value.count { !it.read }
 
-    // 🚀 Commit 45: امضای توسعه‌یافته با فیلدهای پروندهٔ نهنگ (backward-compatible)
     fun addFav(
         ctx: Context,
         addr: String,
@@ -180,7 +175,6 @@ object FavStore {
         save(ctx)
     }
 
-    // 🚀 Commit 45: ویرایش یادداشت کیف ذخیره‌شده
     fun updateNote(ctx: Context, addr: String, newNote: String) {
         val w = favs.value.firstOrNull { it.addr == addr } ?: return
         w.note = newNote
@@ -210,8 +204,6 @@ object FavStore {
     }
 }
 
-// P0-3: اسکن موجودی با تمایز بین قیمت شناخته‌شده و نامشخص + حذف take(10)
-// 🚀 P1-3: زنجیره‌ها (EVM) و توکن‌ها (Solana) موازی شدند؛ جمع‌بندی نهایی sequential و thread-safe
 private suspend fun scanHoldings(addr: String): HoldingsSummary {
     val balances = mutableMapOf<String, Double>()
     var total = 0.0
@@ -219,7 +211,6 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
     var unpriced = 0
     try {
         if (addr.startsWith("0x") && addr.length == 42) {
-            // 🚀 P1-3: هر ۷ زنجیرهٔ EVM هم‌زمان اسکن می‌شود؛ خطای هر زنجیره محبوس
             val parts = coroutineScope {
                 FAV_EVM.map { (gt, host) ->
                     async(Dispatchers.IO) {
@@ -289,8 +280,6 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
     return HoldingsSummary(balances, total, priced, unpriced)
 }
 
-// 🚀 P1-3: کیف‌های ستاره‌دار ۳تا۳تا موازی اسکن می‌شوند؛
-// اعمال تغییرات (snap/alerts/save) بعداً sequential انجام می‌شود تا ترتیب هشدارها و thread-safety حفظ شود.
 suspend fun scanStarred(ctx: Context, force: Boolean = false): Int {
     FavStore.load(ctx)
     val now = System.currentTimeMillis()
@@ -348,7 +337,6 @@ fun FavoritesPage() {
     var newAddr by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
-    // 🚀 Commit 45: dialog برای ویرایش یادداشت
     var editAddr by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf("") }
     val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US)
@@ -394,7 +382,6 @@ fun FavoritesPage() {
                         }
                         Column(modifier = Modifier.weight(1f).padding(horizontal = 6.dp)) {
                             Text(shortA(w.addr), fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGold)
-                            // 🚀 Commit 45: نمایش پروندهٔ نهنگ
                             if (w.symbol.isNotEmpty()) {
                                 Text("🪙 شکار در: ${w.symbol} • ${sdfDate.format(Date(if (w.huntedAtMs > 0) w.huntedAtMs else w.addedTs))}",
                                     fontSize = 9.sp, color = FBlue, fontWeight = FontWeight.Bold)
@@ -408,7 +395,6 @@ fun FavoritesPage() {
                         Button(onClick = { FavStore.moveToTrash(ctx, w.addr) },
                             colors = ButtonDefaults.buttonColors(containerColor = FCard), shape = RoundedCornerShape(6.dp)) { Text("🗑", fontSize = 12.sp) }
                     }
-                    // 🚀 Commit 45: یادداشت قابل ویرایش
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(if (w.note.isNotEmpty()) "📝 ${w.note}" else "📝 (یادداشت اضافه کن)",
                             fontSize = 9.sp, color = if (w.note.isNotEmpty()) FGray else Color(0xFF555555),
@@ -418,7 +404,6 @@ fun FavoritesPage() {
                             editText = w.note
                         }) { Text("✏️", fontSize = 10.sp) }
                     }
-                    // وضعیت اسکن برای کیف‌های ستاره‌دار
                     if (w.starred && w.lastScanTs > 0) {
                         val pricedCount = w.tokenCount - w.unpricedCount
                         val valueText = when {
@@ -437,13 +422,87 @@ fun FavoritesPage() {
         }
     }
 
-    // 🚀 Commit 45: dialog ویرایش یادداشت
+    // 🚀 Commit 45: dialog ویرایش یادداشت — با Dialog + Card (سازگار با همه نسخه‌های Material3)
     if (editAddr != null) {
-        AlertDialog(
-            onDismissRequest = { editAddr = null },
-            title = { Text("📝 ویرایش یادداشت", fontSize = 14.sp) },
-            text = {
-                TextField(
-                    value = editText,
-                    onValueChange = { editText = it },
-                    placeholder = { Text("مثلاً: در ۳ پامپ تکرار شد —
+        Dialog(onDismissRequest = { editAddr = null }) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = FCard),
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("📝 ویرایش یادداشت", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = FGold)
+                    TextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        placeholder = { Text("مثلاً: در ۳ پامپ تکرار شد — رانتی قطعی", fontSize = 10.sp) },
+                        modifier = Modifier.fillMaxWidth().height(100.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { editAddr = null }) { Text("انصراف", color = FGray) }
+                        TextButton(onClick = {
+                            FavStore.updateNote(ctx, editAddr!!, editText)
+                            editAddr = null
+                        }) { Text("💾 ذخیره", color = FGreen) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AlertsPage() {
+    val ctx = LocalContext.current
+    val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US)
+    LaunchedEffect(Unit) {
+        FavStore.load(ctx)
+        FavStore.alerts.value.forEach { it.read = true }
+        FavStore.alerts.value = ArrayList(FavStore.alerts.value)
+        FavStore.save(ctx)
+    }
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("⚡️ هشدارهای نهنگ‌ها", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FGold)
+        Text("توکن جدید یا افزایش موجودی کیف‌های ستاره‌دار — با باز کردن این صفحه، هشدارها خونده می‌شن", fontSize = 9.sp, color = FGray)
+        if (FavStore.alerts.value.isEmpty()) Text("هنوز هشداری نیست — توی ❤️ کیف‌ها رو ستاره‌دار کن", fontSize = 10.sp, color = FGray)
+        FavStore.alerts.value.forEach { a ->
+            Card(colors = CardDefaults.cardColors(containerColor = FCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(a.text, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = FGreen)
+                        Text("${sdf.format(Date(a.ts))} • ${shortA(a.addr)}", fontSize = 8.sp, color = FGray)
+                    }
+                    Button(onClick = { FavStore.moveToTrash(ctx, a.addr) },
+                        colors = ButtonDefaults.buttonColors(containerColor = FCard), shape = RoundedCornerShape(6.dp)) { Text("🗑", fontSize = 12.sp) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TrashPage() {
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) { FavStore.load(ctx) }
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("♻️ سطل بازیافت", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FGray)
+        Text("🔁 = برگردون به ❤️ (اگه اشتباهی حذف کردی) • 🗑 = حذف دائم", fontSize = 9.sp, color = FGray)
+        if (FavStore.trash.value.isEmpty()) Text("سطل خالیه", fontSize = 10.sp, color = FGray)
+        FavStore.trash.value.forEach { w ->
+            Card(colors = CardDefaults.cardColors(containerColor = FCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { FavStore.restore(ctx, w.addr) },
+                        colors = ButtonDefaults.buttonColors(containerColor = FCard), shape = RoundedCornerShape(6.dp)) { Text("🔁", fontSize = 12.sp) }
+                    Column(modifier = Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                        Text(shortA(w.addr), fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGray)
+                        if (w.note.isNotEmpty()) Text(w.note, fontSize = 9.sp, color = FGray)
+                        if (w.symbol.isNotEmpty()) Text("🪙 ${w.symbol} ${if (w.role.isNotEmpty()) "• ${w.role}" else ""}", fontSize = 8.sp, color = FGray)
+                    }
+                    Button(onClick = { FavStore.deleteForever(ctx, w.addr) },
+                        colors = ButtonDefaults.buttonColors(containerColor = FCard), shape = RoundedCornerShape(6.dp)) { Text("🗑", fontSize = 12.sp) }
+                }
+            }
+        }
+    }
+}
