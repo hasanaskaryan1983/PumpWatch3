@@ -1,16 +1,12 @@
 package com.pumpwatch.app.ui
 
 import android.content.Context
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -39,9 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import com.pumpwatch.app.data.Blockscout
-import com.pumpwatch.app.data.GeckoPrice
-import com.pumpwatch.app.data.solanaTyped
+import com.pumpwatch.app.data.GatewayProviders
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -60,6 +54,9 @@ private val FBlue = Color(0xFF40C4FF)
 private val FGray = Color(0xFF8B949E)
 private val FCard = Color(0xFF1A2230)
 private val FG2 = Gson()
+
+// 🚀 Commit 54: همهٔ تماس‌های شبکهٔ این فایل از درِ Gateway عبور می‌کنند
+private val GW = GatewayProviders()
 
 private const val FAV_WALLET_PARALLELISM = 3
 private const val FAV_TOKEN_PARALLELISM = 5
@@ -204,6 +201,7 @@ object FavStore {
     }
 }
 
+// 🚀 Commit 54: اسکن موجودی از طریق Gateway — کش TTL + breaker + بدون catch خاموش
 private suspend fun scanHoldings(addr: String): HoldingsSummary {
     val balances = mutableMapOf<String, Double>()
     var total = 0.0
@@ -216,14 +214,13 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
                     async(Dispatchers.IO) {
                         val out = mutableListOf<FavTokenAgg>()
                         try {
-                            val toks = Blockscout.api(host).tokenList("account", "tokenlist", addr).result
-                                ?: return@async out
+                            val toks = GW.evmTokenList(host, addr).value?.result ?: return@async out
                             toks.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.forEach { t ->
                                 val dec = t.decimals?.toDoubleOrNull() ?: 18.0
                                 val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                                 val sym = t.symbol ?: "?"
                                 val c = t.contractAddress ?: return@forEach
-                                val px = try { GeckoPrice.api.tokenInfo(gt, c).data?.attributes?.price_usd?.toDoubleOrNull() } catch (_: Exception) { null }
+                                val px = GW.geckoTokenInfo(gt, c).value?.data?.attributes?.price_usd?.toDoubleOrNull()
                                 out.add(FavTokenAgg(sym, amt, px))
                             }
                         } catch (_: Exception) { }
@@ -241,11 +238,14 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
                 }
             }
         } else if (addr.length in 32..44) {
-            val res = solanaTyped(mapOf(
-                "jsonrpc" to "2.0", "id" to 1,
-                "method" to "getTokenAccountsByOwner",
-                "params" to listOf(addr, mapOf("programId" to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), mapOf("encoding" to "jsonParsed"))
-            ))
+            val res = GW.solanaTypedGateway(
+                "tok:$addr",
+                mapOf(
+                    "jsonrpc" to "2.0", "id" to 1,
+                    "method" to "getTokenAccountsByOwner",
+                    "params" to listOf(addr, mapOf("programId" to "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"), mapOf("encoding" to "jsonParsed"))
+                )
+            ).value
             val raw = res?.result?.value?.mapNotNull { a ->
                 val inf = a.account?.data?.parsed?.info ?: return@mapNotNull null
                 val amt = inf.tokenAmount?.uiAmountString?.toDoubleOrNull() ?: 0.0
@@ -258,7 +258,7 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
                 raw.chunked(FAV_TOKEN_PARALLELISM).flatMap { chunk ->
                     val part = chunk.map { (mint, amt) ->
                         async(Dispatchers.IO) {
-                            val t = try { GeckoPrice.api.tokenInfo("solana", mint).data?.attributes } catch (_: Exception) { null }
+                            val t = GW.geckoTokenInfo("solana", mint).value?.data?.attributes
                             FavTokenAgg(t?.symbol ?: mint.take(6), amt, t?.price_usd?.toDoubleOrNull())
                         }
                     }.awaitAll()
@@ -422,7 +422,6 @@ fun FavoritesPage() {
         }
     }
 
-    // 🚀 Commit 45: dialog ویرایش یادداشت — با Dialog + Card (سازگار با همه نسخه‌های Material3)
     if (editAddr != null) {
         Dialog(onDismissRequest = { editAddr = null }) {
             Card(
