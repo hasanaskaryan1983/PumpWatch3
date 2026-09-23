@@ -23,6 +23,10 @@ import javax.crypto.spec.GCMParameterSpec
  * fallback صادقانه: اگر Keystore در دسترس نباشد، مقدار plain ذخیره می‌شود
  * و پرچم secure_storage_fell_back برای افشا در Privacy Center ثبت می‌گردد.
  * هرگز وانمود نمی‌کنیم رمزنگاری شده وقتی نشده.
+ *
+ * 🚀 Commit 44 (فاز ۱ برنامهٔ اجرایی): putSecret/getSecret fail-closed
+ * برای API keyها که نباید به هیچ وجه plain ذخیره شوند. اگر Keystore
+ * در دسترس نباشد، ذخیره نمی‌شود و false/خطا برگردانده می‌شود.
  */
 object SecureStorage {
 
@@ -32,6 +36,13 @@ object SecureStorage {
     private const val IV_BYTES = 12
     private const val TAG_BITS = 128
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
+
+    /** نتیجه تلاش putSecret — برای گزارش صادقانه به UI */
+    sealed class SecretResult {
+        object Saved : SecretResult()
+        object KeystoreUnavailable : SecretResult()
+        data class CryptoError(val message: String) : SecretResult()
+    }
 
     private fun prefs(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -86,12 +97,8 @@ object SecureStorage {
         null
     }
 
-    // ---------- API عمومی ----------
+    // ---------- API عمومی (با fallback صادقانه — برای ledger/user data) ----------
 
-    /**
-     * ذخیرهٔ رمزنگاری‌شدهٔ یک مقدار.
-     * اگر Keystore خراب/نبود: plain + پرچم ناامن (صادقانه، نه بی‌صدا).
-     */
     fun putString(ctx: Context, key: String, value: String) {
         try {
             val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -99,7 +106,6 @@ object SecureStorage {
             val iv = cipher.iv ?: throw IllegalStateException("GCM iv missing")
             val ct = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
             prefs(ctx).edit().putString(key, packBlob(iv, ct)).apply()
-            // رمزنگاری موفق → پرچم ناامن را پاک کن
             if (isInsecureFallback(ctx)) {
                 flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, false).apply()
             }
@@ -109,10 +115,6 @@ object SecureStorage {
         }
     }
 
-    /**
-     * خواندن مقدار: اول تلاش رمزگشایی؛ اگر blob از دورهٔ fallback ناامن بود
-     * و پرچم فعال بود، همان plain برگردانده می‌شود (تا دادهٔ کاربر گم نشود).
-     */
     fun getString(ctx: Context, key: String): String? {
         val blob = prefs(ctx).getString(key, null) ?: return null
         val unpacked = unpackBlob(blob)
@@ -122,9 +124,7 @@ object SecureStorage {
                 val cipher = Cipher.getInstance(TRANSFORMATION)
                 cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(TAG_BITS, iv))
                 return String(cipher.doFinal(ct), Charsets.UTF_8)
-            } catch (_: Exception) {
-                // blob رمزنگاری‌شده ولی کلید/دستگاه عوض شده → سقوط به بررسی fallback
-            }
+            } catch (_: Exception) { }
         }
         return if (isInsecureFallback(ctx)) blob else null
     }
@@ -133,17 +133,66 @@ object SecureStorage {
         prefs(ctx).edit().remove(key).apply()
     }
 
-    /** پاک‌کردن کامل همهٔ داده‌های امن + پرچم fallback (دکمهٔ Delete all) */
     fun wipeAll(ctx: Context) {
         try { prefs(ctx).edit().clear().apply() } catch (_: Exception) { }
         try { flagPrefs(ctx).edit().remove(FLAG_INSECURE_FALLBACK).apply() } catch (_: Exception) { }
     }
 
-    /** حذف کلید master از Keystore (reset کامل؛ داده‌های قبلی غیرقابل‌خواندن می‌شوند) */
     fun deleteMasterKey() {
         try {
             val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             if (ks.containsAlias(KEYSTORE_ALIAS)) ks.deleteEntry(KEYSTORE_ALIAS)
         } catch (_: Exception) { }
     }
+
+    // ---------- API fail-closed برای secretها (Commit 44) ----------
+
+    /**
+     * ذخیرهٔ رمزنگاری‌شده بدون fallback. اگر Keystore کار نکند،
+     * ذخیره نمی‌شود و KeystoreUnavailable برگردانده می‌شود.
+     * این برای API keyها که نباید به هیچ وجه plain بمانند.
+     */
+    fun putSecret(ctx: Context, key: String, value: String): SecretResult {
+        return try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+            val iv = cipher.iv ?: throw IllegalStateException("GCM iv missing")
+            val ct = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+            prefs(ctx).edit().putString(key, packBlob(iv, ct)).apply()
+            SecretResult.Saved
+        } catch (keystoreEx: java.security.KeyStoreException) {
+            SecretResult.KeystoreUnavailable
+        } catch (ex: Exception) {
+            val msg = ex.message ?: ex::class.java.simpleName
+            if (msg.contains("Keystore", true) || msg.contains("Keymaster", true)
+                || msg.contains("unavailable", true)) {
+                SecretResult.KeystoreUnavailable
+            } else {
+                SecretResult.CryptoError(msg)
+            }
+        }
+    }
+
+    /**
+     * خواندن secret: فقط رمزگشایی امن. اگر blob خراب بود یا Keystore
+     * در دسترس نبود، null برگردانده می‌شود (نه plain text).
+     */
+    fun getSecret(ctx: Context, key: String): String? {
+        val blob = prefs(ctx).getString(key, null) ?: return null
+        val unpacked = unpackBlob(blob) ?: return null
+        return try {
+            val (iv, ct) = unpacked
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(TAG_BITS, iv))
+            String(cipher.doFinal(ct), Charsets.UTF_8)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * بررسی وجود secret بدون رمزگشایی (ارزان؛ برای نمایش "Configured" در UI).
+     */
+    fun hasSecret(ctx: Context, key: String): Boolean =
+        prefs(ctx).getString(key, null) != null
 }
