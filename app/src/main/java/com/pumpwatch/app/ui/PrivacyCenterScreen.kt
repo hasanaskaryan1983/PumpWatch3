@@ -85,6 +85,8 @@ fun PrivacyCenterScreen() {
     var statusMsg by remember { mutableStateOf("") }
     // 🚀 Sprint 14 (مرحلهٔ ۰ گزارش / Commit 8C): ورود به صفحهٔ متدولوژی
     var showMethodology by remember { mutableStateOf(false) }
+    // 🚀 Commit 55: ورود به صفحهٔ Risk Disclosure
+    var showRiskDisclosure by remember { mutableStateOf(false) }
 
     val keystoreOk = remember { SecureStorage.isKeystoreAvailable() }
     val insecure = remember { SecureStorage.isInsecureFallback(context) }
@@ -99,6 +101,12 @@ fun PrivacyCenterScreen() {
     // 🚀 Commit 8C: صفحهٔ متدولوژی جای کل محتوا را می‌گیرد تا «صفحهٔ مستقل» باشد
     if (showMethodology) {
         MethodologyScreen(onBack = { showMethodology = false })
+        return
+    }
+
+    // 🚀 Commit 55: صفحهٔ Risk Disclosure
+    if (showRiskDisclosure) {
+        RiskDisclosureScreen(onBack = { showRiskDisclosure = false })
         return
     }
 
@@ -166,6 +174,14 @@ fun PrivacyCenterScreen() {
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) { Text("📖 متدولوژی و ریسک: هر عدد از کجا می‌آید؟", fontSize = 11.sp) }
+
+        // ---------- 🚀 Commit 55: درب ورود به Risk Disclosure ----------
+        Button(
+            onClick = { showRiskDisclosure = true },
+            colors = ButtonDefaults.buttonColors(containerColor = PrGold.copy(alpha = 0.2f)),
+            shape = RoundedCornerShape(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("📜 صداقت و محدودیت‌ها: چه نمی‌توانم بگویم", fontSize = 11.sp) }
 
         // ---------- کنترل کاربر ----------
         Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
