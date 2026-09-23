@@ -49,8 +49,6 @@ private val PrBlue = Color(0xFF40C4FF)
 
 /**
  * 🚀 Sprint 14 (مرحله ۳ / Commit 7D): فهرست صادقانهٔ منابع داده اپ.
- * هر منبع + هدفش — همان چیزی که فرم Data Safety پلی‌استور می‌پرسد.
- * internal تا تست JVM قفلش کند.
  */
 internal fun dataProviders(): List<Pair<String, String>> = listOf(
     "CoinGecko" to "قیمت، رتبهٔ بازار و نمودارهای تاریخی",
@@ -84,9 +82,7 @@ fun PrivacyCenterScreen() {
     var confirmWipe by remember { mutableStateOf(false) }
     var confirmExport by remember { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
-    // 🚀 Sprint 14 (مرحلهٔ ۰ گزارش / Commit 8C): ورود به صفحهٔ متدولوژی
     var showMethodology by remember { mutableStateOf(false) }
-    // 🚀 Commit 55: ورود به صفحهٔ Risk Disclosure
     var showRiskDisclosure by remember { mutableStateOf(false) }
 
     val keystoreOk = remember { SecureStorage.isKeystoreAvailable() }
@@ -99,13 +95,11 @@ fun PrivacyCenterScreen() {
         } else true
     }
 
-    // 🚀 Commit 8C: صفحهٔ متدولوژی جای کل محتوا را می‌گیرد تا «صفحهٔ مستقل» باشد
     if (showMethodology) {
         MethodologyScreen(onBack = { showMethodology = false })
         return
     }
 
-    // 🚀 Commit 55: صفحهٔ Risk Disclosure
     if (showRiskDisclosure) {
         RiskDisclosureScreen(onBack = { showRiskDisclosure = false })
         return
@@ -125,7 +119,6 @@ fun PrivacyCenterScreen() {
             fontSize = 10.sp, color = PrGold, lineHeight = 16.sp
         )
 
-        // ---------- وضعیت امنیتی ----------
         Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("🛡️ وضعیت امنیتی", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PrBlue)
@@ -151,7 +144,6 @@ fun PrivacyCenterScreen() {
             }
         }
 
-        // ---------- منابع داده ----------
         Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("📡 منابع دادهٔ اپ", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PrBlue)
@@ -168,7 +160,6 @@ fun PrivacyCenterScreen() {
             }
         }
 
-        // ---------- 🚀 Commit 8C: درب ورود به متدولوژی ----------
         Button(
             onClick = { showMethodology = true },
             colors = ButtonDefaults.buttonColors(containerColor = PrBlue.copy(alpha = 0.2f)),
@@ -176,7 +167,6 @@ fun PrivacyCenterScreen() {
             modifier = Modifier.fillMaxWidth()
         ) { Text("📖 متدولوژی و ریسک: هر عدد از کجا می‌آید؟", fontSize = 11.sp) }
 
-        // ---------- 🚀 Commit 55: درب ورود به Risk Disclosure ----------
         Button(
             onClick = { showRiskDisclosure = true },
             colors = ButtonDefaults.buttonColors(containerColor = PrGold.copy(alpha = 0.2f)),
@@ -184,7 +174,6 @@ fun PrivacyCenterScreen() {
             modifier = Modifier.fillMaxWidth()
         ) { Text("📜 صداقت و محدودیت‌ها: چه نمی‌توانم بگویم", fontSize = 11.sp) }
 
-        // ---------- کنترل کاربر ----------
         Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("🎛️ کنترل داده‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PrBlue)
@@ -223,7 +212,7 @@ fun PrivacyCenterScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (confirmExport) "مطمئنی؟ خروجی بگیر" else "📤 خروجی گرفتن از ledger", fontSize = 11.sp) }
 
-                // ---------- 🚀 Commit 56: Export نهنگ‌ها ----------
+                // 🚀 Commit 56: Export نهنگ‌ها — cast صریح برای رفع ambiguity
                 Button(
                     onClick = {
                         FavStore.load(context)
@@ -232,7 +221,7 @@ fun PrivacyCenterScreen() {
                             statusMsg = "⚠️ هنوز نهنگی ذخیره نکردی"
                             return@Button
                         }
-                        val json = WhaleExporter.exportToFavorites(favorites)
+                        val json: String = WhaleExporter.exportToFavorites(favorites)
                         val intent = Intent(Intent.ACTION_SEND).apply {
                             type = "application/json"
                             putExtra(Intent.EXTRA_TEXT, json)
@@ -248,7 +237,6 @@ fun PrivacyCenterScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("📤 Export نهنگ‌ها (JSON)", fontSize = 11.sp) }
 
-                // ---------- 🚀 Commit 56: راهنمای Import نهنگ‌ها ----------
                 Button(
                     onClick = {
                         statusMsg = "📥 Import: پس از Export، فایل JSON را در Notes/Drive نگه دار. برای Import فعلاً باید فایل را در Privacy Center کپی/پیست کنی (فاز بعدی)."
