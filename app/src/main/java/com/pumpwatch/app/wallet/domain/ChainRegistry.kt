@@ -3,10 +3,20 @@ package com.pumpwatch.app.wallet.domain
 /**
  * 🚀 Commit 48 (فاز ۳): رجیستری مرکزی همهٔ زنجیره‌های پشتیبانی‌شده.
  * این لیست تنها منبع حقیقت برای زنجیره‌ها و validators است.
+ * ترتیب مهم است: detectChain اولین match را برمی‌گرداند، پس Ethereum اول است.
  */
 object ChainRegistry {
 
     val chains: List<Chain> = listOf(
+        // Ethereum (اول — تا detectChain اول این را برگرداند برای آدرس‌های EVM)
+        Chain(
+            chainId = "1",
+            name = "Ethereum",
+            addressPattern = Regex("^0x[0-9a-fA-F]{40}$"),
+            nativeAsset = AssetId.native("1"),
+            explorerUrl = "https://etherscan.io/address/"
+        ),
+
         // Solana
         Chain(
             chainId = "solana",
@@ -14,15 +24,6 @@ object ChainRegistry {
             addressPattern = Regex("^[1-9A-HJ-NP-Za-km-z]{32,44}$"),
             nativeAsset = AssetId.native("solana"),
             explorerUrl = "https://solscan.io/account/"
-        ),
-
-        // Ethereum
-        Chain(
-            chainId = "1",
-            name = "Ethereum",
-            addressPattern = Regex("^0x[0-9a-fA-F]{40}$"),
-            nativeAsset = AssetId.native("1"),
-            explorerUrl = "https://etherscan.io/address/"
         ),
 
         // Base
