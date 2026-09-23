@@ -1,8 +1,9 @@
 package com.pumpwatch.app.wallet.gateway
 
+import kotlinx.coroutines.delay
+
 /**
- * 🚀 Commit 52 (فاز ۷ برنامهٔ اجرایی): خطاهای نوع‌مند منبع.
- * catch-all ممنوع؛ هر خطا باید نوع داشته باشد.
+ * 🚀 Commit 52/53 (فاز ۷): خطاهای نوع‌مند منبع.
  */
 sealed class ProviderError {
     data class Http(val code: Int) : ProviderError()
@@ -12,12 +13,8 @@ sealed class ProviderError {
     data class Unknown(val message: String) : ProviderError()
 }
 
-/** خطایی که providerها پرتاب می‌کنند تا Gateway نوعش را بفهمد */
 class ProviderException(val error: ProviderError, message: String? = null) : Exception(message)
 
-/**
- * 🚀 Commit 52: نتیجهٔ هر تماس با provenance کامل.
- */
 data class ProviderResult<T>(
     val value: T?,
     val source: String,
@@ -28,7 +25,6 @@ data class ProviderResult<T>(
     val isSuccess: Boolean get() = error == null && value != null
 }
 
-/** کش سادهٔ TTL — پایهٔ «جواب تکراری بدون شبکه» */
 internal class TtlCache(private val clock: () -> Long) {
     private data class Entry(val value: Any?, val expiresAt: Long)
     private val map = mutableMapOf<String, Entry>()
@@ -44,10 +40,6 @@ internal class TtlCache(private val clock: () -> Long) {
     fun clear() = map.clear()
 }
 
-/**
- * 🚀 Commit 52: قطع‌کنندهٔ مدار — بعد از N شکست پیاپی، منبع موقتاً قطع می‌شود.
- * بعد از cooldown یک probe (half-open) مجاز است؛ موفق → بسته، شکست → باز مجدد.
- */
 internal class CircuitBreaker(
     private val failureThreshold: Int,
     private val cooldownMs: Long,
@@ -72,17 +64,18 @@ internal class CircuitBreaker(
     fun recordFailure() {
         consecutiveFailures++
         if (openedAt == null && consecutiveFailures >= failureThreshold) openedAt = clock()
-        else if (isHalfOpen) openedAt = clock()   // شکست در probe → باز مجدد
+        else if (isHalfOpen) openedAt = clock()
     }
 }
 
 /**
- * 🚀 Commit 52: درِ واحد دسترسی به داده.
- * ترتیب: کش → breaker → fetch با retry محدود → ثبت provenance.
+ * 🚀 Commit 53: نسخهٔ suspend برای تماس‌های Retrofit اضافه شد؛
+ * نسخهٔ سنکرون Commit 52 بدون تغییر باقی است.
  */
 class ProviderGateway(
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val sleep: (Long) -> Unit = { Thread.sleep(it) },
+    private val sleepSuspend: suspend (Long) -> Unit = { delay(it) },
     private val failureThreshold: Int = 3,
     private val cooldownMs: Long = 60_000L
 ) {
@@ -92,6 +85,7 @@ class ProviderGateway(
     private fun breaker(source: String): CircuitBreaker =
         breakers.getOrPut(source) { CircuitBreaker(failureThreshold, cooldownMs, clock) }
 
+    // ---------- نسخهٔ سنکرون (Commit 52) ----------
     fun <T> call(
         source: String,
         key: String,
@@ -99,29 +93,49 @@ class ProviderGateway(
         attempts: Int = 2,
         fetch: () -> T
     ): ProviderResult<T> {
-        cache.get<T>(key)?.let {
-            return ProviderResult(it, source, clock(), fromCache = true)
-        }
-
+        cache.get<T>(key)?.let { return ProviderResult(it, source, clock(), true) }
         val b = breaker(source)
-        if (!b.allowRequest()) {
-            return ProviderResult(null, source, clock(), false, ProviderError.CircuitOpen)
-        }
-
+        if (!b.allowRequest()) return ProviderResult(null, source, clock(), false, ProviderError.CircuitOpen)
         var lastError: ProviderError? = null
         var attempt = 0
         while (attempt < attempts) {
             attempt++
             try {
                 val v = fetch()
-                b.recordSuccess()
-                cache.put(key, v, ttlMs)
-                return ProviderResult(v, source, clock(), fromCache = false)
+                b.recordSuccess(); cache.put(key, v, ttlMs)
+                return ProviderResult(v, source, clock(), false)
             } catch (e: Exception) {
-                lastError = classify(e)
-                b.recordFailure()
+                lastError = classify(e); b.recordFailure()
                 if (!b.allowRequest()) break
                 if (attempt < attempts) sleep(minOf(1000L * attempt, 4000L))
+            }
+        }
+        return ProviderResult(null, source, clock(), false, lastError)
+    }
+
+    // ---------- نسخهٔ suspend (Commit 53) ----------
+    suspend fun <T> callSuspend(
+        source: String,
+        key: String,
+        ttlMs: Long,
+        attempts: Int = 2,
+        fetch: suspend () -> T
+    ): ProviderResult<T> {
+        cache.get<T>(key)?.let { return ProviderResult(it, source, clock(), true) }
+        val b = breaker(source)
+        if (!b.allowRequest()) return ProviderResult(null, source, clock(), false, ProviderError.CircuitOpen)
+        var lastError: ProviderError? = null
+        var attempt = 0
+        while (attempt < attempts) {
+            attempt++
+            try {
+                val v = fetch()
+                b.recordSuccess(); cache.put(key, v, ttlMs)
+                return ProviderResult(v, source, clock(), false)
+            } catch (e: Exception) {
+                lastError = classify(e); b.recordFailure()
+                if (!b.allowRequest()) break
+                if (attempt < attempts) sleepSuspend(minOf(1000L * attempt, 4000L))
             }
         }
         return ProviderResult(null, source, clock(), false, lastError)
@@ -132,7 +146,6 @@ class ProviderGateway(
         else -> ProviderError.Unknown(e.message ?: e::class.java.simpleName)
     }
 
-    /** وضعیت breaker یک منبع — برای نمایش صادقانه در UI/لاگ */
     fun breakerState(source: String): String = when {
         breaker(source).isOpen -> "open"
         breaker(source).isHalfOpen -> "half-open"
