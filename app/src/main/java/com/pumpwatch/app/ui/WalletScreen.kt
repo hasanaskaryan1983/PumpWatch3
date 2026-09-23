@@ -51,6 +51,7 @@ import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GtTrade
 import androidx.compose.material3.FilterChipDefaults
 import com.pumpwatch.app.data.RpcKeyStore
+import com.pumpwatch.app.data.SecureStorage
 import com.pumpwatch.app.data.SolanaRpc
 import com.pumpwatch.app.data.SuiClient
 import com.pumpwatch.app.data.TonClient
@@ -711,7 +712,7 @@ fun WalletScreen() {
                 Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                            Text("🔍 موتور : بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
                             Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                         }
                         TextField(value = address, onValueChange = { address = it },
@@ -848,8 +849,8 @@ private suspend fun <T> rpcBackoff(block: suspend () -> T): T {
     throw Exception("RPC بی‌پاسخ ماند")
 }
 
-// 🚀 Sprint 15 (Commit 23..43.1): موتور ۶
-// Commit 43.1: هوت‌فیکس کامپایل (نگهبان‌های ورودی) + چیپ‌های پنجرهٔ آمادهٔ شکار
+// 🚀 Sprint 15 (Commit 23..44): موتور ۶
+// Commit 44: انتقال کلید RPC به SecureStorage با fail-closed
 @Composable
 private fun ChainForensicsSection(
     onCopy: (String) -> Unit,
@@ -873,7 +874,17 @@ private fun ChainForensicsSection(
     var poolLabel by remember { mutableStateOf("") }
     var job by remember { mutableStateOf<Job?>(null) }
 
-    LaunchedEffect(Unit) { rpcKey = RpcKeyStore.get(context) ?: "" }
+    LaunchedEffect(Unit) {
+        // migration یک‌باره از SharedPreferences قدیمی
+        when (val r = RpcKeyStore.migrateFromLegacy(context)) {
+            is RpcKeyStore.MigrationResult.Migrated ->
+                savedMsg = "✅ کلید قدیمی به Keystore امن منتقل شد"
+            is RpcKeyStore.MigrationResult.KeystoreUnavailable ->
+                savedMsg = "⚠️ کلید قدیمی در SharedPreferences است ولی Keystore خراب — به Privacy Center مراجعه کن"
+            else -> {}
+        }
+        rpcKey = "" // فیلد ورودی همیشه خالی شروع می‌شود (کلید را ماسک‌شده نشان می‌دهیم)
+    }
 
     fun parseTs(v: Any?): Long {
         val n = num(v)
@@ -903,10 +914,7 @@ private fun ChainForensicsSection(
 
     fun run() {
         val sym = symbol.trim()
-        if (sym.isEmpty()) {
-            err = "❌ نماد ارز رو وارد کن"
-            return
-        }
+        if (sym.isEmpty()) { err = "❌ نماد ارز رو وارد کن"; return }
         val thr = threshold
         val appCtx = context
         job?.cancel()
@@ -1016,7 +1024,7 @@ private fun ChainForensicsSection(
                             sigs.addAll(cachedSigs)
                             rpcDepthFrom = forensicsDepthCache[cacheKey] ?: Long.MAX_VALUE
                             stopReason = "کش پنجره — بدون صفحه‌بندی مجدد"
-                            progress = "⚡ از کش اجرای قبلی همین بازه استفاده شد (آنی)"
+                            progress = "⚡ از کش exécutions قبلی همین بازه استفاده شد (آنی)"
                         } else {
                             val t0 = System.currentTimeMillis()
                             var page = 0
@@ -1281,16 +1289,12 @@ private fun ChainForensicsSection(
             // 🚀 Commit 43: پنجره‌های آمادهٔ شکار — یک ضربه به‌جای تایپ تاریخ
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf(1 to "۲۴س اخیر", 2 to "۴۸س اخیر", 7 to "۷روز اخیر").forEach { (d, label) ->
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val sdfP = SimpleDateFormat("yyyy/MM/dd", Locale.US)
-                            val nowMs = System.currentTimeMillis()
-                            fromText = sdfP.format(Date(nowMs - d * 86400000L))
-                            toText = sdfP.format(Date(nowMs + 86400000L))
-                        },
-                        label = { Text(label, fontSize = 10.sp) }
-                    )
+                    FilterChip(selected = false, onClick = {
+                        val sdfP = SimpleDateFormat("yyyy/MM/dd", Locale.US)
+                        val nowMs = System.currentTimeMillis()
+                        fromText = sdfP.format(Date(nowMs - d * 86400000L))
+                        toText = sdfP.format(Date(nowMs + 86400000L))
+                    }, label = { Text(label, fontSize = 10.sp) })
                 }
             }
             Text("💵 آستانهٔ خرید تکی (هر تراکنش جدا، نه جمع کل):", fontSize = 9.sp, color = VGray)
@@ -1320,21 +1324,59 @@ private fun ChainForensicsSection(
             if (err != null) Text(err ?: "", fontSize = 10.sp, color = VGold)
 
             Spacer(Modifier.height(8.dp))
-            Text("🔑 کلید RPC شخصی (اختیاری — فقط برای کاربران مناطق غیرتحریمی):", fontSize = 10.sp, color = VGold, fontWeight = FontWeight.Bold)
+            Text("🔑 کلید RPC شخصی (fail-closed: فقط در Keystore امن ذخیره می‌شود):",
+                fontSize = 10.sp, color = VGold, fontWeight = FontWeight.Bold)
+
+            val ksOk = SecureStorage.isKeystoreAvailable()
+            val configured = RpcKeyStore.isConfigured(context)
+            val masked = RpcKeyStore.mask(context)
+
+            if (!ksOk) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3D1F1F)),
+                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Text("⚠️ Keystore دستگاه در دسترس نیست — کلید API نمی‌تواند امن ذخیره شود. " +
+                         "از RPC عمومی استفاده می‌شود (بدون کلید شخصی).",
+                        fontSize = 9.sp, color = VRed, modifier = Modifier.padding(8.dp))
+                }
+            } else if (configured) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF1F3D2A)),
+                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("🔐 Configured: $masked", fontSize = 10.sp, color = VGreen,
+                            modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+
             TextField(value = rpcKey, onValueChange = { rpcKey = it },
-                placeholder = { Text("بدون کلید هم کار می‌کند — این فیلد اختیاری است", fontSize = 9.sp) },
-                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                placeholder = { Text(if (configured) "کلید جدید برای چرخش..." else "کلید RPC (اختیاری)", fontSize = 9.sp) },
+                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true,
+                enabled = ksOk)
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = {
-                    RpcKeyStore.set(context, rpcKey)
-                    savedMsg = if (rpcKey.isBlank()) "✅ کلید حذف شد — از RPC عمومی استفاده می‌شود"
-                    else "✅ کلید ذخیره شد — ۴۲ عملاً صفر"
-                }, colors = ButtonDefaults.buttonColors(containerColor = VGold),
-                    shape = RoundedCornerShape(6.dp)) { Text("💾 ذخیره", fontSize = 10.sp) }
-                if (rpcKey.isNotBlank()) {
+                Button(
+                    onClick = {
+                        val res = if (configured) RpcKeyStore.rotate(context, rpcKey)
+                                  else RpcKeyStore.set(context, rpcKey)
+                        savedMsg = when (res) {
+                            is SecureStorage.SecretResult.Saved ->
+                                if (configured) "✅ کلید چرخش شد (رمزنگاری‌شده)" else "✅ کلید ذخیره شد (رمزنگاری‌شده)"
+                            is SecureStorage.SecretResult.KeystoreUnavailable ->
+                                "⚠️ Keystore خراب — کلید ذخیره نشد (امنیت fail-closed)"
+                            is SecureStorage.SecretResult.CryptoError ->
+                                "⚠️ خطای رمزنگاری: ${res.message} — کلید ذخیره نشد"
+                        }
+                        if (res is SecureStorage.SecretResult.Saved) rpcKey = ""
+                    },
+                    enabled = ksOk && rpcKey.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = VGold),
+                    shape = RoundedCornerShape(6.dp)
+                ) { Text(if (configured) "🔄 چرخش" else "💾 ذخیره", fontSize = 10.sp) }
+
+                if (configured) {
                     Button(onClick = {
-                        RpcKeyStore.clear(context); rpcKey = ""
-                        savedMsg = "✅ کلید حذف شد"
+                        RpcKeyStore.clear(context)
+                        savedMsg = "✅ کلید حذف شد — از RPC عمومی استفاده می‌شود"
                     }, colors = ButtonDefaults.buttonColors(containerColor = VCard),
                         shape = RoundedCornerShape(6.dp)) { Text("🗑 پاک", fontSize = 10.sp) }
                 }
