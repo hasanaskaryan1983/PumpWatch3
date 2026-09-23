@@ -37,6 +37,7 @@ import com.google.gson.Gson
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.data.SecureStorage
+import com.pumpwatch.app.data.WHALEExporter
 import com.pumpwatch.app.store.TradeStore
 
 private val PrGreen = Color(0xFF00E676)
@@ -221,6 +222,41 @@ fun PrivacyCenterScreen() {
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (confirmExport) "مطمئنی؟ خروجی بگیر" else "📤 خروجی گرفتن از ledger", fontSize = 11.sp) }
+
+                // ---------- 🚀 Commit 56: Export نهنگ‌ها ----------
+                Button(
+                    onClick = {
+                        FavStore.load(context)
+                        val favorites = FavStore.favs.value
+                        if (favorites.isEmpty()) {
+                            statusMsg = "⚠️ هنوز نهنگی ذخیره نکردی"
+                            return@Button
+                        }
+                        val json = WhaleExporter.exportToFavorites(favorites)
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(Intent.EXTRA_TEXT, json)
+                            putExtra(Intent.EXTRA_SUBJECT, "PumpWatch نهنگ‌ها (${favorites.size} مورد)")
+                        }
+                        context.startActivity(
+                            Intent.createChooser(intent, "📤 Export نهنگ‌ها (${favorites.size} مورد)")
+                        )
+                        statusMsg = "📤 فایل ${favorites.size} نهنگ آمادهٔ اشتراک‌گذاری است"
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrGreen.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("📤 Export نهنگ‌ها (JSON)", fontSize = 11.sp) }
+
+                // ---------- 🚀 Commit 56: راهنمای Import نهنگ‌ها ----------
+                Button(
+                    onClick = {
+                        statusMsg = "📥 Import: پس از Export، فایل JSON را در Notes/Drive نگه دار. برای Import فعلاً باید فایل را در Privacy Center کپی/پیست کنی (فاز بعدی)."
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrGreen.copy(alpha = 0.2f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("📥 Import نهنگ‌ها (راهنما)", fontSize = 11.sp) }
 
                 Button(
                     onClick = {
