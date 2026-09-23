@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -217,7 +218,7 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
                             val toks = GW.evmTokenList(host, addr).value?.result ?: return@async out
                             toks.filter { (it.balance?.toDoubleOrNull() ?: 0.0) > 0 }.forEach { t ->
                                 val dec = t.decimals?.toDoubleOrNull() ?: 18.0
-                                val amt = (t.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
+                                val amt = (it.balance?.toDoubleOrNull() ?: 0.0) / 10.0.pow(dec)
                                 val sym = t.symbol ?: "?"
                                 val c = t.contractAddress ?: return@forEach
                                 val px = GW.geckoTokenInfo(gt, c).value?.data?.attributes?.price_usd?.toDoubleOrNull()
