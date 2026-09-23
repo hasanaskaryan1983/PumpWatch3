@@ -5,9 +5,8 @@ import com.pumpwatch.app.wallet.gateway.ProviderResult
 import kotlinx.coroutines.delay
 
 /**
- * 🚀 Commit 53 (فاز ۷): درِ واحد همهٔ تماس‌های شبکه.
- * APIها قابل تزریق‌اند → تست JVM بدون شبکه.
- * موتورها هنوز مستقیم صدا می‌زنند؛ مهاجرت آن‌ها = Commit 54.
+ * 🚀 Commit 53/54 (فاز ۷): درِ واحد همهٔ تماس‌های شبکه.
+ * Commit 54: solanaTypedGateway اضافه شد (مصرف‌کننده: اسکن کیف‌ها).
  */
 class GatewayProviders(
     private val gecko: GeckoPriceApi = GeckoPrice.api,
@@ -33,9 +32,14 @@ class GatewayProviders(
         gateway.callSuspend("solana-rpc", "sol:$key", ttlMs = 20_000) {
             solanaRaw(body)
         }
+
+    /** 🚀 Commit 54: نسخهٔ typed برای getTokenAccountsByOwner و مشابه */
+    suspend fun solanaTypedGateway(key: String, body: Map<String, @JvmSuppressWildcards Any?>): ProviderResult<SolanaRpcResponse?> =
+        gateway.callSuspend("solana-rpc", "solt:$key", ttlMs = 20_000) {
+            solanaTyped(body)
+        }
 }
 
-/** Gateway مشترک اپ با delay کروتینی */
 object DefaultGateway {
     val instance: ProviderGateway = ProviderGateway(sleepSuspend = { delay(it) })
 }
