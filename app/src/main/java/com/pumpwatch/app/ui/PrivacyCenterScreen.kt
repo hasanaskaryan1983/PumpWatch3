@@ -37,7 +37,7 @@ import com.google.gson.Gson
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.data.SecureStorage
-import com.pumpwatch.app.data.WHALEExporter
+import com.pumpwatch.app.data.WhaleExporter
 import com.pumpwatch.app.store.TradeStore
 
 private val PrGreen = Color(0xFF00E676)
@@ -47,9 +47,6 @@ private val PrGray = Color(0xFF8B949E)
 private val PrCard = Color(0xFF1A2230)
 private val PrBlue = Color(0xFF40C4FF)
 
-/**
- * 🚀 Sprint 14 (مرحله ۳ / Commit 7D): فهرست صادقانهٔ منابع داده اپ.
- */
 internal fun dataProviders(): List<Pair<String, String>> = listOf(
     "CoinGecko" to "قیمت، رتبهٔ بازار و نمودارهای تاریخی",
     "GeckoTerminal" to "استخرهای DEX، میم‌کوین‌ها و نقدینگی",
@@ -212,7 +209,6 @@ fun PrivacyCenterScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (confirmExport) "مطمئنی؟ خروجی بگیر" else "📤 خروجی گرفتن از ledger", fontSize = 11.sp) }
 
-                // 🚀 Commit 56: Export نهنگ‌ها — cast صریح برای رفع ambiguity
                 Button(
                     onClick = {
                         FavStore.load(context)
