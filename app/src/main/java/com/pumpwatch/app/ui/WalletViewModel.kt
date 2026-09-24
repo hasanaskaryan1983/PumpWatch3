@@ -126,7 +126,7 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
         val jets = try { TonClient.api.jettons(addr) } catch (_: Exception) { null }
         
         if (acc == null && jets == null) {
-            _info.value = "️ اتصال به TonAPI ناموفق بود"
+            _info.value = "⚠️ اتصال به TonAPI ناموفق بود"
             return
         }
 
