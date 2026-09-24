@@ -103,8 +103,8 @@ object ThrottledHttp {
             var retries = 0
             while (retries < MAX_RETRIES) {
                 val response = chain.proceed(chain.request())
-                // ✅ اصلاح: استفاده از () برای فراخوانی متد به جای دسترسی به فیلد
-                if (response.code() != 429) return response
+                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
+                if (response.code != 429) return response
 
                 response.close()
                 retries++
