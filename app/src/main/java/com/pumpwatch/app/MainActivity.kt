@@ -74,6 +74,7 @@ import com.pumpwatch.app.ui.SpotWorkspace
 import com.pumpwatch.app.worker.MonitorScheduler
 import com.pumpwatch.app.worker.MonitorWorker
 import com.pumpwatch.app.worker.SignalScannerWorker
+import com.pumpwatch.app.worker.TraderMonitorScheduler
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -122,6 +123,7 @@ class MainActivity : ComponentActivity() {
         MonitorScheduler.start(this)
         scheduleSignalScanner()
         WatchlistScheduler.start(this)
+        TraderMonitorScheduler.start(this) // 🏆 Sprint 16: هشدار تاپ تریدرها
 
         setContent {
             PumpWatchTheme {
@@ -129,6 +131,7 @@ class MainActivity : ComponentActivity() {
                     MonitorScheduler.start(this)
                     scheduleSignalScanner()
                     WatchlistScheduler.start(this)
+                    TraderMonitorScheduler.start(this)
                 })
             }
         }
