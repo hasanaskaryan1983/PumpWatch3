@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -120,7 +121,6 @@ class MainActivity : ComponentActivity() {
 
         MonitorScheduler.start(this)
         scheduleSignalScanner()
-        // 🚀 Sprint 15 (فاز ۲ / Commit 13): شروع Worker بررسی هشدارهای واچ‌لیست (هر ۱۵ دقیقه)
         WatchlistScheduler.start(this)
 
         setContent {
@@ -128,7 +128,6 @@ class MainActivity : ComponentActivity() {
                 MainApp(onModeChanged = {
                     MonitorScheduler.start(this)
                     scheduleSignalScanner()
-                    // 🚀 Commit 13: با تغییر مود هم Scheduler واچ‌لیست تازه می‌ماند
                     WatchlistScheduler.start(this)
                 })
             }
@@ -209,32 +208,69 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("🚀", fontSize = 26.sp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "PumpDump",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black,
-                        color = accent
-                    )
+                    // لوگو و نام برنامه
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🚀", fontSize = 24.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "PumpDump",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = TextPrimary
+                        )
+                    }
+                    
                     Spacer(Modifier.weight(1f))
 
-                    Surface(
-                        modifier = Modifier.clickable {
-                            isFutures = !isFutures
-                            prefs.edit().putString("mode", if (isFutures) "FUTURES" else "SPOT").apply()
-                            onModeChanged()
-                        },
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (isFutures) FuturesAccent.copy(alpha = 0.15f) else SpotAccent.copy(alpha = 0.15f)
+                    // 🚀 دکمه‌های کنار هم (بدون ایموجی)
+                    Row(
+                        modifier = Modifier
+                            .background(DarkCard, RoundedCornerShape(10.dp))
+                            .padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Text(
-                            text = if (isFutures) "🔥 فیوچرز" else "💚 اسپات",
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            color = if (isFutures) FuturesAccent else SpotAccent,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
+                        TextButton(
+                            onClick = {
+                                if (isFutures) {
+                                    isFutures = false
+                                    prefs.edit().putString("mode", "SPOT").apply()
+                                    onModeChanged()
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = if (!isFutures) SpotAccent else Color.Transparent
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                "اسپات",
+                                color = if (!isFutures) Color.Black else TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                if (!isFutures) {
+                                    isFutures = true
+                                    prefs.edit().putString("mode", "FUTURES").apply()
+                                    onModeChanged()
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = if (isFutures) FuturesAccent else Color.Transparent
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                "فیوچرز",
+                                color = if (isFutures) Color.Black else TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }
@@ -262,7 +298,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
-// 🚀 Sprint 10 (V3e): ردیف کانترکت برای کارت‌های لیست بازار
 @Composable
 private fun ContractRow(ctx: Context, contract: String?) {
     if (contract.isNullOrEmpty()) {
@@ -293,9 +328,6 @@ private fun ContractRow(ctx: Context, contract: String?) {
     }
 }
 
-/**
- * 🚀 Sprint 14 (Commit 6D): بج تازگی دادهٔ بازار
- */
 @Composable
 private fun FreshnessBadge(meta: MarketMeta) {
     val (emoji, color, text) = when {
