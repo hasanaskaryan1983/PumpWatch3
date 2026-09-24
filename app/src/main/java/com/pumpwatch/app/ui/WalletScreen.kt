@@ -1037,8 +1037,8 @@ private fun ChainForensicsSection(
                                 daysSpan < 3 -> 100
                                 else -> 150
                             }
+                            var page = 0 // ✅ اصلاح: تعریف خارج از بلوک try
                             try {
-                                var page = 0
                                 while (page < pageCap) {
                                     pagesUsed = page + 1
                                     val perMs = if (page > 0) (System.currentTimeMillis() - t0) / page else 0L
@@ -1085,7 +1085,7 @@ private fun ChainForensicsSection(
                                 val m = t.message ?: ""
                                 if (m.contains("closed", true) || m.contains("refused", true) || m.contains("timeout", true) || m.contains("connect", true) || m.contains("429")) {
                                     rpcBlocked = true
-                                    stopReason = "خطای اتصال در صفحهٔ ${page + 1}: $m"
+                                    stopReason = "خطای اتصال در صفحهٔ ${page + 1}: $m" // ✅ حالا page قابل دسترسی است
                                 } else throw t
                             }
                             forensicsSigsCache[cacheKey] = sigs.toList()
