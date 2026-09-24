@@ -101,7 +101,7 @@ private val CHAINS = listOf(
     ChainCfg("bsc", "BNB 🟡", "bsc", null, "evm"),
     ChainCfg("arbitrum", "Arbitrum 🔷", "arbitrum", "https://arbitrum.blockscout.com/", "evm"),
     ChainCfg("optimism", "Optimism 🔴", "optimism", "https://optimism.blockscout.com/", "evm"),
-    ChainCfg("polygon", "Polygon 🟣", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
+    ChainCfg("polygon", "Polygon ", "polygon_pos", "https://polygon.blockscout.com/", "evm"),
     ChainCfg("avalanche", "Avalanche 🔺", "avalanche", null, "evm"),
     ChainCfg("ton", "TON 🔵", "ton", null, "ton"),
     ChainCfg("sui", "SUI 💧", "sui", null, "sui"),
@@ -203,7 +203,7 @@ fun WalletScreen() {
         val cfg = chain
         scope.launch {
             loading = true; error = null; holdings = emptyList(); txs = emptyList()
-            info = "🔍 در حال اسکن کیف پول..."
+            info = " در حال اسکن کیف پول..."
             try {
                 withContext(Dispatchers.IO) {
                     val kind = if (cfg.kind == "auto") detectKind(addr) else cfg.kind
@@ -326,7 +326,7 @@ fun WalletScreen() {
                             val acc = try { TonClient.api.account(addr) } catch (_: Exception) { null }
                             val jets = try { TonClient.api.jettons(addr) } catch (_: Exception) { null }
                             if (acc == null && jets == null) {
-                                info = "⚠️ اتصال به TonAPI ناموفق بود — دوباره تلاش کن"
+                                info = "️ اتصال به TonAPI ناموفق بود — دوباره تلاش کن"
                             } else {
                                 val coinsT = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
                                 val tonPx = coinsT.firstOrNull { it.symbol.equals("TON", true) }?.current_price
@@ -670,7 +670,7 @@ fun WalletScreen() {
                             }
                             info = if (allHold.isEmpty()) {
                                 if (addr.startsWith("0x") && addr.length == 42)
-                                    "😴 موجودی توکنی روی ۷ شبکهٔ EVM فعال پیدا نشد • اگر آدرس BSC/Avax/Sei است: منبع این شبکه‌ها قطع شده (🚫)"
+                                    "😴 موجودی توکنی روی ۷ شبکهٔ EVM فعال پیدا نشد • اگر آدرس BSC/Avax/Sei است: منبع این شبکه‌ها قطع شده ()"
                                 else "😴 موجودی پیدا نشد (آدرس یا شبکه رو چک کن)"
                             }
                             else "✅ ${allHold.size} توکن روی ${hosts.size} شبکه بررسی شد"
@@ -688,7 +688,7 @@ fun WalletScreen() {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("⚙️ موتورها", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("️ موتورها", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 2, onClick = { subTab = 2 }, label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
@@ -719,10 +719,11 @@ fun WalletScreen() {
                     }
                 }
 
+                // 🚀 Commit 61.3: موتور 
                 Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                            Text("🔍 موتور : بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
                             Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده. سوال: الان داخلش چیه؟" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                         }
                         TextField(value = address, onValueChange = { address = it },
@@ -732,7 +733,7 @@ fun WalletScreen() {
                             colors = ButtonDefaults.buttonColors(containerColor = VBlue),
                             shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
                             if (loading) CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
-                            Text("🔍 بررسی کیف پول", fontSize = 12.sp)
+                            Text(" بررسی کیف پول", fontSize = 12.sp)
                         }
                         if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = VGreen)
                     }
@@ -799,7 +800,7 @@ fun WalletScreen() {
                         items(txs) { t ->
                             Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                                 Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
+                                    Text(if (t.incoming) "🟢" else "", fontSize = 14.sp)
                                     Spacer(Modifier.width(6.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text("${if (t.incoming) "خرید/ورود" else "فروش/خروج"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -913,7 +914,7 @@ private fun ChainForensicsSection(
             s > b * 1.3 -> "توزیع (فروش سنگین‌تر)"
             else -> "متعادل"
         }
-        return "💹 جریان پنجره (خریدهای تکی ≥ آستانه): خرید ${String.format(Locale.US, "$%,.0f", b)} در برابر فروش ${String.format(Locale.US, "$%,.0f", s)} → $bias"
+        return " جریان پنجره (خریدهای تکی ≥ آستانه): خرید ${String.format(Locale.US, "$%,.0f", b)} در برابر فروش ${String.format(Locale.US, "$%,.0f", s)} → $bias"
     }
 
     fun run() {
@@ -1030,14 +1031,14 @@ private fun ChainForensicsSection(
                         } else {
                             val t0 = System.currentTimeMillis()
                             val daysSpan = (toTs - fromTs) / 86400000.0
+                            // 🚀 Commit 61.3: pageCap بسیار کم‌تر برای سرعت
                             var pageCap = when {
-                                daysSpan < 0.25 -> 20
-                                daysSpan < 0.5 -> 40
-                                daysSpan < 1 -> 60
-                                daysSpan < 3 -> 100
-                                else -> 150
+                                daysSpan < 0.25 -> 15   // < 6 hours
+                                daysSpan < 0.5 -> 20    // < 12 hours  
+                                daysSpan < 1 -> 30      // < 24 hours
+                                else -> 50              // >= 1 day
                             }
-                            var page = 0 // ✅ اصلاح: تعریف خارج از بلوک try
+                            var page = 0
                             try {
                                 while (page < pageCap) {
                                     pagesUsed = page + 1
@@ -1055,7 +1056,7 @@ private fun ChainForensicsSection(
                                     }
                                     if (resp == null || resp.result == null) { rpcBlocked = true; stopReason = "پاسخ نامعتبر/Rate در صفحهٔ ${page + 1}"; break }
                                     val arr = resp.result.asJsonArray ?: break
-                                    if (arr.size() == 0) { stopReason = "به شروع تاریخچهٔ استخر رسیدم (صفحهٔ ${page + 1})"; break }
+                                    if (arr.size() == 0) { stopReason = "به شروع تاریخچه استخر رسیدم (صفحهٔ ${page + 1})"; break }
                                     val pageNewest = (arr.get(0).asJsonObject.get("blockTime")?.asLong ?: 0L) * 1000L
                                     if (page == 0) newestSeen = pageNewest
                                     var oldest = Long.MAX_VALUE
@@ -1070,7 +1071,7 @@ private fun ChainForensicsSection(
                                         val spanMs = pageNewest - oldest
                                         if (spanMs > 60_000L) {
                                             val need = ((pageNewest - fromTs) / spanMs).toInt() + 3
-                                            pageCap = minOf(pageCap, maxOf(20, need))
+                                            pageCap = minOf(pageCap, maxOf(15, need))
                                         }
                                     }
                                     if (oldest < rpcDepthFrom) rpcDepthFrom = oldest
@@ -1085,7 +1086,7 @@ private fun ChainForensicsSection(
                                 val m = t.message ?: ""
                                 if (m.contains("closed", true) || m.contains("refused", true) || m.contains("timeout", true) || m.contains("connect", true) || m.contains("429")) {
                                     rpcBlocked = true
-                                    stopReason = "خطای اتصال در صفحهٔ ${page + 1}: $m" // ✅ حالا page قابل دسترسی است
+                                    stopReason = "خطای اتصال در صفحهٔ ${page + 1}: $m"
                                 } else throw t
                             }
                             forensicsSigsCache[cacheKey] = sigs.toList()
@@ -1270,8 +1271,8 @@ private fun ChainForensicsSection(
                     err = "⏹ اسکن توسط تو متوقف شد"
                 } else {
                     err = if ((t.message ?: "").contains("429"))
-                        "⚠️ سهمیه RPC عمومی پر شد (429). بازه را کوتاه‌تر کن و یکی‌دو دقیقه صبر کن."
-                    else "⚠️ خطا: ${t.message}"
+                        "️ سهمیه RPC عمومی پر شد (429). بازه را کوتاه‌تر کن و یکی‌دو دقیقه صبر کن."
+                    else "️ خطا: ${t.message}"
                 }
             }
             loading = false; progress = ""
@@ -1280,7 +1281,8 @@ private fun ChainForensicsSection(
 
     Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("⛓️ موتور ۶: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم + fallback منطقه‌ای)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
+            //  Commit 61.3: نام موتور ۳ (نه ۶)
+            Text("⛓️ موتور ۳: جنایت‌شناسی کامل زنجیره (Solana — RPC مستقیم + fallback منطقه‌ای)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
             Text("برای شکار روزانه (راه ۱): یکی از چیپ‌های پنجرهٔ آماده را بزن و اجرا کن. بار اول ممکن است چند دقیقه طول بکشد؛ بار بعد برای همان بازه آنی است. آستانه روی «خرید تکی» هر تراکنش اعمال می‌شود، نه جمع کل.", fontSize = 9.sp, color = VGray, lineHeight = 14.sp)
             TextField(value = symbol, onValueChange = { symbol = it },
                 placeholder = { Text("نماد... (CATE)", fontSize = 11.sp) },
@@ -1293,8 +1295,9 @@ private fun ChainForensicsSection(
                     placeholder = { Text("تا: 2026/09/15", fontSize = 10.sp) },
                     modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
             }
+            // 🚀 Commit 61.3: حذف ۳ روز، فقط ۴ گزینه
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(4 to "۴س اخیر", 8 to "۸س اخیر", 12 to "۱۲س اخیر", 24 to "۲۴س اخیر", 3 to "۳روز اخیر").forEach { (h, label) ->
+                listOf(4 to "۴س اخیر", 8 to "۸س اخیر", 12 to "۱۲س اخیر", 24 to "۲۴س اخیر").forEach { (h, label) ->
                     FilterChip(selected = false, onClick = {
                         val sdfP = SimpleDateFormat("yyyy/MM/dd", Locale.US)
                         val nowMs = System.currentTimeMillis()
@@ -1305,7 +1308,7 @@ private fun ChainForensicsSection(
             }
             Text("💵 آستانهٔ خرید تکی (هر تراکنش جدا، نه جمع کل):", fontSize = 9.sp, color = VGray)
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(10_000.0 to "≥۱۰K", 20_000.0 to "≥۲۰K", 50_000.0 to "≥۵۰K", 100_000.0 to "≥۱۰۰K", 200_000.0 to "≥۲۰۰K", 500_000.0 to "≥۵۰۰K").forEach { (v, label) ->
+                listOf(10_000.0 to "≥۱۰K", 20_000.0 to "≥۲۰K", 50_000.0 to "≥۵۰K", 100_000.0 to "≥۱۰K", 200_000.0 to "≥۲۰۰K", 500_000.0 to "≥۵۰۰K").forEach { (v, label) ->
                     FilterChip(selected = threshold == v, onClick = { threshold = v }, label = { Text(label, fontSize = 10.sp) })
                 }
             }
@@ -1340,7 +1343,7 @@ private fun ChainForensicsSection(
             if (!ksOk) {
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3D1F1F)),
                     shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Text("⚠️ Keystore دستگاه در دسترس نیست — کلید API نمی‌تواند امن ذخیره شود. " +
+                    Text("️ Keystore دستگاه در دسترس نیست — کلید API نمی‌تواند امن ذخیره شود. " +
                          "از RPC عمومی استفاده می‌شود (بدون کلید شخصی).",
                         fontSize = 9.sp, color = VRed, modifier = Modifier.padding(8.dp))
                 }
@@ -1384,7 +1387,7 @@ private fun ChainForensicsSection(
                         RpcKeyStore.clear(context)
                         savedMsg = "✅ کلید حذف شد — از RPC عمومی استفاده می‌شود"
                     }, colors = ButtonDefaults.buttonColors(containerColor = VCard),
-                        shape = RoundedCornerShape(6.dp)) { Text("🗑 پاک", fontSize = 10.sp) }
+                        shape = RoundedCornerShape(6.dp)) { Text(" پاک", fontSize = 10.sp) }
                 }
             }
             if (savedMsg.isNotEmpty()) Text(savedMsg, fontSize = 9.sp, color = VGreen, fontWeight = FontWeight.Bold)
@@ -1405,7 +1408,7 @@ private fun ChainForensicsSection(
                     Text("🕐 اولین: ${w.firstBuyText} • ${w.txCount} تراکنش ≥ آستانه • فروش: ${String.format(Locale.US, "$%,.0f", w.soldUsd)}", fontSize = 9.sp, color = VGray)
                     Text(w.statusText, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                         color = if (w.statusText.contains("هودل")) VGreen else if (w.statusText.contains("✅")) VGold else VRed)
-                    if (w.bottomTag) Text("🎯 کف‌خر سنگین: ورود حوالی کفِ بازه — کاندید کیف رانتی", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                    if (w.bottomTag) Text(" کف‌خر سنگین: ورود حوالی کفِ بازه — کاندید کیف رانتی", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(onClick = { onCopy(w.addr) }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("📋 کپی", fontSize = 9.sp) }
                         Button(onClick = { onInspect(w.addr) }, colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
