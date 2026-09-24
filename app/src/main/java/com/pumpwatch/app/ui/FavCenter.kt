@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.google.gson.Gson
 import com.google.gson.JsonArray
-import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.GatewayProviders
 import kotlinx.coroutines.Dispatchers
@@ -58,16 +57,12 @@ private val FGray = Color(0xFF8B949E)
 private val FCard = Color(0xFF1A2230)
 private val FG2 = Gson()
 
-// 🚀 Commit 54: همهٔ تماس‌های شبکهٔ این فایل از درِ Gateway عبور می‌کنند
 private val GW = GatewayProviders()
 
 private const val FAV_WALLET_PARALLELISM = 3
 private const val FAV_TOKEN_PARALLELISM = 5
 private const val FAV_CHUNK_DELAY_MS = 200L
 
-// 🚀 Commit 57 (مرحلهٔ A): پروندهٔ نهنگ — تکرار + اعداد غنی
-// symbol → symbols (لیست ارزهایی که این نهنگ در آن‌ها شکار شده)
-// + boughtUsd/maxSingleUsd/soldUsd/txCount/multiplier برای گزارش‌های B
 data class FavWallet(
     val addr: String,
     var note: String,
@@ -118,9 +113,6 @@ object FavStore {
     var lastScanTs = 0L
     private var loaded = false
 
-    // 🚀 Commit 57: نرمال‌سازی آرایهٔ قدیمی → جدید (symbol→symbols + فیلدهای عددی)
-    // Gson با Unsafe مقدار اولیهٔ کلاس را اعمال نمی‌کند، پس باید مطمئن شویم
-    // symbols و اعداد هرگز null نیستند.
     private fun normalizeFavsArray(arr: JsonArray): MutableList<FavWallet> {
         val out = mutableListOf<FavWallet>()
         for (el in arr) {
@@ -139,7 +131,6 @@ object FavStore {
             fun ei(name: String, d: Int) { if (!o.has(name) || o.get(name).isJsonNull) o.addProperty(name, d) }
             en("boughtUsd", 0.0); en("maxSingleUsd", 0.0); en("soldUsd", 0.0); en("multiplier", 0.0); ei("txCount", 0)
             val fw = FG2.fromJson(o, FavWallet::class.java) ?: continue
-            if (fw.symbols == null) fw.symbols = syms
             out.add(fw)
         }
         return out
@@ -189,8 +180,6 @@ object FavStore {
 
     fun unread(): Int = alerts.value.count { !it.read }
 
-    // 🚀 Commit 57: addFav — تکرار نهنگ ثبت می‌شود (نه return)
-    // سازگار با فراخوانی فعلی WalletScreen (symbol=) و فراخوانی جدید (symbols= + اعداد)
     fun addFav(
         ctx: Context,
         addr: String,
@@ -210,7 +199,6 @@ object FavStore {
         val allSyms = (symbols + listOf(symbol)).filter { it.isNotEmpty() }.distinct()
         val existing = favs.value.firstOrNull { it.addr == addr }
         if (existing != null) {
-            if (existing.symbols == null) existing.symbols = mutableListOf()
             val isNew = allSyms.any { it !in existing.symbols }
             for (s in allSyms) if (s !in existing.symbols) existing.symbols.add(s)
             if (isNew) {
@@ -263,7 +251,6 @@ object FavStore {
     }
 }
 
-// 🚀 Commit 54: اسکن موجودی از طریق Gateway — کش TTL + breaker + بدون catch خاموش
 private suspend fun scanHoldings(addr: String): HoldingsSummary {
     val balances = mutableMapOf<String, Double>()
     var total = 0.0
