@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.GatewayProviders
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +65,9 @@ private const val FAV_WALLET_PARALLELISM = 3
 private const val FAV_TOKEN_PARALLELISM = 5
 private const val FAV_CHUNK_DELAY_MS = 200L
 
+// 🚀 Commit 57 (مرحلهٔ A): پروندهٔ نهنگ — تکرار + اعداد غنی
+// symbol → symbols (لیست ارزهایی که این نهنگ در آن‌ها شکار شده)
+// + boughtUsd/maxSingleUsd/soldUsd/txCount/multiplier برای گزارش‌های B
 data class FavWallet(
     val addr: String,
     var note: String,
@@ -73,9 +78,14 @@ data class FavWallet(
     var unpricedCount: Int = 0,
     var snap: MutableMap<String, Double> = mutableMapOf(),
     var tokenCount: Int = 0,
-    val symbol: String = "",
-    val role: String = "",
-    val huntedAtMs: Long = 0L
+    var symbols: MutableList<String> = mutableListOf(),
+    var role: String = "",
+    var huntedAtMs: Long = 0L,
+    var boughtUsd: Double = 0.0,
+    var maxSingleUsd: Double = 0.0,
+    var soldUsd: Double = 0.0,
+    var txCount: Int = 0,
+    var multiplier: Double = 0.0
 )
 
 data class WalletAlert(val addr: String, val ts: Long, val text: String, var read: Boolean = false)
@@ -108,6 +118,33 @@ object FavStore {
     var lastScanTs = 0L
     private var loaded = false
 
+    // 🚀 Commit 57: نرمال‌سازی آرایهٔ قدیمی → جدید (symbol→symbols + فیلدهای عددی)
+    // Gson با Unsafe مقدار اولیهٔ کلاس را اعمال نمی‌کند، پس باید مطمئن شویم
+    // symbols و اعداد هرگز null نیستند.
+    private fun normalizeFavsArray(arr: JsonArray): MutableList<FavWallet> {
+        val out = mutableListOf<FavWallet>()
+        for (el in arr) {
+            if (!el.isJsonObject) continue
+            val o = el.asJsonObject
+            val syms: MutableList<String> = when {
+                o.has("symbols") && o.get("symbols").isJsonArray ->
+                    o.getAsJsonArray("symbols").mapNotNull { if (it.isJsonNull) null else it.asString }.toMutableList()
+                o.has("symbol") && !o.get("symbol").isJsonNull && o.get("symbol").asString.isNotEmpty() ->
+                    mutableListOf(o.get("symbol").asString)
+                else -> mutableListOf()
+            }
+            o.remove("symbol")
+            val na = JsonArray(); syms.forEach { na.add(it) }; o.add("symbols", na)
+            fun en(name: String, d: Double) { if (!o.has(name) || o.get(name).isJsonNull) o.addProperty(name, d) }
+            fun ei(name: String, d: Int) { if (!o.has(name) || o.get(name).isJsonNull) o.addProperty(name, d) }
+            en("boughtUsd", 0.0); en("maxSingleUsd", 0.0); en("soldUsd", 0.0); en("multiplier", 0.0); ei("txCount", 0)
+            val fw = FG2.fromJson(o, FavWallet::class.java) ?: continue
+            if (fw.symbols == null) fw.symbols = syms
+            out.add(fw)
+        }
+        return out
+    }
+
     fun load(ctx: Context) {
         if (loaded) return
         loaded = true
@@ -120,19 +157,23 @@ object FavStore {
                     val olds: MutableList<SavedTraderOld>? = FG2.fromJson(old, object : TypeToken<MutableList<SavedTraderOld>>() {}.type)
                     olds?.map {
                         FavWallet(
-                            addr = it.addr,
-                            note = it.note,
-                            starred = false,
+                            addr = it.addr, note = it.note, starred = false,
                             addedTs = System.currentTimeMillis(),
-                            symbol = it.symbol,
-                            role = "",
+                            symbols = mutableListOf(it.symbol), role = "",
                             huntedAtMs = System.currentTimeMillis()
                         )
                     }?.toMutableList() ?: mutableListOf()
                 } else mutableListOf()
-            } else FG2.fromJson(j, object : TypeToken<MutableList<FavWallet>>() {}.type) ?: mutableListOf()
+            } else {
+                val arr = FG2.fromJson(j, JsonArray::class.java)
+                if (arr != null) normalizeFavsArray(arr) else mutableListOf()
+            }
         } catch (_: Exception) { mutableListOf() }
-        trash.value = try { FG2.fromJson(p.getString("fav_trash", "") ?: "", object : TypeToken<MutableList<FavWallet>>() {}.type) ?: mutableListOf() } catch (_: Exception) { mutableListOf() }
+        trash.value = try {
+            val tj = p.getString("fav_trash", "") ?: ""
+            if (tj.isEmpty()) mutableListOf()
+            else { val ta = FG2.fromJson(tj, JsonArray::class.java); if (ta != null) normalizeFavsArray(ta) else mutableListOf() }
+        } catch (_: Exception) { mutableListOf() }
         alerts.value = try { FG2.fromJson(p.getString("fav_alerts", "") ?: "", object : TypeToken<MutableList<WalletAlert>>() {}.type) ?: mutableListOf() } catch (_: Exception) { mutableListOf() }
         lastScanTs = p.getLong("fav_lastscan", 0L)
     }
@@ -148,57 +189,77 @@ object FavStore {
 
     fun unread(): Int = alerts.value.count { !it.read }
 
+    // 🚀 Commit 57: addFav — تکرار نهنگ ثبت می‌شود (نه return)
+    // سازگار با فراخوانی فعلی WalletScreen (symbol=) و فراخوانی جدید (symbols= + اعداد)
     fun addFav(
         ctx: Context,
         addr: String,
         note: String = "",
         starred: Boolean = false,
         symbol: String = "",
+        symbols: List<String> = emptyList(),
         role: String = "",
-        huntedAtMs: Long = System.currentTimeMillis()
+        huntedAtMs: Long = System.currentTimeMillis(),
+        boughtUsd: Double = 0.0,
+        maxSingleUsd: Double = 0.0,
+        soldUsd: Double = 0.0,
+        txCount: Int = 0,
+        multiplier: Double = 0.0
     ) {
-        if (favs.value.any { it.addr == addr } || trash.value.any { it.addr == addr }) return
+        load(ctx)
+        val allSyms = (symbols + listOf(symbol)).filter { it.isNotEmpty() }.distinct()
+        val existing = favs.value.firstOrNull { it.addr == addr }
+        if (existing != null) {
+            if (existing.symbols == null) existing.symbols = mutableListOf()
+            val isNew = allSyms.any { it !in existing.symbols }
+            for (s in allSyms) if (s !in existing.symbols) existing.symbols.add(s)
+            if (isNew) {
+                existing.boughtUsd += boughtUsd
+                existing.soldUsd += soldUsd
+                existing.txCount += txCount
+                existing.maxSingleUsd = maxOf(existing.maxSingleUsd, maxSingleUsd)
+                existing.multiplier = maxOf(existing.multiplier, multiplier)
+            }
+            if (role.isNotEmpty()) existing.role = role
+            if (huntedAtMs > 0) existing.huntedAtMs = huntedAtMs
+            favs.value = ArrayList(favs.value); save(ctx)
+            return
+        }
+        if (trash.value.any { it.addr == addr }) return
         favs.value.add(
             FavWallet(
-                addr = addr,
-                note = note,
-                starred = starred,
+                addr = addr, note = note, starred = starred,
                 addedTs = System.currentTimeMillis(),
-                symbol = symbol,
-                role = role,
-                huntedAtMs = huntedAtMs
+                symbols = allSyms.toMutableList(), role = role, huntedAtMs = huntedAtMs,
+                boughtUsd = boughtUsd, maxSingleUsd = maxSingleUsd, soldUsd = soldUsd,
+                txCount = txCount, multiplier = multiplier
             )
         )
-        favs.value = ArrayList(favs.value)
-        save(ctx)
+        favs.value = ArrayList(favs.value); save(ctx)
     }
 
     fun updateNote(ctx: Context, addr: String, newNote: String) {
         val w = favs.value.firstOrNull { it.addr == addr } ?: return
         w.note = newNote
-        favs.value = ArrayList(favs.value)
-        save(ctx)
+        favs.value = ArrayList(favs.value); save(ctx)
     }
 
     fun moveToTrash(ctx: Context, addr: String) {
         val w = favs.value.firstOrNull { it.addr == addr } ?: return
         favs.value.remove(w); trash.value.add(w)
-        favs.value = ArrayList(favs.value); trash.value = ArrayList(trash.value)
-        save(ctx)
+        favs.value = ArrayList(favs.value); trash.value = ArrayList(trash.value); save(ctx)
     }
 
     fun restore(ctx: Context, addr: String) {
         val w = trash.value.firstOrNull { it.addr == addr } ?: return
         trash.value.remove(w); favs.value.add(w)
-        favs.value = ArrayList(favs.value); trash.value = ArrayList(trash.value)
-        save(ctx)
+        favs.value = ArrayList(favs.value); trash.value = ArrayList(trash.value); save(ctx)
     }
 
     fun deleteForever(ctx: Context, addr: String) {
         trash.value.removeAll { it.addr == addr }
         alerts.value.removeAll { it.addr == addr }
-        trash.value = ArrayList(trash.value); alerts.value = ArrayList(alerts.value)
-        save(ctx)
+        trash.value = ArrayList(trash.value); alerts.value = ArrayList(alerts.value); save(ctx)
     }
 }
 
@@ -231,12 +292,7 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
             }
             for (part in parts) for (a in part) {
                 balances[a.sym] = (balances[a.sym] ?: 0.0) + a.amt
-                if (a.px != null && a.px > 0) {
-                    total += a.amt * a.px
-                    priced++
-                } else {
-                    unpriced++
-                }
+                if (a.px != null && a.px > 0) { total += a.amt * a.px; priced++ } else unpriced++
             }
         } else if (addr.length in 32..44) {
             val res = GW.solanaTypedGateway(
@@ -269,12 +325,7 @@ private suspend fun scanHoldings(addr: String): HoldingsSummary {
             }
             for (a in parts) {
                 balances[a.sym] = (balances[a.sym] ?: 0.0) + a.amt
-                if (a.px != null && a.px > 0) {
-                    total += a.amt * a.px
-                    priced++
-                } else {
-                    unpriced++
-                }
+                if (a.px != null && a.px > 0) { total += a.amt * a.px; priced++ } else unpriced++
             }
         }
     } catch (_: Exception) { }
@@ -349,7 +400,7 @@ fun FavoritesPage() {
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("❤️ پروندهٔ نهنگ‌ها", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FRed)
-        Text("⭐ زرد = بررسی خودکار هر ۶ ساعت + هشدار در ⚡️ • هر نهنگ شامل: ارز شکار + نقش + تاریخ شکار + یادداشت قابل ویرایش", fontSize = 9.sp, color = FGray)
+        Text("⭐ زرد = بررسی خودکار هر ۶ ساعت + هشدار در ⚡️ • تکرار نهنگ در چند پامپ خودکار شمرده می‌شود", fontSize = 9.sp, color = FGray)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             TextField(value = newAddr, onValueChange = { newAddr = it },
                 placeholder = { Text("آدرس کیف مهم...", fontSize = 11.sp) },
@@ -383,14 +434,18 @@ fun FavoritesPage() {
                         }
                         Column(modifier = Modifier.weight(1f).padding(horizontal = 6.dp)) {
                             Text(shortA(w.addr), fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGold)
-                            if (w.symbol.isNotEmpty()) {
-                                Text("🪙 شکار در: ${w.symbol} • ${sdfDate.format(Date(if (w.huntedAtMs > 0) w.huntedAtMs else w.addedTs))}",
-                                    fontSize = 9.sp, color = FBlue, fontWeight = FontWeight.Bold)
+                            if (w.symbols.isNotEmpty()) {
+                                val rep = if (w.symbols.size > 1) " • 🔁 ${w.symbols.size} پامپ" else ""
+                                Text("🪙 شکار در: ${w.symbols.joinToString(" / ")} • ${sdfDate.format(Date(if (w.huntedAtMs > 0) w.huntedAtMs else w.addedTs))}$rep",
+                                    fontSize = 9.sp, color = if (w.symbols.size > 1) FGold else FBlue, fontWeight = FontWeight.Bold)
                             }
                             if (w.role.isNotEmpty()) {
                                 Text("🏷️ نقش: ${w.role}", fontSize = 9.sp,
-                                    color = if (w.role.contains("کف‌خر")) FGold else FGray,
-                                    fontWeight = FontWeight.Bold)
+                                    color = if (w.role.contains("کف‌خر")) FGold else FGray, fontWeight = FontWeight.Bold)
+                            }
+                            if (w.boughtUsd > 0) {
+                                Text("💵 کل خرید: ${String.format(Locale.US, "$%,.0f", w.boughtUsd)} • فروش: ${String.format(Locale.US, "$%,.0f", w.soldUsd)} • ${w.txCount} tx • ${String.format(Locale.US, "%.1f", w.multiplier)}x",
+                                    fontSize = 8.sp, color = FGray)
                             }
                         }
                         Button(onClick = { FavStore.moveToTrash(ctx, w.addr) },
@@ -400,21 +455,15 @@ fun FavoritesPage() {
                         Text(if (w.note.isNotEmpty()) "📝 ${w.note}" else "📝 (یادداشت اضافه کن)",
                             fontSize = 9.sp, color = if (w.note.isNotEmpty()) FGray else Color(0xFF555555),
                             modifier = Modifier.weight(1f))
-                        TextButton(onClick = {
-                            editAddr = w.addr
-                            editText = w.note
-                        }) { Text("✏️", fontSize = 10.sp) }
+                        TextButton(onClick = { editAddr = w.addr; editText = w.note }) { Text("✏️", fontSize = 10.sp) }
                     }
                     if (w.starred && w.lastScanTs > 0) {
                         val pricedCount = w.tokenCount - w.unpricedCount
                         val valueText = when {
                             w.tokenCount == 0 -> "بدون توکن"
-                            w.unpricedCount == 0 ->
-                                "ارزش: ${String.format(Locale.US, "$%,.0f", w.totalUsd)} • ${w.tokenCount} توکن"
-                            pricedCount == 0 ->
-                                "❓ ${w.tokenCount} توکن (همه بدون قیمت شناخته‌شده)"
-                            else ->
-                                "ارزش: ${String.format(Locale.US, "$%,.0f", w.totalUsd)} • ${w.tokenCount} توکن (${w.unpricedCount} بدون قیمت)"
+                            w.unpricedCount == 0 -> "ارزش: ${String.format(Locale.US, "$%,.0f", w.totalUsd)} • ${w.tokenCount} توکن"
+                            pricedCount == 0 -> "❓ ${w.tokenCount} توکن (همه بدون قیمت شناخته‌شده)"
+                            else -> "ارزش: ${String.format(Locale.US, "$%,.0f", w.totalUsd)} • ${w.tokenCount} توکن (${w.unpricedCount} بدون قیمت)"
                         }
                         Text("🔄 آخرین بررسی: ${sdf.format(Date(w.lastScanTs))} • $valueText", fontSize = 8.sp, color = FGreen)
                     }
@@ -425,26 +474,16 @@ fun FavoritesPage() {
 
     if (editAddr != null) {
         Dialog(onDismissRequest = { editAddr = null }) {
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = FCard),
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
-            ) {
+            Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = FCard),
+                modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("📝 ویرایش یادداشت", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = FGold)
-                    TextField(
-                        value = editText,
-                        onValueChange = { editText = it },
+                    TextField(value = editText, onValueChange = { editText = it },
                         placeholder = { Text("مثلاً: در ۳ پامپ تکرار شد — رانتی قطعی", fontSize = 10.sp) },
-                        modifier = Modifier.fillMaxWidth().height(100.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    )
+                        modifier = Modifier.fillMaxWidth().height(100.dp), shape = RoundedCornerShape(8.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = { editAddr = null }) { Text("انصراف", color = FGray) }
-                        TextButton(onClick = {
-                            FavStore.updateNote(ctx, editAddr!!, editText)
-                            editAddr = null
-                        }) { Text("💾 ذخیره", color = FGreen) }
+                        TextButton(onClick = { FavStore.updateNote(ctx, editAddr!!, editText); editAddr = null }) { Text("💾 ذخیره", color = FGreen) }
                     }
                 }
             }
@@ -459,8 +498,7 @@ fun AlertsPage() {
     LaunchedEffect(Unit) {
         FavStore.load(ctx)
         FavStore.alerts.value.forEach { it.read = true }
-        FavStore.alerts.value = ArrayList(FavStore.alerts.value)
-        FavStore.save(ctx)
+        FavStore.alerts.value = ArrayList(FavStore.alerts.value); FavStore.save(ctx)
     }
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("⚡️ هشدارهای نهنگ‌ها", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FGold)
@@ -497,7 +535,7 @@ fun TrashPage() {
                     Column(modifier = Modifier.weight(1f).padding(horizontal = 6.dp)) {
                         Text(shortA(w.addr), fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGray)
                         if (w.note.isNotEmpty()) Text(w.note, fontSize = 9.sp, color = FGray)
-                        if (w.symbol.isNotEmpty()) Text("🪙 ${w.symbol} ${if (w.role.isNotEmpty()) "• ${w.role}" else ""}", fontSize = 8.sp, color = FGray)
+                        if (w.symbols.isNotEmpty()) Text("🪙 ${w.symbols.joinToString(" / ")} ${if (w.role.isNotEmpty()) "• ${w.role}" else ""}", fontSize = 8.sp, color = FGray)
                     }
                     Button(onClick = { FavStore.deleteForever(ctx, w.addr) },
                         colors = ButtonDefaults.buttonColors(containerColor = FCard), shape = RoundedCornerShape(6.dp)) { Text("🗑", fontSize = 12.sp) }
