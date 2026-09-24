@@ -37,12 +37,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,7 +75,6 @@ import com.pumpwatch.app.ui.SpotWorkspace
 import com.pumpwatch.app.worker.MonitorScheduler
 import com.pumpwatch.app.worker.MonitorWorker
 import com.pumpwatch.app.worker.SignalScannerWorker
-import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -212,7 +209,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("", fontSize = 24.sp)
+                        Text("🚀", fontSize = 24.sp)
                         Spacer(Modifier.width(8.dp))
                         Text(
                             "PumpDump",
@@ -384,7 +381,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp)
             )
         }
@@ -447,7 +444,7 @@ fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
                 }
 
                 Text(
-                    "",
+                    "📊",
                     fontSize = 18.sp,
                     modifier = Modifier.clickable {
                         try {
