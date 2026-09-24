@@ -29,8 +29,8 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.worker.SignalNavigator
 
 /**
- * 🚀 Sprint 15 (Commit 29 + 32):
- * - ۹ تب (حریم به زیرتب کیف پول منتقل شد)
+ * 🚀 Sprint 15 (Commit 29 + 32) + Sprint 16 (Commit 64):
+ * - ۱۰ تب (تب جدید: تاپ تریدرها 🏆)
  * - Commit 32: navigationBarsPadding → ناوبری پایین دیگر زیر دکمه‌های گوشی نمی‌رود
  */
 enum class SpotTab(val title: String, val emoji: String) {
@@ -42,7 +42,8 @@ enum class SpotTab(val title: String, val emoji: String) {
     MEME("میم", "🐸"),
     TRADES("معامله", "📈"),
     WALLETS("کیف پول", "👛"),
-    WATCHLIST("واچ‌لیست", "⭐")
+    WATCHLIST("واچ‌لیست", "⭐"),
+    TRADERS("تریدرها", "🏆")
 }
 
 private val SpotAccent = Color(0xFF00E676)
@@ -76,6 +77,7 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 SpotTab.TRADES -> TradesScreen()
                 SpotTab.WALLETS -> WalletScreen()
                 SpotTab.WATCHLIST -> WatchlistScreen()
+                SpotTab.TRADERS -> TraderLeaderboardScreen()
             }
         }
 
