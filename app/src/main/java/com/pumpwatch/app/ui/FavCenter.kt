@@ -1,7 +1,9 @@
 package com.pumpwatch.app.ui
 
 import android.content.Context
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -251,6 +253,47 @@ object FavStore {
     }
 }
 
+// 🚀 Commit 58: کارت داشبورد تکرار نهنگ‌ها (بدون کتابخانهٔ خارجی)
+@Composable
+private fun WhaleDashboardCard() {
+    val allWhales = FavStore.favs.value
+    val repeatingWhales = allWhales.filter { it.symbols.size > 1 }.sortedByDescending { it.symbols.size }
+    val topWhales = repeatingWhales.take(3)
+    val maxPumps = topWhales.firstOrNull()?.symbols?.size ?: 1
+
+    Card(colors = CardDefaults.cardColors(containerColor = FCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("📊 داشبورد تکرار نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = FGold)
+            Text(
+                "از ${allWhales.size} نهنگ، ${repeatingWhales.size} نفر در بیش از ۱ پامپ تکرار شده‌اند.",
+                fontSize = 10.sp, color = FGray
+            )
+
+            if (topWhales.isEmpty()) {
+                Text("هنوز نهنگ تکراری ثبت نشده. حداقل ۲ پامپ برای یک آدرس لازم است.", fontSize = 9.sp, color = FGray)
+            } else {
+                topWhales.forEach { w ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(shortA(w.addr), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = FBlue, modifier = Modifier.weight(1f))
+                            Text("🔁 ${w.symbols.size} پامپ", fontSize = 10.sp, color = FGold, fontWeight = FontWeight.Bold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(fraction = w.symbols.size.toFloat() / maxPumps.toFloat())
+                                .height(8.dp)
+                                .background(
+                                    color = if (w.symbols.size >= 3) FRed else if (w.symbols.size == 2) FGold else FBlue,
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 private suspend fun scanHoldings(addr: String): HoldingsSummary {
     val balances = mutableMapOf<String, Double>()
     var total = 0.0
@@ -346,7 +389,7 @@ suspend fun scanStarred(ctx: Context, force: Boolean = false): Int {
             for ((sym, amt) in holds) {
                 val old = w.snap[sym]
                 if (old == null) {
-                    FavStore.alerts.value.add(0, WalletAlert(w.addr, now, "🟢 توکن جدید در کیف: $sym • مقدار: ${String.format(Locale.US, "%.4f", amt)}"))
+                    FavStore.alerts.value.add(0, WalletAlert(w.addr, now, " توکن جدید در کیف: $sym • مقدار: ${String.format(Locale.US, "%.4f", amt)}"))
                     newAlerts++
                 } else if (amt > old * 1.01) {
                     FavStore.alerts.value.add(0, WalletAlert(w.addr, now, "📈 افزایش موجودی: $sym • از ${String.format(Locale.US, "%.4f", old)} به ${String.format(Locale.US, "%.4f", amt)}"))
@@ -388,6 +431,10 @@ fun FavoritesPage() {
     ) {
         Text("❤️ پروندهٔ نهنگ‌ها", fontWeight = FontWeight.Black, fontSize = 16.sp, color = FRed)
         Text("⭐ زرد = بررسی خودکار هر ۶ ساعت + هشدار در ⚡️ • تکرار نهنگ در چند پامپ خودکار شمرده می‌شود", fontSize = 9.sp, color = FGray)
+
+        // 🚀 Commit 58: داشبورد تکرار نهنگ‌ها
+        WhaleDashboardCard()
+
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             TextField(value = newAddr, onValueChange = { newAddr = it },
                 placeholder = { Text("آدرس کیف مهم...", fontSize = 11.sp) },
