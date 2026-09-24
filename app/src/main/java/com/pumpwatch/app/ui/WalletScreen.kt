@@ -203,7 +203,7 @@ fun WalletScreen() {
         val cfg = chain
         scope.launch {
             loading = true; error = null; holdings = emptyList(); txs = emptyList()
-            info = " در حال اسکن کیف پول..."
+            info = "🔍 در حال اسکن کیف پول..."
             try {
                 withContext(Dispatchers.IO) {
                     val kind = if (cfg.kind == "auto") detectKind(addr) else cfg.kind
@@ -690,7 +690,7 @@ fun WalletScreen() {
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("⚙️ موتورها", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
-                FilterChip(selected = subTab == 2, onClick = { subTab = 2 }, label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "️ هشدار", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 2, onClick = { subTab = 2 }, label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 4, onClick = { subTab = 4 }, label = { Text("🔒 حریم", fontSize = 11.sp) })
             }
@@ -760,14 +760,14 @@ fun WalletScreen() {
                                             if (h.price != null && h.price > 0) {
                                                 Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ${String.format(Locale.US, "$%.6f", h.price)}", fontSize = 9.sp, color = VGray)
                                             } else {
-                                                Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت:  نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                                                Text("مقدار: ${String.format(Locale.US, "%.4f", h.amount)} • قیمت: ❓ نامشخص", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                         Text(String.format(Locale.US, "$%,.2f", h.value), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = VGreen)
                                     }
                                     if (h.firstBuyTs != null) {
                                         Text(
-                                            " اولین مشاهده در داده موجود: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت تقریبی آن روز: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
+                                            "🕐 اولین مشاهده در داده موجود: ${sdfBuy.format(Date(h.firstBuyTs!!))} • قیمت تقریبی آن روز: ${if (h.buyPrice != null && h.buyPrice!! > 0) String.format(Locale.US, "$%.6f", h.buyPrice!!) else "توی CoinGecko لیست نشده"}",
                                             fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -780,7 +780,7 @@ fun WalletScreen() {
                                                     info = "📋 کانترکت کپی شد — توی CoinGecko پیست کن تا اشتباهی نخری"
                                                 } catch (_: Exception) { }
                                             }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) {
-                                                Text(" کپی", fontSize = 9.sp)
+                                                Text("📋 کپی", fontSize = 9.sp)
                                             }
                                         }
                                     }
@@ -799,7 +799,7 @@ fun WalletScreen() {
                         items(txs) { t ->
                             Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                                 Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(if (t.incoming) "🟢" else "", fontSize = 14.sp)
+                                    Text(if (t.incoming) "🟢" else "🔴", fontSize = 14.sp)
                                     Spacer(Modifier.width(6.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text("${if (t.incoming) "خرید/ورود" else "فروش/خروج"} ${t.symbol}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -1029,14 +1029,13 @@ private fun ChainForensicsSection(
                             progress = "⚡ از کش executions قبلی همین بازه استفاده شد (آنی)"
                         } else {
                             val t0 = System.currentTimeMillis()
-                            // 🚀 Commit 61: pageCap پویا بر اساس بازه (به جای 150 ثابت)
                             val daysSpan = (toTs - fromTs) / 86400000.0
                             var pageCap = when {
-                                daysSpan < 0.25 -> 20   // < 6 hours
-                                daysSpan < 0.5 -> 40    // < 12 hours
-                                daysSpan < 1 -> 60      // < 24 hours
-                                daysSpan < 3 -> 100     // < 3 days
-                                else -> 150             // >= 3 days
+                                daysSpan < 0.25 -> 20
+                                daysSpan < 0.5 -> 40
+                                daysSpan < 1 -> 60
+                                daysSpan < 3 -> 100
+                                else -> 150
                             }
                             try {
                                 var page = 0
@@ -1078,7 +1077,7 @@ private fun ChainForensicsSection(
                                     if (oldest == Long.MAX_VALUE || oldest < fromTs) { stopReason = "به شروع بازه رسیدم (صفحهٔ ${page + 1})"; break }
                                     before = arr.get(arr.size() - 1).asJsonObject.get("signature")?.asString ?: break
                                     page++
-                                    delay(100) // 🚀 Commit 61: کاهش از 150 به 100
+                                    delay(100)
                                 }
                                 if (stopReason.isEmpty()) stopReason = "سقف صفحات ($pageCap) تمام شد — بازه بلندتر از عمق قابل رسیدن است"
                             } catch (t: Throwable) {
@@ -1177,7 +1176,7 @@ private fun ChainForensicsSection(
                             wallets = list
                             flowLine = flowText(buys.values.sumOf { it.usd }, sells.values.sum())
                             coverage = "⛓️ منبع: RPC مستقیم زنجیره • استخر: $poolLabel • ${deltas.size} delta از ${sigs.size} تراکنش بازه • عمق: از ${if (rpcDepthFrom < Long.MAX_VALUE) sdf.format(Date(rpcDepthFrom)) else "—"} • صفحات: $pagesUsed • آستانه: خرید تکی ≥${String.format(Locale.US, "$%,.0f", thr)}" +
-                                (if (rpcDepthFrom > fromTs) " • ️ پوشش جزئی (تا ${sdfIn.format(Date(rpcDepthFrom))}) • دلیل توقف: $stopReason" else "")
+                                (if (rpcDepthFrom > fromTs) " • ⚠️ پوشش جزئی (تا ${sdfIn.format(Date(rpcDepthFrom))}) • دلیل توقف: $stopReason" else "")
                             if (wallets.isEmpty()) err = "😴 در تراکنش‌های parse‌شدهٔ بازه، کیفی با خرید تکی ≥${String.format(Locale.US, "$%,.0f", thr)} نبود — آستانه را پایین‌تر بیاور (چیپ‌های بالا؛ اجرای بعدی آنی است)"
                         }
                     }
@@ -1243,7 +1242,7 @@ private fun ChainForensicsSection(
 
                         wallets = list
                         flowLine = flowText(buys.values.sumOf { it.usd }, sells.values.sum())
-                        coverage = (if (rpcBlocked) "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما بسته است)" else " منبع: تریدهای GeckoTerminal (عمق RPC به شروع بازه نرسید)") +
+                        coverage = (if (rpcBlocked) "🌍 منبع: تریدهای GeckoTerminal (RPC زنجیره در منطقهٔ شما بسته است)" else "🌍 منبع: تریدهای GeckoTerminal (عمق RPC به شروع بازه نرسید)") +
                             " • استخر: $poolLabel • ${allTrades.size} ترید بررسی شد • عمق: از ${if (gtDepthFrom < Long.MAX_VALUE) sdf.format(Date(gtDepthFrom)) else "—"} • آستانه: خرید تکی ≥${String.format(Locale.US, "$%,.0f", thr)}" +
                             (if (stopReason.isNotEmpty()) " • دلیل توقف RPC: $stopReason" else "")
                         if (wallets.isEmpty()) err =
@@ -1259,8 +1258,8 @@ private fun ChainForensicsSection(
                         val notes = windowNotes.joinToString(" | ")
                         val extra = when {
                             rpcDepthFrom < Long.MAX_VALUE && rpcDepthFrom > toTs -> " — فعالیت استخر از ${sdfIn.format(Date(rpcDepthFrom))} شروع می‌شود؛ بازهٔ تو قبل از آن است"
-                            newestSeen > 0 && newestSeen < fromTs -> " — آخرین فعالیت استخر ${sdfIn.format(Date(newestSeen))} بوده؛ بازه تو بعد از آن است"
-                            !activeFound -> " — به‌نظر می‌رسد بازه تو قبل از ساخت/فعالیت همهٔ استخرهای این نماد است"
+                            newestSeen > 0 && newestSeen < fromTs -> " — آخرین فعالیت استخر ${sdfIn.format(Date(newestSeen))} بوده؛ بازهٔ تو بعد از آن است"
+                            !activeFound -> " — به‌نظر می‌رسد بازهٔ تو قبل از ساخت/فعالیت همهٔ استخرهای این نماد است"
                             else -> ""
                         }
                         err = "😴 در این بازه تراکنشی روی هیچ استخر نامزدی نیست. پنجرهٔ فعالیت استخرها: $notes$extra"
@@ -1294,7 +1293,6 @@ private fun ChainForensicsSection(
                     placeholder = { Text("تا: 2026/09/15", fontSize = 10.sp) },
                     modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true)
             }
-            // 🚀 Commit 61: ترتیب از کوچک به بزرگ + حذف 7 روز + اضافه کردن 4 و 12 ساعت
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf(4 to "۴س اخیر", 8 to "۸س اخیر", 12 to "۱۲س اخیر", 24 to "۲۴س اخیر", 3 to "۳روز اخیر").forEach { (h, label) ->
                     FilterChip(selected = false, onClick = {
@@ -1306,9 +1304,8 @@ private fun ChainForensicsSection(
                 }
             }
             Text("💵 آستانهٔ خرید تکی (هر تراکنش جدا، نه جمع کل):", fontSize = 9.sp, color = VGray)
-            // 🚀 Commit 61: اصلاح برچسب‌ها + ترتیب از کوچک به بزرگ
             Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(10_000.0 to "≥۱۰K", 20_000.0 to "≥۲۰K", 50_000.0 to "≥۵۰K", 100_000.0 to "≥۱۰K", 200_000.0 to "≥۲۰۰K", 500_000.0 to "≥۵۰۰K").forEach { (v, label) ->
+                listOf(10_000.0 to "≥۱۰K", 20_000.0 to "≥۲۰K", 50_000.0 to "≥۵۰K", 100_000.0 to "≥۱۰۰K", 200_000.0 to "≥۲۰۰K", 500_000.0 to "≥۵۰۰K").forEach { (v, label) ->
                     FilterChip(selected = threshold == v, onClick = { threshold = v }, label = { Text(label, fontSize = 10.sp) })
                 }
             }
@@ -1333,7 +1330,7 @@ private fun ChainForensicsSection(
             if (err != null) Text(err ?: "", fontSize = 10.sp, color = VGold)
 
             Spacer(Modifier.height(8.dp))
-            Text(" کلید RPC شخصی (fail-closed: فقط در Keystore امن ذخیره می‌شود):",
+            Text("🔑 کلید RPC شخصی (fail-closed: فقط در Keystore امن ذخیره می‌شود):",
                 fontSize = 10.sp, color = VGold, fontWeight = FontWeight.Bold)
 
             val ksOk = SecureStorage.isKeystoreAvailable()
@@ -1380,7 +1377,7 @@ private fun ChainForensicsSection(
                     enabled = ksOk && rpcKey.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(containerColor = VGold),
                     shape = RoundedCornerShape(6.dp)
-                ) { Text(if (configured) " چرخش" else "💾 ذخیره", fontSize = 10.sp) }
+                ) { Text(if (configured) "🔄 چرخش" else "💾 ذخیره", fontSize = 10.sp) }
 
                 if (configured) {
                     Button(onClick = {
@@ -1408,7 +1405,7 @@ private fun ChainForensicsSection(
                     Text("🕐 اولین: ${w.firstBuyText} • ${w.txCount} تراکنش ≥ آستانه • فروش: ${String.format(Locale.US, "$%,.0f", w.soldUsd)}", fontSize = 9.sp, color = VGray)
                     Text(w.statusText, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                         color = if (w.statusText.contains("هودل")) VGreen else if (w.statusText.contains("✅")) VGold else VRed)
-                    if (w.bottomTag) Text(" کف‌خر سنگین: ورود حوالی کفِ بازه — کاندید کیف رانتی", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
+                    if (w.bottomTag) Text("🎯 کف‌خر سنگین: ورود حوالی کفِ بازه — کاندید کیف رانتی", fontSize = 9.sp, color = VGold, fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(onClick = { onCopy(w.addr) }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("📋 کپی", fontSize = 9.sp) }
                         Button(onClick = { onInspect(w.addr) }, colors = ButtonDefaults.buttonColors(containerColor = VBlue), shape = RoundedCornerShape(6.dp)) { Text("🔍 بررسی کامل", fontSize = 9.sp) }
