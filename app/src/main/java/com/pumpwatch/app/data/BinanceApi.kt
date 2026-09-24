@@ -114,12 +114,12 @@ object ExchangeHttp {
             var retries = 0
             while (retries < MAX_RETRIES) {
                 val response = chain.proceed(chain.request())
-                // ✅ اصلاح: استفاده از () برای فراخوانی متد به جای دسترسی به فیلد
-                if (response.code() != 429 && response.code() != 418) return response
+                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
+                if (response.code != 429 && response.code != 418) return response
 
                 val retryAfter = response.header("Retry-After")?.toLongOrNull()
-                // ✅ اصلاح: استفاده از url() و host()
-                val host = chain.request().url().host()
+                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
+                val host = chain.request().url.host
                 response.close()
                 retries++
 
@@ -132,8 +132,8 @@ object ExchangeHttp {
                 synchronized(lock) { lastRequestMs.set(System.currentTimeMillis()) }
             }
             throw RateLimitedException(
-                // ✅ اصلاح: استفاده از url() و host()
-                "Exchange rate limit exceeded after $MAX_RETRIES retries: ${chain.request().url().host()}"
+                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
+                "Exchange rate limit exceeded after $MAX_RETRIES retries: ${chain.request().url.host}"
             )
         }
     }
