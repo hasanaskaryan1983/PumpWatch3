@@ -38,6 +38,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
@@ -69,6 +71,7 @@ import com.pumpwatch.app.data.platformContractOf
 import com.pumpwatch.app.store.WatchlistScheduler
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
+import com.pumpwatch.app.ui.MarketViewModel
 import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.SpotWorkspace
 import com.pumpwatch.app.worker.MonitorScheduler
@@ -208,9 +211,8 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // لوگو و نام برنامه
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🚀", fontSize = 24.sp)
+                        Text("", fontSize = 24.sp)
                         Spacer(Modifier.width(8.dp))
                         Text(
                             "PumpDump",
@@ -222,7 +224,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                     
                     Spacer(Modifier.weight(1f))
 
-                    // 🚀 دکمه‌های کنار هم (بدون ایموجی)
                     Row(
                         modifier = Modifier
                             .background(DarkCard, RoundedCornerShape(10.dp))
@@ -324,7 +325,7 @@ private fun ContractRow(ctx: Context, contract: String?) {
             colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) SpotAccent else ContractGold),
             shape = RoundedCornerShape(6.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
+        ) { Text(if (copied.value) "✅" else " کپی", fontSize = 9.sp, color = Color.Black) }
     }
 }
 
@@ -333,7 +334,7 @@ private fun FreshnessBadge(meta: MarketMeta) {
     val (emoji, color, text) = when {
         meta.observedAtMs <= 0L -> Triple("⚪", FreshGray, "نامشخص")
         meta.servedFrom == ServedFrom.DISK_CACHE -> Triple("🟠", FreshYellow, "آفلاین (${meta.ageSec() / 60}د)")
-        meta.ageSec() <= 130 -> Triple("🟢", FreshGreen, "زنده")
+        meta.ageSec() <= 130 -> Triple("", FreshGreen, "زنده")
         meta.ageSec() <= 1800 -> Triple("🟡", FreshYellow, "کش (${meta.ageSec() / 60}د)")
         else -> Triple("🔴", FreshRed, "مانده (${meta.ageSec() / 60}د)")
     }
@@ -353,50 +354,15 @@ private fun FreshnessBadge(meta: MarketMeta) {
 
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
-    var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
+    val viewModel: MarketViewModel = viewModel()
+    
+    val coins by viewModel.coins.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMsg by viewModel.errorMsg.collectAsState()
+    val meta by viewModel.meta.collectAsState()
+    val platformMap by viewModel.platformMap.collectAsState()
+
     var query by remember { mutableStateOf("") }
-    var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
-    var meta by remember { mutableStateOf(MarketMeta(0L, ServedFrom.UNKNOWN, 0)) }
-    val scope = rememberCoroutineScope()
-
-    fun load() {
-        scope.launch {
-            loading = true
-            errorMsg = null
-            try {
-                val mode = prefs.getString("mode", "SPOT")
-                if (mode == "FUTURES") {
-                    coins = ApiClient.getTop100Coins()
-                } else {
-                    coins = ApiClient.getQuickCoins()
-                    loading = false
-                    try {
-                        val full = ApiClient.getTop1000Coins()
-                        if (full.size > coins.size) coins = full
-                    } catch (e: Exception) {
-                        NetErr.log("MarketScreen", "coingecko/coins/markets?page=1..4", null, e)
-                    }
-                }
-                meta = ApiClient.marketMeta()
-                platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
-            } catch (e: Exception) {
-                NetErr.log("MarketScreen", "coingecko/coins/markets", null, e)
-                errorMsg = NetErr.msg(e)
-            } finally {
-                loading = false
-            }
-            if (errorMsg == null && coins.isEmpty()) {
-                NetErr.logEmpty("MarketScreen", "coingecko/coins/markets", null)
-                errorMsg = NetErr.msg(NetError.EmptyData)
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) { load() }
 
     val shown = if (query.isBlank()) coins
     else coins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
@@ -410,7 +376,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             Spacer(Modifier.width(8.dp))
             FreshnessBadge(meta)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { load() }) { Text("بروزرسانی") }
+            TextButton(onClick = { viewModel.refresh() }) { Text("بروزرسانی") }
         }
 
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
@@ -428,10 +394,10 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
 
         when {
-            loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            isLoading && coins.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = SpotAccent)
             }
-            errorMsg != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            errorMsg != null && coins.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     errorMsg ?: "",
                     color = FuturesAccent,
@@ -481,7 +447,7 @@ fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
                 }
 
                 Text(
-                    "📊",
+                    "",
                     fontSize = 18.sp,
                     modifier = Modifier.clickable {
                         try {
