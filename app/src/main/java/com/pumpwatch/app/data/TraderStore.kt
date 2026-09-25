@@ -13,9 +13,10 @@ import java.util.Locale
 import kotlin.math.log10
 
 /**
- * 🚀 Sprint 16 — تب تاپ تریدرها (v0)
+ * 🚀 Sprint 16 — تب تاپ تریدرها (v0.1)
  * منبع داده: شکارهای ثبت‌شدهٔ موتور ۶ + افزودن دستی توسط کاربر.
  * صادقانه: این «رتبه‌بندی جهانی» نیست؛ فقط تریدرهایی که خود اپ کشف/ردیابی می‌کند.
+ * v0.1: بررسی موقعیت باز (موجودی فعلی توکن) + PnL تقریبی با disclaimer.
  */
 data class TraderProfile(
     val addr: String,
@@ -31,10 +32,15 @@ data class TraderProfile(
     var txCount: Int,
     var multiplier: Double,
     var pumpsCount: Int,
-    var alertOn: Boolean
+    var alertOn: Boolean,
+    val mint: String? = null,        // v0.1: کانترکت توکن برای بررسی موقعیت (اختیاری)
+    val entryPrice: Double? = null   // v0.1: قیمت ورود برای PnL تقریبی (اختیاری)
 )
 
 data class TraderActivity(val ts: Long, val txId: String)
+
+/** v0.1: موقعیت فعلی تریدر در توکن ردیابی‌شده */
+data class OpenPosition(val amount: Double, val priceUsd: Double?, val valueUsd: Double)
 
 object TraderStore {
 
@@ -110,7 +116,7 @@ object TraderStore {
         else -> "solana"
     }
 
-    /** v0: فقط Solana بررسی فعالیت ارزان و پایدار دارد */
+    /** v0: بررسی فعالیت جدید (آخرین امضا) — فقط Solana */
     suspend fun checkNewActivity(ctx: Context, t: TraderProfile): TraderActivity? {
         if (t.chain != "solana") return null
         return try {
@@ -126,6 +132,41 @@ object TraderStore {
             val ts = (o.get("blockTime")?.asLong ?: 0L) * 1000L
             val sig = o.get("signature")?.asString ?: return null
             if (ts > t.lastSeenTs && sig != t.lastTxId) TraderActivity(ts, sig) else null
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * v0.1: بررسی موقعیت باز — موجودی فعلی همان توکن در کیف تریدر.
+     * فقط Solana + وقتی mint ثبت شده باشد. برگشت null یعنی «پشتیبانی نمی‌شود»،
+     * برگشت OpenPosition(0) یعنی «بررسی شد و چیزی نیست».
+     */
+    suspend fun checkOpenPosition(ctx: Context, t: TraderProfile): OpenPosition? {
+        val mint = t.mint?.trim().orEmpty()
+        if (t.chain != "solana" || mint.isEmpty()) return null
+        return try {
+            val resp = solanaRaw(
+                mapOf(
+                    "jsonrpc" to "2.0", "id" to 1,
+                    "method" to "getTokenAccountsByOwner",
+                    "params" to listOf(t.addr, mapOf("mint" to mint), mapOf("encoding" to "jsonParsed"))
+                ),
+                ctx = ctx
+            )
+            val arr = resp?.result?.asJsonObject?.getAsJsonArray("value") ?: return null
+            var amt = 0.0
+            for (el in arr) {
+                val info = el.asJsonObject
+                    .getAsJsonObject("account")
+                    ?.getAsJsonObject("data")
+                    ?.getAsJsonObject("parsed")
+                    ?.getAsJsonObject("info") ?: continue
+                amt += info.getAsJsonObject("tokenAmount")?.get("uiAmount")?.asDouble ?: 0.0
+            }
+            if (amt <= 0.0) return OpenPosition(0.0, null, 0.0)
+            val px = try {
+                GeckoPrice.api.tokenInfo("solana", mint).data?.attributes?.price_usd?.toDoubleOrNull()
+            } catch (_: Exception) { null }
+            OpenPosition(amt, px, amt * (px ?: 0.0))
         } catch (_: Exception) { null }
     }
 
