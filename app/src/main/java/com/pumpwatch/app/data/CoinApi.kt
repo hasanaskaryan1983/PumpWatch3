@@ -123,9 +123,17 @@ object ThrottledHttp {
         }
     }
 
+    /**
+     * 🚀 Commit 81: OkHttpClient با دو interceptor:
+     *   1. Metrics.interceptor (اول اجرا می‌شود — شمارش request/latency/429)
+     *   2. interceptor (retry logic برای 429)
+     *
+     * ترتیب addInterceptor مهم است: اول اضافه‌شده اول اجرا می‌شود.
+     */
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .addInterceptor(interceptor)
+            .addInterceptor(Metrics.interceptor)  // 🚀 Commit 81: metrics اول
+            .addInterceptor(interceptor)           // retry logic دوم
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
