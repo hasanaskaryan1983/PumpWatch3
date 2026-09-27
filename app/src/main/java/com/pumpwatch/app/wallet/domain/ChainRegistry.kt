@@ -110,7 +110,7 @@ object ChainRegistry {
             name = "Gnosis",
             addressPattern = EVM_PATTERN,
             nativeAsset = AssetId.native("100"),
-            explorerUrl = "https://gnosisscan.io/address/"
+            explorerUrl = "https://gnosisscan.com/address/"
         ),
         Chain(
             chainId = "robinhood",
@@ -172,10 +172,14 @@ object ChainRegistry {
     /** گرفتن زنجیره از chainId */
     fun getChain(chainId: String): Chain? = chains.firstOrNull { it.chainId == chainId }
 
-    /** لینک explorer برای آدرس (null اگر زنجیره شناخته‌شده نباشد یا EVM_GENERIC) */
+    /**
+     * لینک explorer برای آدرس.
+     * null اگر زنجیره شناخته‌شده نباشد یا EVM_GENERIC (که explorer ندارد).
+     */
     fun explorerLink(chainId: String, address: String): String? {
         val chain = getChain(chainId) ?: return null
-        if (chain.explorerUrl.isBlank()) return null
-        return "${chain.explorerUrl}$address"
+        val url = chain.explorerUrl
+        if (url.isNullOrBlank()) return null
+        return "$url$address"
     }
 }
