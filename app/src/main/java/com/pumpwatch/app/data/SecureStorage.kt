@@ -3,9 +3,12 @@ package com.pumpwatch.app.data
 import android.content.Context
 import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import java.security.KeyStore
+import java.security.UnrecoverableKeyException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -13,6 +16,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * 🚀 Sprint 14 (مرحله ۳ / Commit 7A): ذخیره‌سازی امن بدون dependency خارجی
+ * 🚀 Commit 78 (فاز ۲ — بند ۸): هندل KeyPermanentlyInvalidatedException
  *
  * رمزنگاری: AES-256-GCM با کلید داخل Android Keystore
  * (کلید هرگز از دستگاه خارج نمی‌شود؛ حتی root هم نمی‌تواند استخراجش کند).
@@ -27,6 +31,14 @@ import javax.crypto.spec.GCMParameterSpec
  * 🚀 Commit 44 (فاز ۱ برنامهٔ اجرایی): putSecret/getSecret fail-closed
  * برای API keyها که نباید به هیچ وجه plain ذخیره شوند. اگر Keystore
  * در دسترس نباشد، ذخیره نمی‌شود و false/خطا برگردانده می‌شود.
+ *
+ * 🚀 Commit 78: وقتی کاربر PIN/بیومتریک را تغییر می‌دهد، Android Keystore
+ * کلید را invalidate می‌کند. قبلاً این باعث کرش می‌شد. حالا:
+ *   1. Exception detect می‌شود
+ *   2. کلید قدیمی حذف می‌شود
+ *   3. کلید جدید تولید می‌شود
+ *   4. دادهٔ قبلی از دست می‌رود (اجتناب‌ناپذیر — کلید gone forever)
+ *   5. flag secure_storage_fell_back set می‌شود تا UI به کاربر بگوید
  */
 object SecureStorage {
 
@@ -36,6 +48,7 @@ object SecureStorage {
     private const val IV_BYTES = 12
     private const val TAG_BITS = 128
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
+    private const val TAG = "SecureStorage"
 
     /** نتیجه تلاش putSecret — برای گزارش صادقانه به UI */
     sealed class SecretResult {
@@ -50,10 +63,45 @@ object SecureStorage {
     private fun flagPrefs(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences("pumpwatch_prefs", Context.MODE_PRIVATE)
 
-    /** ساخت یا دریافت کلید AES از Android Keystore */
+    /**
+     * 🚀 Commit 78: ساخت یا دریافت کلید AES با هندل invalidation.
+     *
+     * اگر کلید invalidated شده باشد (کاربر PIN/بیومتریک را عوض کرده):
+     *   1. UnrecoverableKeyException یا KeyPermanentlyInvalidatedException detect می‌شود
+     *   2. کلید قدیمی حذف می‌شود
+     *   3. کلید جدید تولید می‌شود
+     *   4. دادهٔ قبلی از دست می‌رود (اجتناب‌ناپذیر)
+     */
     private fun getOrCreateKey(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey)?.let { return it }
+
+        // تلاش برای دریافت کلید موجود
+        val existingKey = try {
+            ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey
+        } catch (e: UnrecoverableKeyException) {
+            Log.w(TAG, "Master key unrecoverable (PIN/biometric changed?), regenerating", e)
+            null
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            Log.w(TAG, "Master key permanently invalidated, regenerating", e)
+            null
+        }
+
+        if (existingKey != null) {
+            // تست رمزنگاری: اگر کلید invalidated باشد، اینجا exception می‌دهد
+            try {
+                val cipher = Cipher.getInstance(TRANSFORMATION)
+                cipher.init(Cipher.ENCRYPT_MODE, existingKey)
+                return existingKey
+            } catch (e: KeyPermanentlyInvalidatedException) {
+                Log.w(TAG, "Master key invalidated during use, regenerating", e)
+                // حذف کلید قدیمی
+                if (ks.containsAlias(KEYSTORE_ALIAS)) {
+                    ks.deleteEntry(KEYSTORE_ALIAS)
+                }
+            }
+        }
+
+        // تولید کلید جدید
         val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         kg.init(
             KeyGenParameterSpec.Builder(
@@ -109,6 +157,11 @@ object SecureStorage {
             if (isInsecureFallback(ctx)) {
                 flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, false).apply()
             }
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            // 🚀 Commit 78: کلید invalidated — دادهٔ قبلی از دست رفت، ولی کرش نکن
+            Log.e(TAG, "Key invalidated during putString, falling back to plain", e)
+            prefs(ctx).edit().putString(key, value).apply()
+            flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, true).apply()
         } catch (_: Exception) {
             prefs(ctx).edit().putString(key, value).apply()
             flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, true).apply()
@@ -124,6 +177,11 @@ object SecureStorage {
                 val cipher = Cipher.getInstance(TRANSFORMATION)
                 cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(TAG_BITS, iv))
                 return String(cipher.doFinal(ct), Charsets.UTF_8)
+            } catch (e: KeyPermanentlyInvalidatedException) {
+                // 🚀 Commit 78: کلید invalidated — دادهٔ قبلی از دست رفت
+                Log.e(TAG, "Key invalidated during getString, data lost", e)
+                // flag set کن تا UI به کاربر بگوید
+                flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, true).apply()
             } catch (_: Exception) { }
         }
         return if (isInsecureFallback(ctx)) blob else null
@@ -160,6 +218,10 @@ object SecureStorage {
             val ct = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
             prefs(ctx).edit().putString(key, packBlob(iv, ct)).apply()
             SecretResult.Saved
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            // 🚀 Commit 78: کلید invalidated — secret از دست رفت
+            Log.e(TAG, "Key invalidated during putSecret, secret lost", e)
+            SecretResult.KeystoreUnavailable
         } catch (keystoreEx: java.security.KeyStoreException) {
             SecretResult.KeystoreUnavailable
         } catch (ex: Exception) {
@@ -185,6 +247,10 @@ object SecureStorage {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(TAG_BITS, iv))
             String(cipher.doFinal(ct), Charsets.UTF_8)
+        } catch (e: KeyPermanentlyInvalidatedException) {
+            // 🚀 Commit 78: کلید invalidated — secret از دست رفت
+            Log.e(TAG, "Key invalidated during getSecret, secret lost", e)
+            null
         } catch (_: Exception) {
             null
         }
