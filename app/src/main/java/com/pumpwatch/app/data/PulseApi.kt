@@ -1,21 +1,22 @@
 package com.pumpwatch.app.data
 
 import com.google.gson.annotations.SerializedName
-import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
-import java.util.concurrent.TimeUnit
 
-// ---------- کلاینت سریع و مستقل برای نبض بازار ----------
-
-private val pulseClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
-}
+/**
+ * 🚀 Commit 73 (فاز ۲ — provider governance): حذف client مستقل.
+ *
+ * قبلاً: `pulseClient` یک OkHttpClient مستقل بود → درخواست‌های CoinGecko
+ *   از مسیر ThrottledHttp بیرون می‌ماندند و سقف نرخ رعایت نمی‌شد → 429.
+ * حالا: هر دو object (FngClient و PulseClient) از `ThrottledHttp.client`
+ *   عبور می‌کنند — همان مسیر مرکزی که ScanApi/CoinApi/NewsApi استفاده می‌کنند.
+ *
+ * نکته: FngClient به alternative.me می‌زند (هاست متفاوت)؛ عبور از throttle
+ *   مرکزی برای آن ضرر ندارد و سیاست «یک client برای همه» را ساده نگه می‌دارد.
+ */
 
 // ---------- ترس و طمع ----------
 
@@ -36,7 +37,7 @@ object FngClient {
     val api: FngApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.alternative.me/")
-            .client(pulseClient)
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(FngApi::class.java)
@@ -76,7 +77,7 @@ object PulseClient {
     val api: PulseApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.coingecko.com/api/v3/")
-            .client(pulseClient)
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(PulseApi::class.java)
