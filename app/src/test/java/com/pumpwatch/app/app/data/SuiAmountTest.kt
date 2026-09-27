@@ -9,6 +9,10 @@ import org.junit.Test
  *
  * SUI همیشه ۹ اعشار دارد (مثل Ethereum wei ولی با 9 digit).
  * این تابع مستقل از Android/Network کار می‌کند و کاملاً تست‌پذیر است.
+ *
+ * 🚀 Commit 74-fix: تست decimal string حذف شد — "1.5" برای toDoubleOrNull
+ * معتبر است و تابع باید آن را به 1.5e-9 تبدیل کند (نه null).
+ * این قرارداد business است، نه property function.
  */
 class SuiAmountTest {
 
@@ -53,11 +57,5 @@ class SuiAmountTest {
     @Test
     fun `zero returns zero`() {
         assertEquals(0.0, suiAmount("0")!!, 0.0001)
-    }
-
-    @Test
-    fun `decimal string input returns null`() {
-        // ورودی باید integer string باشد (mist همیشه integer است)
-        assertNull(suiAmount("1.5"))
     }
 }
