@@ -2,9 +2,11 @@ package com.pumpwatch.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 
 /**
  * 🚀 Commit 44 (فاز ۱ برنامهٔ اجرایی): RpcKeyStore با fail-closed روی SecureStorage
+ * 🚀 Commit 79 (فاز ۲ — observability + safety): synchronized + لاگ migration + flag
  *
  * - هیچ RPC key در SharedPreferences معمولی باقی نمی‌ماند (بعد از migration)
  * - اگر Keystore کار نکند، کلید ذخیره نمی‌شود و UI صادقانه هشدار می‌دهد
@@ -13,17 +15,28 @@ import android.content.SharedPreferences
  * - cachedKey() کش حافظه‌ای برای صداهای بدون Context در لایهٔ data
  *   (به‌محض اینکه هر صفحه‌ای یک بار get کند، همهٔ موتورها کلید را می‌بینند)
  * - log/exception/clipboard: کلید هرگز وارد نمی‌شود
+ *
+ * 🚀 Commit 79:
+ * - synchronized(lock) روی migrateFromLegacy برای safety (اگر دو thread هم‌زمان صدا بزنند)
+ * - لاگ explicit هر مرحله (Migration started/completed/failed)
+ * - flag legacy_migrated در SharedPreferences برای skip کردن migration در future runs
+ * - try-catch روی Log calls (در JVM unit test crash نمی‌کند)
  */
 object RpcKeyStore {
 
+    private const val TAG = "RpcKeyStore"
     private const val KEY = "solana_rpc_key"
 
     // نام‌های واقعی دورهٔ قدیمی (Commit 27) برای migration و پاک‌سازی ردپا
     private const val LEGACY_PREFS = "pumpwatch_rpc_prefs"
     private const val LEGACY_KEY = "solana_rpc_api_key"
+    private const val FLAG_MIGRATED = "legacy_migrated"
 
     @Volatile
     private var cached: String? = null
+
+    /** قفل برای migration (safety در برابر race condition) */
+    private val lock = Any()
 
     /** برای صداهای بدون Context در لایهٔ data (solanaRaw / solanaTyped) */
     fun cachedKey(): String? = cached
@@ -82,26 +95,79 @@ object RpcKeyStore {
     }
 
     /**
-     * migration از SharedPreferences قدیمی (pumpwatch_rpc_prefs) به SecureStorage.
-     * یک‌بار در شروع اپ اجرا می‌شود. اگر migration موفق بود، قدیمی حذف می‌شود.
+     * 🚀 Commit 79: migration از SharedPreferences قدیمی (pumpwatch_rpc_prefs) به SecureStorage.
+     *
+     * یک‌بار در شروع اپ اجرا می‌شود (flag legacy_migrated چک می‌شود).
+     * اگر migration موفق بود، قدیمی حذف می‌شود.
      * اگر Keystore کار نکند، قدیمی حفظ می‌شود تا کاربر دستی اقدام کند (fail-closed).
+     *
+     * synchronized برای safety در برابر race condition (اگر دو thread هم‌زمان صدا بزنند).
+     * لاگ explicit هر مرحله برای observability.
      */
     fun migrateFromLegacy(ctx: Context): MigrationResult {
-        val legacy = try {
-            legacyPrefs(ctx).getString(LEGACY_KEY, null)?.takeIf { it.isNotBlank() }
-        } catch (_: Exception) { null } ?: return MigrationResult.NothingToMigrate
-        // اگر قبلاً secure ذخیره شده، فقط ردپای قدیمی را پاک کن
-        if (isConfigured(ctx)) {
-            try { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() } catch (_: Exception) { }
-            return MigrationResult.AlreadySecure
-        }
-        return when (set(ctx, legacy)) {
-            is SecureStorage.SecretResult.Saved -> {
-                try { legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply() } catch (_: Exception) { }
-                MigrationResult.Migrated
+        synchronized(lock) {
+            // 🚀 Commit 79: چک flag — اگر قبلاً migrate شده، skip
+            if (legacyPrefs(ctx).getBoolean(FLAG_MIGRATED, false)) {
+                logDebug("Migration already completed (flag set)")
+                return MigrationResult.AlreadySecure
             }
-            is SecureStorage.SecretResult.KeystoreUnavailable -> MigrationResult.KeystoreUnavailable
-            is SecureStorage.SecretResult.CryptoError -> MigrationResult.Failed
+
+            val legacy = try {
+                legacyPrefs(ctx).getString(LEGACY_KEY, null)?.takeIf { it.isNotBlank() }
+            } catch (e: Exception) {
+                logWarning("Failed to read legacy prefs", e)
+                null
+            }
+
+            if (legacy == null) {
+                logDebug("Nothing to migrate (no legacy key found)")
+                // flag set کن تا دفعهٔ بعد skip شود
+                try {
+                    legacyPrefs(ctx).edit().putBoolean(FLAG_MIGRATED, true).apply()
+                } catch (e: Exception) {
+                    logWarning("Failed to set migration flag", e)
+                }
+                return MigrationResult.NothingToMigrate
+            }
+
+            logInfo("Migration started (legacy key found)")
+
+            // اگر قبلاً secure ذخیره شده، فقط ردپای قدیمی را پاک کن
+            if (isConfigured(ctx)) {
+                logInfo("Migration: key already secure, cleaning legacy")
+                try {
+                    legacyPrefs(ctx).edit()
+                        .remove(LEGACY_KEY)
+                        .putBoolean(FLAG_MIGRATED, true)
+                        .apply()
+                } catch (e: Exception) {
+                    logWarning("Failed to clean legacy after secure check", e)
+                }
+                return MigrationResult.AlreadySecure
+            }
+
+            return when (val result = set(ctx, legacy)) {
+                is SecureStorage.SecretResult.Saved -> {
+                    logInfo("Migration completed successfully")
+                    try {
+                        legacyPrefs(ctx).edit()
+                            .remove(LEGACY_KEY)
+                            .putBoolean(FLAG_MIGRATED, true)
+                            .apply()
+                    } catch (e: Exception) {
+                        logWarning("Migration succeeded but failed to clean legacy", e)
+                    }
+                    MigrationResult.Migrated
+                }
+                is SecureStorage.SecretResult.KeystoreUnavailable -> {
+                    logWarning("Migration failed: Keystore unavailable")
+                    MigrationResult.KeystoreUnavailable
+                }
+                is SecureStorage.SecretResult.CryptoError -> {
+                    logWarning("Migration failed: ${result.message}")
+                    MigrationResult.Failed
+                }
+            }
         }
     }
 
@@ -115,4 +181,30 @@ object RpcKeyStore {
 
     private fun legacyPrefs(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE)
+
+    // 🚀 Commit 79: helper های لاگ با try-catch (در JVM unit test crash نمی‌کند)
+
+    private fun logDebug(msg: String) {
+        try {
+            Log.d(TAG, msg)
+        } catch (_: Throwable) {
+            println("$TAG: $msg")
+        }
+    }
+
+    private fun logInfo(msg: String) {
+        try {
+            Log.i(TAG, msg)
+        } catch (_: Throwable) {
+            println("$TAG: $msg")
+        }
+    }
+
+    private fun logWarning(msg: String, e: Throwable? = null) {
+        try {
+            if (e != null) Log.w(TAG, msg, e) else Log.w(TAG, msg)
+        } catch (_: Throwable) {
+            println("$TAG: $msg${if (e != null) " (${e.message})" else ""}")
+        }
+    }
 }
