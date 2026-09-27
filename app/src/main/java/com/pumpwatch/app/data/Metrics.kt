@@ -3,7 +3,6 @@ package com.pumpwatch.app.data
 import okhttp3.Interceptor
 import okhttp3.Response
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 🚀 Commit 81 (فاز ۲ — observability): متریک‌های runtime برای رصد سلامت شبکه.
@@ -67,10 +66,18 @@ object Metrics {
         rateLimitHits.incrementAndGet()
     }
 
-    /** ثبت latency یک درخواست (milliseconds) */
+    /**
+     * ثبت latency یک درخواست (milliseconds).
+     *
+     * 🚀 Commit 81-fix: getAndIncrement به‌جای incrementAndGet.
+     *   قبلاً: incrementAndGet() اول افزایش می‌داد (0→1)، بعد index را برمی‌گرداند (1)
+     *     → داده در index 1 ذخیره می‌شد، نه 0 → اولین sample از دست می‌رفت
+     *   حالا: getAndIncrement() اول index فعلی را برمی‌گرداند (0)، بعد افزایش می‌دهد (0→1)
+     *     → داده در index 0 ذخیره می‌شود (درست)
+     */
     fun recordLatency(latencyMs: Long) {
         synchronized(latencyLock) {
-            val idx = (latencyIndex.incrementAndGet() % 100).toInt()
+            val idx = (latencyIndex.getAndIncrement() % 100).toInt()
             latencyBuffer[idx] = latencyMs
         }
     }
