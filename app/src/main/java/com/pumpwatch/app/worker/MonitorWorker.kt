@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
@@ -30,9 +31,8 @@ import java.util.Locale
  * 🚀 Sprint 3: time = candleCloseTs (نه زمان اسکن)
  * 🚀 Sprint 4: پارامترهای سیگنال از ParamsStore (بهینه‌شده یا default)
  * 🚀 Sprint 5: ارزیابی قوانین هشدار سفارشی روی همهٔ نتایج + نوتیفیکیشن 🔔
- * 🚀 Sprint 14 (مرحله ۱ / Commit 3 — C3): گارد مجوز POST_NOTIFICATIONS
- *      روی اندروید ۱۳+ بدون مجوز، notify() بی‌صدا سرکوب می‌شود؛ پس قبل از
- *      ساخت و ارسال چک می‌کنیم و وضعیت را برای نمایش صادقانه در UI ثبت می‌کنیم.
+ * 🚀 Sprint 14 (C3): گارد مجوز POST_NOTIFICATIONS
+ * 🚀 Commit 71 (فاز ۱ — بند ۱۱): تفکیک transient vs terminal errors
  */
 class MonitorWorker(
     context: Context,
@@ -44,13 +44,54 @@ class MonitorWorker(
         private const val CHANNEL_RULES = "pumpwatch_rules"
         private const val MIN_SCORE = 70
         private const val MAX_RULE_ALERTS_PER_RUN = 3
+        private const val TAG = "MonitorWorker"
 
         const val KEY_MODE = "mode"
+
+        /**
+         * 🚀 Commit 71: تشخیص خطای موقتی از قطعی (بند ۱۱).
+         *
+         * Transient (قابل retry):
+         *   - Network/IO errors (SocketTimeout, ConnectTimeout, UnknownHost)
+         *   - HTTP 429 (rate limit), 5xx (server errors)
+         *   - CancellationException (نباید retry شود، ولی به‌عنوان transient طبقه‌بندی می‌کنیم)
+         *
+         * Terminal (غیرقابل retry):
+         *   - NullPointerException, ClassCastException (باگ کد)
+         *   - JsonSyntaxException (parse error)
+         *   - IllegalArgumentException (ورودی نامعتبر)
+         */
+        internal fun isTransient(e: Throwable): Boolean {
+            val name = e::class.java.simpleName
+            val msg = (e.message ?: "").lowercase(Locale.US)
+
+            // کلاس‌های شناخته‌شده transient
+            if (name.contains("Timeout", true) ||
+                name.contains("Network", true) ||
+                name.contains("Socket", true) ||
+                name.contains("Connect", true) ||
+                name.contains("UnknownHost", true) ||
+                name.contains("IOException", true)
+            ) return true
+
+            // الگوهای پیام transient
+            if (msg.contains("timeout") ||
+                msg.contains("429") ||
+                msg.contains("500") ||
+                msg.contains("502") ||
+                msg.contains("503") ||
+                msg.contains("504") ||
+                msg.contains("network") ||
+                msg.contains("connection") ||
+                msg.contains("unreachable")
+            ) return true
+
+            return false
+        }
     }
 
     /**
      * 🚀 Sprint 14 (C3): آیا مجوز نمایش نوتیفیکیشن داریم؟
-     * زیر اندروید ۱۳ مجوز جدا لازم نیست → همیشه true.
      */
     private fun canPostNotifications(): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -62,10 +103,6 @@ class MonitorWorker(
             true
         }
 
-    /**
-     * 🚀 Sprint 14 (C3): ثبت وضعیت «هشدارها مسدود» برای نمایش صادقانه در UI.
-     * مرحلهٔ ۶ (معماری هشدار) این پرچم را در تب هشدارها نشان می‌دهد.
-     */
     private fun markNotificationsBlocked(blocked: Boolean) {
         applicationContext.getSharedPreferences("pumpwatch_prefs", 0)
             .edit().putBoolean("notif_permission_denied", blocked).apply()
@@ -82,19 +119,14 @@ class MonitorWorker(
                 ?: "SPOT"
             val mode = if (modeRaw == "FUTURES") "FUT" else "SPOT"
 
-            // 🚀 Sprint 4: پارامترهای فعال
             val signalParams = ParamsStore.load(applicationContext)
-
             val results = BatchScanner.scan(mode, signalParams, limit = 25)
             val hot = results.filter { it.side != "NONE" && it.score >= MIN_SCORE }.take(3)
 
             hot.forEachIndexed { i, r ->
                 val logSide = if (r.side == "PUMP") "BUY" else "SELL"
-
-                // 🚀 Sprint 3: timestamp = زمان بسته شدن کندل مولد سیگنال
                 val signalTs = if (r.candleCloseTs > 0L) r.candleCloseTs else System.currentTimeMillis()
 
-                // گیت واحد dedup با QuickScanner
                 val logged = SignalLogger.log(
                     applicationContext,
                     LoggedSignal(
@@ -122,22 +154,31 @@ class MonitorWorker(
                 }
             }
 
-            // 🚀 Sprint 5: ارزیابی قوانین هشدار سفارشی روی همهٔ نتایج اسکن
+            // 🚀 Commit 71: لاگ به‌جای catch خالی (خطای منطقی مخفی نشود)
             try {
                 evaluateRules(results)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                Log.w(TAG, "evaluateRules failed (non-critical, will retry next run)", e)
+            }
 
             Result.success()
         } catch (e: Exception) {
-            if (runAttemptCount < 3) Result.retry() else Result.failure()
+            // 🚀 Commit 71 (بند ۱۱): تفکیک transient vs terminal
+            if (isTransient(e)) {
+                if (runAttemptCount < 3) {
+                    Log.w(TAG, "Transient error (attempt ${runAttemptCount + 1}/3), will retry", e)
+                    Result.retry()
+                } else {
+                    Log.e(TAG, "Transient error but max retries reached, failing", e)
+                    Result.failure()
+                }
+            } else {
+                Log.e(TAG, "Terminal error (code/data bug), failing immediately", e)
+                Result.failure()
+            }
         }
     }
 
-    /**
-     * 🚀 Sprint 5: بررسی قوانین سفارشی کاربر.
-     * ترتیب گیت‌ها (ارزان‌ترین اول): enabled → symbol → cooldown → matches
-     * حداکثر MAX_RULE_ALERTS_PER_RUN نوتیفیکیشن در هر اجرا.
-     */
     private fun evaluateRules(results: List<SignalResult>) {
         val now = System.currentTimeMillis()
         val rules = AlertRulesStore.load(applicationContext)
@@ -160,9 +201,6 @@ class MonitorWorker(
         }
     }
 
-    /**
-     * نمایش مقدار فعلی مرتبط با شرط قانون (برای متن نوتیفیکیشن)
-     */
     private fun currentValueText(rule: AlertRule, r: SignalResult): String = when (rule.condition) {
         RuleCondition.PRICE_ABOVE, RuleCondition.PRICE_BELOW ->
             String.format(Locale.US, "قیمت فعلی: %.6f", r.price)
@@ -183,7 +221,6 @@ class MonitorWorker(
     }
 
     private fun showRuleNotification(rule: AlertRule, r: SignalResult) {
-        // 🚀 Sprint 14 (C3): بدون مجوز، ساخت کانال و نوتیفیکیشن بی‌معنی است
         if (!canPostNotifications()) {
             markNotificationsBlocked(true)
             return
@@ -210,17 +247,16 @@ class MonitorWorker(
             .setAutoCancel(true)
             .build()
 
-        // 🚀 Sprint 14 (C3): برخی OEMها حتی با چک مجوز، SecurityException می‌اندازند
         try {
             nm.notify("rule_${rule.id}".hashCode(), notification)
             markNotificationsBlocked(false)
-        } catch (_: SecurityException) {
+        } catch (e: SecurityException) {
+            Log.w(TAG, "SecurityException on notify (OEM restriction)", e)
             markNotificationsBlocked(true)
         }
     }
 
     private fun showNotification(id: Int, title: String, text: String) {
-        // 🚀 Sprint 14 (C3): بدون مجوز، ساخت کانال و نوتیفیکیشن بی‌معنی است
         if (!canPostNotifications()) {
             markNotificationsBlocked(true)
             return
@@ -246,11 +282,11 @@ class MonitorWorker(
             .setAutoCancel(true)
             .build()
 
-        // 🚀 Sprint 14 (C3): برخی OEMها حتی با چک مجوز، SecurityException می‌اندازند
         try {
             nm.notify(id, notification)
             markNotificationsBlocked(false)
-        } catch (_: SecurityException) {
+        } catch (e: SecurityException) {
+            Log.w(TAG, "SecurityException on notify (OEM restriction)", e)
             markNotificationsBlocked(true)
         }
     }
