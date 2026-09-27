@@ -85,6 +85,10 @@ object Metrics {
      *
      * P95 latency: sort کردن ring buffer، گرفتن index 95.
      * اگر کمتر از ۱۰۰ sample داشته باشیم، از موجود استفاده می‌کنیم.
+     *
+     * 🚀 Commit 81-fix: الگوریتم P95 اصلاح شد.
+     *   قبلاً: (count * 0.95).toInt() → index 95 برای 100 sample = 96امین مقدار (اشتباه)
+     *   حالا: ((count - 1) * 0.95).toInt() → index 94 برای 100 sample = 95امین مقدار (درست)
      */
     fun snapshot(): MetricsSnapshot {
         val p95 = synchronized(latencyLock) {
@@ -93,7 +97,8 @@ object Metrics {
                 0L
             } else {
                 val sorted = latencyBuffer.copyOf(count).sorted()
-                val p95Index = (count * 0.95).toInt().coerceAtMost(count - 1)
+                // P95 = 95th percentile = index (n-1) * 0.95
+                val p95Index = ((count - 1) * 0.95).toInt()
                 sorted[p95Index]
             }
         }
