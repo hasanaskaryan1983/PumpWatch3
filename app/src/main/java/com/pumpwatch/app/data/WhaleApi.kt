@@ -1,14 +1,12 @@
 package com.pumpwatch.app.data
 
 import com.google.gson.annotations.SerializedName
-import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 // ============================================
 // 🟢 کد موجود (دست‌نخورده) — Binance legacy
@@ -33,12 +31,7 @@ object WhaleClient {
     val api: WhaleBinanceApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.binance.com/")
-            .client(
-                OkHttpClient.Builder()
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(10, TimeUnit.SECONDS)
-                    .build()
-            )
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(WhaleBinanceApi::class.java)
@@ -96,13 +89,6 @@ private fun numd(v: Any?): Double? = when (v) {
     is Number -> v.toDouble()
     is String -> v.toDoubleOrNull()
     else -> null
-}
-
-private fun sharedOkHttp(): OkHttpClient {
-    return OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
 }
 
 /**
@@ -204,7 +190,7 @@ object BinanceProvider : WhaleProvider {
     private val api: BinanceRawApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.binance.com/")
-            .client(sharedOkHttp())
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(BinanceRawApi::class.java)
@@ -251,7 +237,7 @@ object BybitProvider : WhaleProvider {
     private val api: BybitRawApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.bybit.com/")
-            .client(sharedOkHttp())
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(BybitRawApi::class.java)
@@ -302,7 +288,7 @@ object OkxProvider : WhaleProvider {
     private val api: OkxRawApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://www.okx.com/")
-            .client(sharedOkHttp())
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(OkxRawApi::class.java)
@@ -350,7 +336,7 @@ object GateProvider : WhaleProvider {
     private val api: GateRawApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.gateio.ws/")
-            .client(sharedOkHttp())
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(GateRawApi::class.java)
