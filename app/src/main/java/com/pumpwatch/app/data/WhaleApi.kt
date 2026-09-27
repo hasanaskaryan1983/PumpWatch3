@@ -7,6 +7,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Query
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 // ============================================
@@ -45,7 +46,7 @@ object WhaleClient {
 }
 
 // ============================================
-// 🆕 P0-2: abstraction چندصرافی + کف بدون‌مجوز آن‌چین
+// 🆕 Commit 68: Suffix Parsing + مدیریت خطای هوشمند + کش DEX
 // ============================================
 
 /**
@@ -70,6 +71,20 @@ interface WhaleProvider {
     suspend fun fetchNormalized(symbol: String, limit: Int): List<AggTradeNormalized>
 }
 
+// -------- خطاهای طبقه‌بندی‌شده (CONSTITUTION بند ۷) --------
+
+/**
+ * خطای موقتی: قابل تلاش مجدد (شبکه، تایم‌اوت، 5xx، 429).
+ * لایهٔ بالاتر می‌تواند Exponential Backoff اعمال کند.
+ */
+class TransientError(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * خطای قطعی: غیرقابل تلاش مجدد (نماد اشتباه، 4xx، ساختار نامعتبر).
+ * لایهٔ بالاتر باید provider بعدی را امتحان کند، نه همین provider را.
+ */
+class TerminalError(message: String, cause: Throwable? = null) : Exception(message, cause)
+
 // -------- Shared helpers (top-level) --------
 
 /**
@@ -91,28 +106,86 @@ private fun sharedOkHttp(): OkHttpClient {
 }
 
 /**
- * نرمال‌سازی نماد برای هر صرافی:
- *  - ورودی: هر فرمت (BTCUSDT / BTC-USDT / BTC_USDT / btc)
- *  - خروجی: فرمت مخصوص صرافی
+ * 🚀 Commit 68 (بند ۷ CONSTITUTION): نرمال‌سازی نماد مبتنی بر Suffix Parsing.
+ *
+ * باگ قبلی: `replace("USDT","").replace("USD","")` → BTC--USDT می‌سازد
+ *   (چون USDT اول جایگزین می‌شود، بعد USD از داخل USDT باقی‌مانده دوباره replace می‌شود)
+ *
+ * راه‌حل: پسوند را از **انتهای رشته** جدا کن، نه با replace عمومی.
+ *   این کار ساختار داخلی نماد (مثل STETH-ETH) را دست‌نخورده نگه می‌دارد.
+ *
+ * مثال‌ها:
+ *   BTCUSDT      → Binance: BTCUSDT، OKX: BTC-USDT
+ *   BTC-USDT     → Binance: BTCUSDT، OKX: BTC-USDT
+ *   BTC_USDT     → Binance: BTCUSDT، Gate: BTC_USDT
+ *   1000PEPEUSDT → Binance: 1000PEPEUSDT (نه 1000PEPE)
+ *   PEPEUSDT     → Binance: PEPEUSDT
  */
-private fun normalizeSymbol(symbol: String, exchange: String): String {
-    val cleaned = symbol.uppercase(Locale.US)
-        .replace("_", "-")
-        .replace("USDT", "-USDT")
-        .replace("USD", "-USD")
-    val withDash = if (cleaned.contains("-")) cleaned else "$cleaned-USDT"
-    val parts = withDash.split("-")
-    if (parts.size != 2) {
-        return symbol.uppercase(Locale.US)
+fun normalizeSymbol(symbol: String, exchange: String): String {
+    val cleaned = symbol.uppercase(Locale.US).trim()
+    if (cleaned.isEmpty()) return cleaned
+
+    // لیست پسوندهای رایج به ترتیب طول (طولانی‌تر اولویت دارد)
+    // این مهم است: USDT قبل از USD چک شود تا USDT به US+DT تجزیه نشود
+    val quotes = listOf("USDT", "USDC", "USD", "EUR", "GBP", "BUSD", "FDUSD",
+        "TUSD", "DAI", "ETH", "BTC", "BNB", "SOL")
+
+    var base = cleaned
+    var quote = "USDT" // پیش‌فرض
+
+    for (q in quotes) {
+        if (cleaned.endsWith(q)) {
+            val potentialBase = cleaned.substring(0, cleaned.length - q.length)
+            // حذف جداکننده‌های احتمالی انتهای base (مثل - یا _)
+            val trimmedBase = potentialBase.trimEnd('-', '_')
+            if (trimmedBase.isNotEmpty()) {
+                base = trimmedBase
+                quote = q
+                break
+            }
+        }
     }
-    val coin = parts[0]
-    val quote = parts[1]
+
     return when (exchange) {
-        "BINANCE" -> "$coin$quote"        // BTCUSDT
-        "BYBIT" -> "$coin$quote"          // BTCUSDT
-        "OKX" -> "$coin-$quote"           // BTC-USDT
-        "GATE" -> "${coin}_$quote"        // BTC_USDT
-        else -> symbol.uppercase(Locale.US)
+        "BINANCE" -> "$base$quote"        // BTCUSDT
+        "BYBIT" -> "$base$quote"          // BTCUSDT
+        "OKX" -> "$base-$quote"           // BTC-USDT
+        "GATE" -> "${base}_$quote"        // BTC_USDT
+        else -> cleaned
+    }
+}
+
+/**
+ * 🚀 Commit 68: تابع کمکی برای تشخیص و لاگ‌گیری خطاها.
+ * خطاهای موقتی (Transient) → WARNING (قابل retry)
+ * خطاهای قطعی (Terminal) → ERROR (باید provider عوض شود)
+ */
+private fun handleProviderError(e: Exception, providerName: String) {
+    when (e) {
+        is TerminalError -> {
+            android.util.Log.e("WhaleProvider", "[$providerName] Terminal: ${e.message}")
+        }
+        is TransientError -> {
+            android.util.Log.w("WhaleProvider", "[$providerName] Transient: ${e.message}")
+        }
+        else -> {
+            val msg = e.message ?: ""
+            val cls = e::class.java.simpleName
+            val isTransient = msg.contains("429") ||
+                msg.contains("timeout", true) ||
+                msg.contains("Timeout", true) ||
+                msg.contains("503") ||
+                msg.contains("502") ||
+                msg.contains("504") ||
+                msg.contains("500") ||
+                cls.contains("Timeout") ||
+                cls.contains("Connect")
+            if (isTransient) {
+                android.util.Log.w("WhaleProvider", "[$providerName] Likely Transient ($cls): ${e.message}")
+            } else {
+                android.util.Log.e("WhaleProvider", "[$providerName] Error ($cls): ${e.message}", e)
+            }
+        }
     }
 }
 
@@ -146,7 +219,8 @@ object BinanceProvider : WhaleProvider {
                 val ts = t.time ?: return@mapNotNull null
                 AggTradeNormalized(p, q, ts, t.buyerIsMaker ?: false)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            handleProviderError(e, name)
             emptyList()
         }
     }
@@ -188,7 +262,7 @@ object BybitProvider : WhaleProvider {
             val sym = normalizeSymbol(symbol, "BYBIT")
             val resp = api.recentTrades("spot", sym, limit)
             if (resp.retCode != 0) {
-                return emptyList()
+                throw TerminalError("Bybit API Error: retCode=${resp.retCode}")
             }
             val list = resp.result?.list
             list?.mapNotNull { t ->
@@ -197,7 +271,8 @@ object BybitProvider : WhaleProvider {
                 val ts = t.time ?: return@mapNotNull null
                 AggTradeNormalized(p, q, ts, t.side?.equals("Sell", true) == true)
             } ?: emptyList()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            handleProviderError(e, name)
             emptyList()
         }
     }
@@ -238,7 +313,7 @@ object OkxProvider : WhaleProvider {
             val inst = normalizeSymbol(symbol, "OKX")
             val resp = api.trades(inst, limit.coerceAtMost(100)) // OKX limit max 100
             if (resp.code != "0") {
-                return emptyList()
+                throw TerminalError("OKX API Error: code=${resp.code}")
             }
             resp.data?.mapNotNull { t ->
                 val p = t.px?.toDoubleOrNull() ?: return@mapNotNull null
@@ -246,7 +321,8 @@ object OkxProvider : WhaleProvider {
                 val ts = t.ts?.toLongOrNull() ?: return@mapNotNull null
                 AggTradeNormalized(p, q, ts, t.side?.equals("sell", true) == true)
             } ?: emptyList()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            handleProviderError(e, name)
             emptyList()
         }
     }
@@ -289,41 +365,71 @@ object GateProvider : WhaleProvider {
                 val ts = t.create_time_ms ?: return@mapNotNull null
                 AggTradeNormalized(p, q, ts, t.side?.equals("sell", true) == true)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            handleProviderError(e, name)
             emptyList()
         }
     }
 }
 
-// -------- 🟢 کف بدون‌مجوز: GeckoTerminal DEX (هرگز جغرافیایی مسدود نمی‌شود) --------
+// -------- 🟢 کف بدون‌مجوز: GeckoTerminal DEX (با کش بهینه) --------
 
 /**
- * منبع آن‌چین: swapهای واقعی DEX با آدرس کیف و جهت buy/sell.
- * این‌ها «تخمین» نیستند — تراکنش‌های واقعی روی بلاکچین‌اند.
+ * 🚀 Commit 68: کش ساده برای نتایج جستجوی استخرها.
+ * کاهش درخواست‌های متوالی HTTP → کمتر با 429 برخورد می‌کنیم.
+ * آدرس استخرهای اصلی برای یک نماد به ندرت تغییر می‌کند.
  */
+private val poolCache = ConcurrentHashMap<String, Pair<String, String>>()
+
 object GeckoDexProvider : WhaleProvider {
     override val name: String = "GECKO_DEX"
 
     override suspend fun fetchNormalized(symbol: String, limit: Int): List<AggTradeNormalized> {
         return try {
-            val pools = GeckoTerminal.api.searchPools(symbol).data?.filter { it.attributes != null } ?: emptyList()
-            val pool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 } ?: return emptyList()
-            val net = pool.relationships?.network?.data?.id ?: return emptyList()
-            val poolAddr = pool.id?.substringAfter('_') ?: return emptyList()
+            // ۱. بررسی کش
+            var networkAndPool = poolCache[symbol]
+
+            // ۲. اگر در کش نبود، جستجو کن
+            if (networkAndPool == null) {
+                val pools = GeckoTerminal.api.searchPools(symbol).data?.filter { it.attributes != null } ?: emptyList()
+                val bestPool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 }
+
+                if (bestPool == null) {
+                    throw TerminalError("No pool found for $symbol on GeckoTerminal")
+                }
+
+                val net = bestPool.relationships?.network?.data?.id
+                    ?: throw TerminalError("Network ID missing")
+                val poolAddr = bestPool.id?.substringAfter('_')
+                    ?: throw TerminalError("Pool Address missing")
+
+                networkAndPool = Pair(net, poolAddr)
+                poolCache[symbol] = networkAndPool
+            }
+
+            val (net, poolAddr) = networkAndPool
+
+            // ۳. دریافت معاملات
             val trades = GeckoPrice.api.poolTrades(net, poolAddr).data ?: emptyList()
+
             trades.mapNotNull { t ->
                 val a = t.attributes ?: return@mapNotNull null
                 val vol = numd(a.volume_in_usd) ?: return@mapNotNull null
                 val px = numd(a.price_in_usd) ?: numd(a.price) ?: return@mapNotNull null
-                if (px <= 0) {
-                    return@mapNotNull null
-                }
-                val tsSec = numd(a.block_timestamp) ?: return@mapNotNull null
+
+                // ✅ محافظت در برابر تقسیم بر صفر
+                if (px <= 0) return@mapNotNull null
+
+                // ✅ محاسبه حجم توکن: qty = volume_usd / price_usd
                 val qty = vol / px
+
+                val tsSec = numd(a.block_timestamp) ?: return@mapNotNull null
                 val isSell = a.type?.toString()?.equals("sell", true) == true
+
                 AggTradeNormalized(px, qty, tsSec.toLong() * 1000L, isSell)
             }.take(limit)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            handleProviderError(e, name)
             emptyList()
         }
     }
