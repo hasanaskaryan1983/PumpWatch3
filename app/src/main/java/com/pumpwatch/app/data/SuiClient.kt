@@ -1,5 +1,6 @@
 package com.pumpwatch.app.data
 
+import android.util.Log
 import com.google.gson.JsonObject
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -15,6 +16,10 @@ import retrofit2.http.POST
  *
  * Sprint 9 (I2a): baseUrl قابل تزریق است (فقط برای تست با MockWebServer).
  * در تولید همان fullnode.mainnet.sui.io پیش‌فرض است.
+ *
+ * 🚀 Commit 74 (فاز ۲ — بند ۵ CONSTITUTION): log explicit + طبقه‌بندی خطا.
+ * قبلاً هر سه متد silent catch داشتند → caller نمی‌فهمید شبکه قطع است
+ * یا داده‌ای وجود ندارد. حالا: log warning/error + طبقه‌بندی transient/terminal.
  */
 
 interface SuiApi {
@@ -23,6 +28,7 @@ interface SuiApi {
 }
 
 object SuiClient {
+    private const val TAG = "SuiClient"
     const val MAINNET = "https://fullnode.mainnet.sui.io/"
 
     /** فقط برای تست (MockWebServer). تغییرش نمونهٔ Retrofit را باطل می‌کند. */
@@ -44,6 +50,33 @@ object SuiClient {
             .create(SuiApi::class.java)
             .also { cached = it }
 
+    /**
+     * 🚀 Commit 74: طبقه‌بندی خطا (مثل WhaleApi.kt).
+     * Transient (شبکه/timeout/5xx/429) → Log.w
+     * Terminal (باگ/parse/ورودی نامعتبر) → Log.e
+     */
+    private fun handleError(method: String, e: Exception) {
+        val msg = e.message ?: ""
+        val cls = e::class.java.simpleName
+        val isTransient = msg.contains("429") ||
+            msg.contains("timeout", true) ||
+            msg.contains("503") ||
+            msg.contains("502") ||
+            msg.contains("504") ||
+            msg.contains("500") ||
+            msg.contains("network", true) ||
+            cls.contains("Timeout", true) ||
+            cls.contains("Connect", true) ||
+            cls.contains("Socket", true) ||
+            cls.contains("UnknownHost", true)
+
+        if (isTransient) {
+            Log.w(TAG, "[$method] Transient ($cls): ${e.message}")
+        } else {
+            Log.e(TAG, "[$method] Terminal ($cls): ${e.message}", e)
+        }
+    }
+
     /** موجودی همهٔ کوین‌ها (SUI خام + توکن‌ها) برای یک آدرس */
     suspend fun balances(addr: String): JsonObject? = try {
         api.rpc(mapOf(
@@ -51,7 +84,10 @@ object SuiClient {
             "method" to "getAllBalances",
             "params" to listOf(addr)
         ))
-    } catch (_: Exception) { null }
+    } catch (e: Exception) {
+        handleError("balances($addr)", e)
+        null
+    }
 
     /** لیست تراکنش‌های آدرس + تغییرات موجودی هر تراکنش */
     suspend fun txBlocks(addr: String, limit: Int): JsonObject? = try {
@@ -69,7 +105,10 @@ object SuiClient {
                 limit
             )
         ))
-    } catch (_: Exception) { null }
+    } catch (e: Exception) {
+        handleError("txBlocks($addr)", e)
+        null
+    }
 
     /** متادیتای کوین (symbol/decimals) برای یک coinType */
     suspend fun coinMetadata(coinType: String): JsonObject? = try {
@@ -78,7 +117,10 @@ object SuiClient {
             "method" to "getCoinMetadata",
             "params" to listOf(coinType)
         ))
-    } catch (_: Exception) { null }
+    } catch (e: Exception) {
+        handleError("coinMetadata($coinType)", e)
+        null
+    }
 }
 
 // 🚀 Sprint 8 (S1): تابع pure — SUI همیشه ۹ اعشار دارد
