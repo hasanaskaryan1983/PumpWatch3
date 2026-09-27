@@ -1,21 +1,21 @@
 package com.pumpwatch.app.data
 
 import com.google.gson.annotations.SerializedName
-import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
-private val radarClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
-}
+/**
+ * 🚀 Commit 73 (فاز ۲ — provider governance): حذف radarClient مستقل.
+ *
+ * سه object این فایل (GeckoTerminal، CoinGeckoSearch، RadarBinance) از client
+ * مستقل `radarClient` استفاده می‌کردند → درخواست‌ها از ThrottledHttp بیرون
+ * می‌ماندند و سقف نرخ رعایت نمی‌شد.
+ * حالا: همه به `ThrottledHttp.client` وصل می‌شوند.
+ */
 
 // ---------- GeckoTerminal ----------
 
@@ -63,7 +63,7 @@ object GeckoTerminal {
     val api: GeckoApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.geckoterminal.com/")
-            .client(radarClient)
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(GeckoApi::class.java)
@@ -105,7 +105,7 @@ object CoinGeckoSearch {
     val api: CoinGeckoSearchApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.coingecko.com/")
-            .client(radarClient)
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(CoinGeckoSearchApi::class.java)
@@ -161,7 +161,7 @@ object RadarBinance {
     val api: RadarBinanceApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://api.binance.com/")
-            .client(radarClient)
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(RadarBinanceApi::class.java)
