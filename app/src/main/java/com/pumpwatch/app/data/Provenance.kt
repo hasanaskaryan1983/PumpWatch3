@@ -20,9 +20,10 @@ import com.pumpwatch.app.engine.WhaleFlowResult
  *   ساعت گوشی را جلو/عقب می‌برد یا NTP sync می‌شد، عدد age بی‌معنی می‌شد
  *   (حتی منفی!). freshnessLabel بر این اساس دروغ می‌گفت.
  *
- * حالا: ageSec اول elapsedRealtime را چک می‌کند (monotonic، unaffected by
- *   NTP/clock changes). اگر observedAtElapsedMs null بود (backward compat)،
- *   fallback به currentTimeMillis.
+ * حالا: ageSec اول observedAtElapsedMs را چک می‌کند. اگر موجود باشد (حالت
+ *   عادی production که از MarketMeta.now() ساخته شده)، از elapsedRealtime
+ *   استفاده می‌کند (monotonic، unaffected by NTP/clock changes). اگر null
+ *   باشد (backward compat با دادهٔ قدیمی یا تست‌ها)، fallback به currentTimeMillis.
  */
 
 // ---------- تازگی دادهٔ بازار ----------
@@ -33,14 +34,14 @@ data class MarketMeta(
     val observedAtMs: Long,          // زمانی که داده واقعاً از شبکه گرفته شد (wall-clock)
     val servedFrom: ServedFrom,      // لایه‌ای که همین حالا پاسخ داد
     val itemCount: Int,
-    val observedAtElapsedMs: Long? = SystemClock.elapsedRealtime()  // 🚀 Commit 80: monotonic
+    val observedAtElapsedMs: Long? = null  // 🚀 Commit 80: default = null (backward compat + JVM-safe)
 ) {
     /**
      * 🚀 Commit 80: محاسبهٔ age با elapsedRealtime (monotonic).
      *
      * اگر observedAtElapsedMs موجود باشد (حالت عادی)، از آن استفاده می‌شود →
      *   تغییر ساعت گوشی/NTP sync روی نتیجه اثر نمی‌گذارد.
-     * اگر null باشد (backward compat با دادهٔ قدیمی)، fallback به currentTimeMillis.
+     * اگر null باشد (backward compat با دادهٔ قدیمی یا تست‌ها)، fallback به currentTimeMillis.
      *
      * @return age در ثانیه. هرگز منفی نمی‌شود.
      */
@@ -67,6 +68,23 @@ data class MarketMeta(
     }
 
     companion object {
+        /**
+         * 🚀 Commit 80: helper برای ساخت MarketMeta در production با auto-capture elapsedRealtime.
+         *
+         * این monotonic guarantee می‌دهد (unaffected by NTP/clock changes).
+         * در production هر جا MarketMeta ساخته می‌شود، باید از این helper استفاده شود.
+         * در تست از constructor مستقیم با `observedAtElapsedMs = null` یا `forTest` استفاده شود.
+         */
+        fun now(
+            servedFrom: ServedFrom,
+            itemCount: Int
+        ): MarketMeta = MarketMeta(
+            observedAtMs = System.currentTimeMillis(),
+            servedFrom = servedFrom,
+            itemCount = itemCount,
+            observedAtElapsedMs = SystemClock.elapsedRealtime()
+        )
+
         /**
          * 🚀 Commit 80: constructor کمکی برای تست (elapsedRealtime قابل تنظیم).
          *
