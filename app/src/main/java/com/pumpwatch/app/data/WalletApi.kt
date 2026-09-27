@@ -31,9 +31,15 @@ data class GtTradeAttrs(
     val volume_in_usd: Any?, val price_in_usd: Any?, val price: Any?, val type: String?
 )
 
+/**
+ * 🚀 Commit 73 (فاز ۲ — provider governance): وصل به ThrottledHttp.
+ * قبلاً: بدون .client() → client پیش‌فرض Retrofit (بدون throttle/timeout مشترک).
+ * حالا: از همان مسیر مرکزی که ScanApi/CoinApi/NewsApi استفاده می‌کنند.
+ */
 object GeckoPrice {
     val api: GeckoPriceApi by lazy {
         Retrofit.Builder().baseUrl("https://api.geckoterminal.com/api/v2/")
+            .client(ThrottledHttp.client)
             .addConverterFactory(GsonConverterFactory.create()).build().create(GeckoPriceApi::class.java)
     }
 }
