@@ -43,6 +43,7 @@ object WhaleClient {
 // ============================================
 // 🆕 Commit 68: Suffix Parsing + مدیریت خطای هوشمند + کش DEX
 // 🚀 Commit 82: مدل ترید GeckoTerminal اصلاح شد (W1)
+// 🚀 Commit 83-fix: parsing ISO-8601 در GeckoDexProvider
 // ============================================
 
 data class AggTradeNormalized(
@@ -69,21 +70,15 @@ private fun numd(v: Any?): Double? = when (v) {
 }
 
 /**
- * 🚀 Commit 82: پارسر ISO-8601 برای block_timestamp.
+ * 🚀 Commit 83: پارسر ISO-8601 thread-safe برای block_timestamp.
  *
  * ThreadLocal به‌جای SimpleDateFormat سراسری (SimpleDateFormat thread-safe نیست).
- * اگر minSdk >= 26 بود می‌شد از java.time.Instant.parse استفاده کرد،
- * ولی SimpleDateFormat با ThreadLocal روی همهٔ نسخه‌های Android کار می‌کند.
+ * در providerها چند coroutine ممکن است همزمان parse کنند.
  */
-internal val iso8601Format: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+internal val isoFmt: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
     SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
     }
-}
-
-internal fun parseIso8601(s: String?): Long? {
-    if (s == null) return null
-    return runCatching { iso8601Format.get().parse(s)?.time }.getOrNull()
 }
 
 fun normalizeSymbol(symbol: String, exchange: String): String {
@@ -338,13 +333,13 @@ object GateProvider : WhaleProvider {
 private val poolCache = ConcurrentHashMap<String, Pair<String, String>>()
 
 /**
- * 🚀 Commit 82: GeckoDexProvider با مدل دقیق مطابق مستندات رسمی.
+ * 🚀 Commit 82 + 83-fix: GeckoDexProvider با مدل دقیق مطابق مستندات رسمی.
  *
- * اصلاحات نسبت به نسخه قبلی:
+ * اصلاحات نسبت به نسخهٔ اولیه:
  *   1. `a.kind` برای جهت معامله (به‌جای `a.type` که "trade" ثابت بود)
- *   2. `a.block_timestamp` با parseIso8601 (به‌جای numd که روی ISO null می‌داد)
+ *   2. `a.block_timestamp` با `isoFmt` ThreadLocal (ISO-8601 → epoch ms)
  *   3. `price_to_in_usd` یا `price_from_in_usd` برای قیمت (به‌جای `price_in_usd`)
- *   4. `volume_in_usd` رشته است → toDoubleOrNull مستقیم
+ *   4. `volume_in_usd` رشته است → `toDoubleOrNull` مستقیم
  *
  * نتیجه: GECKO_DEX دیگر همیشه خالی برنمی‌گردد.
  */
@@ -382,8 +377,12 @@ object GeckoDexProvider : WhaleProvider {
                 // 🚀 Commit 82: volume_in_usd رشته است
                 val vol = a.volume_in_usd?.toDoubleOrNull() ?: return@mapNotNull null
 
-                // 🚀 Commit 82: block_timestamp ISO-8601 است (نه عدد)
-                val tsMs = parseIso8601(a.block_timestamp) ?: return@mapNotNull null
+                // 🚀 Commit 83-fix: block_timestamp ISO-8601 است (با ThreadLocal برای thread safety)
+                val tsMs = a.block_timestamp?.let { tsStr ->
+                    isoFmt.get()?.let { fmt ->
+                        runCatching { fmt.parse(tsStr)?.time }.getOrNull()
+                    }
+                } ?: return@mapNotNull null
 
                 // 🚀 Commit 82: kind = "buy" | "sell" (نه type که "trade" ثابت است)
                 val isSell = a.kind.equals("sell", ignoreCase = true)
