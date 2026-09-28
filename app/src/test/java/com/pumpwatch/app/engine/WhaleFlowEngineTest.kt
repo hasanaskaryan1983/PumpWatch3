@@ -10,6 +10,11 @@ import org.junit.Test
  * 🚀 Commit 83: تست pure برای WhaleFlowEngine.computeFromTrades.
  *
  * این تابع حالا pure است (بدون suspend) و می‌توان در JVM unit test صدا زد.
+ *
+ * 🚀 Commit 83-fix: threshold در تست‌های accumulation/distribution
+ *   به 50_000 کاهش یافت تا هر دو trade به‌عنوان «نهنگ» محاسبه شوند.
+ *   قبلاً با threshold = 100_000، یکی از trade‌ها زیر آستانه بود و
+ *   whaleTrades = 1 می‌شد → buyRatio محاسبه‌شده با انتظار mismatch بود.
  */
 class WhaleFlowEngineTest {
 
@@ -29,7 +34,7 @@ class WhaleFlowEngineTest {
         val trades = listOf(
             AggTradeNormalized(price = 50000.0, qty = 0.5, time = 1000L, buyerIsMaker = false),
             AggTradeNormalized(price = 50100.0, qty = 0.3, time = 5000L, buyerIsMaker = false),
-            AggTradeNormalized(price = 50200.0, qty = 3.0, time = 3000L, buyerIsMaker = false) // وسطی
+            AggTradeNormalized(price = 50200.0, qty = 3.0, time = 3000L, buyerIsMaker = false)
         )
         val result = WhaleFlowEngine.computeFromTrades(
             symbol = "BTCUSDT",
@@ -64,6 +69,7 @@ class WhaleFlowEngineTest {
 
     @Test
     fun `accumulation when buy ratio 60 percent or more`() {
+        // 🚀 Commit 83-fix: threshold = 50_000 تا هر دو trade به‌عنوان «نهنگ» محاسبه شوند
         val trades = listOf(
             AggTradeNormalized(price = 50000.0, qty = 3.0, time = 1000L, buyerIsMaker = false), // buy 150K
             AggTradeNormalized(price = 50000.0, qty = 1.0, time = 2000L, buyerIsMaker = true)   // sell 50K
@@ -72,7 +78,7 @@ class WhaleFlowEngineTest {
             symbol = "BTCUSDT",
             source = "BINANCE",
             trades = trades,
-            whaleThresholdUsd = 100_000.0
+            whaleThresholdUsd = 50_000.0   // ← کاهش آستانه
         )
         assertNotNull(result)
         assertEquals(2, result!!.whaleTrades)
@@ -84,6 +90,7 @@ class WhaleFlowEngineTest {
 
     @Test
     fun `distribution when buy ratio 40 percent or less`() {
+        // 🚀 Commit 83-fix: threshold = 50_000 تا هر دو trade به‌عنوان «نهنگ» محاسبه شوند
         val trades = listOf(
             AggTradeNormalized(price = 50000.0, qty = 1.0, time = 1000L, buyerIsMaker = false), // buy 50K
             AggTradeNormalized(price = 50000.0, qty = 3.0, time = 2000L, buyerIsMaker = true)   // sell 150K
@@ -92,10 +99,11 @@ class WhaleFlowEngineTest {
             symbol = "BTCUSDT",
             source = "BINANCE",
             trades = trades,
-            whaleThresholdUsd = 100_000.0
+            whaleThresholdUsd = 50_000.0   // ← کاهش آستانه
         )
         assertNotNull(result)
-        assertEquals(WhaleFlowEngine.PRESSURE_DISTRIBUTION, result!!.pressure)
+        assertEquals(2, result!!.whaleTrades)
+        assertEquals(WhaleFlowEngine.PRESSURE_DISTRIBUTION, result.pressure)
         assertEquals(0.25, result.buyRatio, 0.001)
     }
 
