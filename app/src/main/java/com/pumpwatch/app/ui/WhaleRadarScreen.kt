@@ -52,8 +52,9 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.data.findCoinByContractOrId  // 🚀 Commit 84: contract-based lookup
 import com.pumpwatch.app.engine.WhaleFlowEngine
-import com.pumpwatch.app.engine.formatWindowLabel  // 🚀 Commit 83: import از engine
+import com.pumpwatch.app.engine.formatWindowLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -152,7 +153,6 @@ private val NOISE_SYMBOLS = setOf(
     "BTCB", "STETH", "WSTETH", "CBBTC", "LBTC"
 )
 
-// 🚀 Commit 83: marker حذف شد — کندل‌ها فقط قیمت‌اند، نه سیگنال نهنگ
 private data class ChartCandle(val o: Double, val h: Double, val l: Double, val c: Double)
 private data class FlowRow(val label: String, val buy: Double, val sell: Double)
 
@@ -162,11 +162,18 @@ private data class AnalysisData(
     val changePct: Double,
     val poolName: String?,
     val source: String = "DEX",
-    val whaleTrades: Int = 0,          // 🚀 Commit 83: برای نمایش "بدون فعالیت نهنگ"
-    val windowStartMs: Long = 0L,     // 🚀 Commit 83: برای برچسب زمانی واقعی
+    val whaleTrades: Int = 0,
+    val windowStartMs: Long = 0L,
     val windowEndMs: Long = 0L
 )
 
+/**
+ * 🚀 Commit 84: `unambiguous` اضافه شد.
+ *   - true = با contract + chain match شد (یا اصلاً در CoinGecko نیست)
+ *   - false = فقط با ticker fallback شد (احتمال Ticker Collision)
+ *
+ * چک «لیست‌شده در CoinGecko» فقط وقتی سبز می‌شود که `rank != null && unambiguous`.
+ */
 private data class WhalePick(
     val symbol: String,
     val name: String,
@@ -190,7 +197,8 @@ private data class WhalePick(
     val rank: Int?,
     val marketCap: Double?,
     val poolUrl: String,
-    val contract: String? = null
+    val contract: String? = null,
+    val unambiguous: Boolean = false  // 🚀 Commit 84
 )
 
 private fun compact(v: Double): String = when {
@@ -270,6 +278,12 @@ private fun sourceLabel(source: String): Pair<String, Color> = when (source) {
     else -> "⚠️ تخمین از DEX (حجم استخر)" to WGold
 }
 
+/**
+ * 🚀 Commit 84 (W4): چک «لیست‌شده در CoinGecko» فقط وقتی سبز می‌شود
+ * که توکن unambiguous (با contract یا id) پیدا شده باشد، نه فقط ticker.
+ *
+ * قبلاً: توکن اسکم با تیکر PEPE روی Base → چک اشتباه سبز می‌شد.
+ */
 private fun trustChecks(l: WhalePick): List<Pair<String, Boolean>> {
     val r1 = ratio(l.buysH1, l.sellsH1)
     return listOf(
@@ -279,7 +293,7 @@ private fun trustChecks(l: WhalePick): List<Pair<String, Boolean>> {
         "فشار خرید مثبت ≥ ۵۵٪" to (r1 >= 0.55),
         "سن استخر ≥ ۲۴ ساعت" to (l.ageHours >= 24),
         "FDV سالم (۱۰۰K تا ۲۰M)" to (l.fdv in 100_000.0..20_000_000.0),
-        "لیست‌شده در CoinGecko" to (l.rank != null)
+        "لیست‌شده در CoinGecko" to (l.rank != null && l.unambiguous)
     )
 }
 
@@ -319,7 +333,12 @@ private fun ContractRow(ctx: Context, contract: String?) {
     }
 }
 
-private fun poolStats(p: GeckoPool): WhalePick? {
+/**
+ * 🚀 Commit 84: poolStats حالا platformMap و coins می‌گیرد.
+ *   - قبلاً: فقط اطلاعات استخر را استخراج می‌کرد، unambiguous = false
+ *   - حالا: فقط اطلاعات استخر را استخراج می‌کند، unambiguous در fetchLists تنظیم می‌شود
+ */
+private fun poolStats(p: GeckoPool, platformMap: Map<String, Map<String, String>>?, coins: List<CoinMarket>): WhalePick? {
     val a = p.attributes ?: return null
     val price = a.priceUsd?.toDoubleOrNull() ?: return null
     if (price <= 0) return null
@@ -359,13 +378,11 @@ private fun poolStats(p: GeckoPool): WhalePick? {
         ageHours = age, fdv = fdv, credScore = score.coerceAtMost(100),
         rank = null, marketCap = null,
         poolUrl = "https://www.geckoterminal.com/$network/pools/$addr",
-        contract = contract
+        contract = contract,
+        unambiguous = false  // در fetchLists تنظیم می‌شود
     )
 }
 
-/**
- * 🚀 Commit 83: marker/zone حذف شدند — کندل‌ها فقط قیمت‌اند، نه سیگنال نهنگ.
- */
 @Composable
 private fun WhaleFlowChart(candles: List<ChartCandle>) {
     Canvas(modifier = Modifier.fillMaxWidth().height(190.dp)) {
@@ -621,7 +638,6 @@ fun WhaleRadarScreen() {
                 val prices = chart.prices.map { it[1] }
                 val chunked = prices.chunked(chunk).filter { it.size == chunk }
 
-                // 🚀 Commit 83: marker/th/buyZones حذف شدند (W3) — کندل فقط قیمت است
                 val candles = mutableListOf<ChartCandle>()
                 for (c in chunked) {
                     val o = c.first()
@@ -656,8 +672,6 @@ fun WhaleRadarScreen() {
                         windowStart = whaleResult.windowStartMs
                         windowEnd = whaleResult.windowEndMs
 
-                        // 🚀 Commit 83 (W2): برچسب زمانی واقعی از پنجره
-                        // فرمت از engine package import می‌شود
                         val windowLabel = formatWindowLabel(
                             whaleResult.windowStartMs,
                             whaleResult.windowEndMs,
@@ -743,6 +757,10 @@ fun WhaleRadarScreen() {
         bFlows = map
     }
 
+    /**
+     * 🚀 Commit 84 (W4): fetchLists حالا همزمان platformMap را prefetch می‌کند
+     * و هر pool با findCoinByContractOrId بررسی می‌شود (نه فقط ticker).
+     */
     fun fetchLists() {
         scope.launch {
             loadingList = true
@@ -768,21 +786,36 @@ fun WhaleRadarScreen() {
                     catch (_: Exception) { emptyList<CoinMarket>() }
                 }
 
+                // 🚀 Commit 84: prefetch platform map برای reverse lookup
+                val platformMapDeferred = async(Dispatchers.IO) {
+                    try { ApiClient.getPlatformMap() }
+                    catch (_: Exception) { null }
+                }
+
                 val trend = trendDeferred.await()
                 val news = newsDeferred.await()
                 val markets = marketsDeferred.await()
+                val platformMap = platformMapDeferred.await()
                 val allTrending = trend
 
-                fun marketOf(sym: String): CoinMarket? = markets.firstOrNull { it.symbol.equals(sym, true) }
+                // 🚀 Commit 84: marketOf با contract + chain + ticker fallback
+                suspend fun marketOf(sym: String, contract: String?, chain: String): Pair<CoinMarket?, Boolean> {
+                    return findCoinByContractOrId(markets, contract, chain, sym, platformMap)
+                }
 
                 leaders = trend
-                    .mapNotNull { poolStats(it) }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
+                    .mapNotNull { pool ->
+                        val base = poolStats(pool, platformMap, markets) ?: return@mapNotNull null
+                        val (mk, unambiguous) = marketOf(base.symbol, base.contract, base.chain)
+                        base.copy(
+                            rank = mk?.market_cap_rank,
+                            marketCap = mk?.market_cap,
+                            unambiguous = unambiguous || mk == null
+                        )
                     }
                     .filter {
-                        (it.rank == null || it.rank <= 1000) &&
+                        // 🚀 Commit 84: فقط unambiguous match‌ها برای rank-based filter
+                        (it.rank == null || (it.rank <= 1000 && it.unambiguous)) &&
                         it.volH1 >= threshold && it.buysH1 > it.sellsH1 && it.sellsH1 > 0 &&
                         it.symbol.uppercase(Locale.US) !in NOISE_SYMBOLS
                     }
@@ -791,7 +824,15 @@ fun WhaleRadarScreen() {
                     .take(15)
 
                 memeTrends = allTrending
-                    .mapNotNull { poolStats(it) }
+                    .mapNotNull { pool ->
+                        val base = poolStats(pool, platformMap, markets) ?: return@mapNotNull null
+                        val (mk, unambiguous) = marketOf(base.symbol, base.contract, base.chain)
+                        base.copy(
+                            rank = mk?.market_cap_rank,
+                            marketCap = mk?.market_cap,
+                            unambiguous = unambiguous || mk == null
+                        )
+                    }
                     .filter { p ->
                         p.liquidity >= 50_000 &&
                         p.fdv in 100_000.0..50_000_000.0 &&
@@ -801,16 +842,20 @@ fun WhaleRadarScreen() {
                         ratio(p.buysH1, p.sellsH1) >= 0.55 &&
                         p.credScore >= 45
                     }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
-                    }
                     .distinctBy { it.symbol + it.chain }
                     .sortedByDescending { it.volH1 * ratio(it.buysH1, it.sellsH1) }
                     .take(20)
 
                 val freshStrict = news
-                    .mapNotNull { poolStats(it) }
+                    .mapNotNull { pool ->
+                        val base = poolStats(pool, platformMap, markets) ?: return@mapNotNull null
+                        val (mk, unambiguous) = marketOf(base.symbol, base.contract, base.chain)
+                        base.copy(
+                            rank = mk?.market_cap_rank,
+                            marketCap = mk?.market_cap,
+                            unambiguous = unambiguous || mk == null
+                        )
+                    }
                     .filter { p ->
                         p.liquidity >= 25_000 &&
                         p.fdv in 50_000.0..50_000_000.0 &&
@@ -819,22 +864,22 @@ fun WhaleRadarScreen() {
                         p.buysH1 >= p.sellsH1 &&
                         p.credScore >= 40
                     }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
-                    }
                     .distinctBy { it.symbol + it.chain }
                     .sortedByDescending { it.credScore * 1_000_000 + it.volH1 }
                     .take(10)
 
                 fresh = if (freshStrict.isNotEmpty()) freshStrict
                 else news
-                    .mapNotNull { poolStats(it) }
-                    .filter { it.liquidity >= 10_000 && it.volH1 >= 10_000 && it.buysH1 > 0 }
-                    .map {
-                        val mk = marketOf(it.symbol)
-                        it.copy(rank = mk?.market_cap_rank, marketCap = mk?.market_cap)
+                    .mapNotNull { pool ->
+                        val base = poolStats(pool, platformMap, markets) ?: return@mapNotNull null
+                        val (mk, unambiguous) = marketOf(base.symbol, base.contract, base.chain)
+                        base.copy(
+                            rank = mk?.market_cap_rank,
+                            marketCap = mk?.market_cap,
+                            unambiguous = unambiguous || mk == null
+                        )
                     }
+                    .filter { it.liquidity >= 10_000 && it.volH1 >= 10_000 && it.buysH1 > 0 }
                     .distinctBy { it.symbol + it.chain }
                     .sortedByDescending { it.volH1 }
                     .take(5)
@@ -906,11 +951,9 @@ fun WhaleRadarScreen() {
                                 val an = analysis!!
                                 val (srcText, srcColor) = sourceLabel(an.source)
                                 Text("📈 نمودار کندلی $analysisSymbol", fontSize = 10.sp, color = WGray)
-                                // 🚀 Commit 83: zone حذف شد — فقط قیمت (W3)
                                 WhaleFlowChart(an.candles)
                                 Text("تغییر بازه: ${String.format(Locale.US, "%+.2f%%", an.changePct)}", fontSize = 11.sp, color = WGreen)
 
-                                // 🚀 Commit 83 (W9): پیام صادقانه برای حالت NO_WHALE_ACTIVITY
                                 if (an.whaleTrades == 0 && an.flows.isNotEmpty()) {
                                     Text(
                                         "⚠️ در پنجرهٔ نمایش داده‌شده هیچ معاملهٔ نهنگی (≥ ۱۰۰K$) ثبت نشد. " +
