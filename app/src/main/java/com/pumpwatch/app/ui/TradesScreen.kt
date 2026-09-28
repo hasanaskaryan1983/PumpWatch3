@@ -175,6 +175,19 @@ private fun saveAlloc(ctx: Context, a: Map<String, Int>) {
 
 private fun usd(v: Double): String = String.format(Locale.US, "$%,.2f", v)
 
+/**
+ * 🚀 Commit 87-fix: فرمت فشردهٔ دلار برای برچسب آستانهٔ نهنگ.
+ *
+ * قبلاً برچسب «بالای ۱۰۰K» hardcode بود. حالا آستانه از
+ * `WhaleFlowResult.adaptiveThresholdUsed` خوانده می‌شود و با این
+ * helper نمایش داده می‌شود تا برچسب همیشه صادق باشد.
+ */
+private fun compactUsd(v: Double): String = when {
+    v >= 1_000_000 -> String.format(Locale.US, "$%.1fM", v / 1_000_000)
+    v >= 1_000 -> String.format(Locale.US, "$%.0fK", v / 1_000)
+    else -> String.format(Locale.US, "$%.0f", v)
+}
+
 // ---------- 🚀 Sprint 13 (F6d): محاسبات ژورنال ----------
 
 private fun rMultiple(t: PaperTrade): Double {
@@ -419,7 +432,15 @@ fun TradesScreen() {
                     consensus.take(6).map { pk ->
                         async(Dispatchers.IO) {
                             try {
-                                val r = WhaleFlowEngine.analyze(pk.symbol + "USDT", 100_000.0, 1000)
+                                // 🚀 Commit 87-fix: named arguments — signature جدید analyze()
+                                // پارامتر volume24h وسط signature اضافه شده، پس positional
+                                // call قدیمی (sym, 100_000.0, 1000) به‌اشتباه 1000 را به
+                                // whaleThresholdUsd: Double? می‌داد (خطای compile CI).
+                                val r = WhaleFlowEngine.analyze(
+                                    symbol = pk.symbol + "USDT",
+                                    whaleThresholdUsd = 100_000.0,
+                                    limit = 1000
+                                )
                                 if (r != null) pk.symbol to r else null
                             } catch (_: Exception) { null }
                         }
@@ -630,7 +651,7 @@ fun TradesScreen() {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
                             Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                            Text("⚡ ۲۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                            Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
                         }
                         // 🚀 Sprint 14 (مرحله ۲ / Commit 6A): منبع واقعی کندل‌های امتیازدهی
                         // فقط برای پیک‌های CEX — پیک‌های DEX کندل صرافی ندارند و برچسب دروغ نمی‌گیرند
@@ -643,7 +664,8 @@ fun TradesScreen() {
                         realWhale[pk.symbol]?.let { rw ->
                             Text(
                                 // 🚀 Sprint 14 (Commit 5): منبع واقعی جریان نهنگ‌ها — نه برچسب سخت‌کدشده
-                                "🐳 جریان نهنگ‌ها (${rw.sourceLabel()}): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ۱۰۰K",
+                                // 🚀 Commit 87-fix: آستانه از adaptiveThresholdUsed خوانده می‌شود، نه hardcode «۱۰۰K»
+                                "🐳 جریان نهنگ‌ها (${rw.sourceLabel()}): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ${compactUsd(rw.adaptiveThresholdUsed)}",
                                 fontSize = 9.sp, fontWeight = FontWeight.Bold,
                                 color = if (rw.buyRatio >= 0.6) TGreen else if (rw.buyRatio <= 0.4) TRed else TGray
                             )
