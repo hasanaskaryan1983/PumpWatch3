@@ -14,6 +14,15 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
+/**
+ * سیگنال میم‌کوین از رادار.
+ *
+ * 🚀 Commit 86 (M4): فیلدهای `entry`, `stopLoss`, `target1`, `target2` حذف شدند.
+ *   - این فیلدها با درصدهای ثابت (−۱۰٪، +۲۵٪، +۶۰٪) محاسبه می‌شدند
+ *   - هیچ ارتباطی با نوسان، عمق نقدینگی یا slippage نداشتند
+ *   - در MemeRadarScreen.kt هیچ‌جا استفاده نمی‌شدند (کد مرده)
+ *   - اگر در آینده SL/TP نیاز باشد، باید بر پایهٔ ATR/liquidity محاسبه شود
+ */
 data class MemeSignal(
     val symbol: String,
     val name: String,
@@ -29,10 +38,6 @@ data class MemeSignal(
     val changeH6: Double,
     val changeH24: Double,
     val fdv: Double,
-    val entry: Double,
-    val stopLoss: Double,
-    val target1: Double,
-    val target2: Double,
     val reasons: List<String>,
     val rugScore: Int? = null,
     val rugWarnings: List<String> = emptyList(),
@@ -106,6 +111,14 @@ object MemeRadar {
         return results.sortedByDescending { it.score }.take(20)
     }
 
+    /**
+     * 🚀 Commit 86 (M3): اگر امنیت نامشخص است (rugScore == null)، امتیاز را به ۵۰ محدود کن.
+     *
+     * قبلاً: توکن با امنیت نامشخص می‌توانست امتیاز ۹۰+ بگیرد و در رتبهٔ اول نمایش داده شود.
+     * حالا: توکن با امنیت نامشخص حداکثر امتیاز ۵۰ می‌گیرد (رتبهٔ «متوسط»).
+     *
+     * این تضمین می‌کند که توکن‌های امن با rugScore = 85 همیشه بالاتر از توکن‌های نامشخص رتبه‌بندی شوند.
+     */
     private suspend fun analyze(p: GeckoPool): MemeSignal? {
         val a = p.attributes ?: return null
         val price = a.priceUsd?.toDoubleOrNull() ?: return null
@@ -170,13 +183,22 @@ object MemeRadar {
             return null
         }
 
+        // 🚀 Commit 86 (M3): جریمه امتیاز برای امنیت نامشخص
+        // اگر rugScore == null (UNKNOWN/EMPTY/FAILED)، امتیاز را به ۵۰ محدود کن
+        val finalScore = if (rugScore == null) {
+            reasons.add("⚠️ امنیت نامشخص — حداکثر امتیاز ۵۰")
+            score.coerceAtMost(50)
+        } else {
+            score
+        }
+
         return MemeSignal(
             symbol = sym,
             name = fullName,
             chain = chain,
             dex = p.relationships?.dex?.data?.id ?: "?",
             price = price,
-            score = score.coerceAtMost(100),
+            score = finalScore.coerceAtMost(100),  // 🚀 Commit 86: استفاده از finalScore
             liquidity = liq,
             volumeH1 = vol1,
             buyRatio = buyRatio,
@@ -185,10 +207,7 @@ object MemeRadar {
             changeH6 = h6,
             changeH24 = h24,
             fdv = fdv,
-            entry = price,
-            stopLoss = price * 0.90,
-            target1 = price * 1.25,
-            target2 = price * 1.60,
+            // 🚀 Commit 86 (M4): entry/stopLoss/target1/target2 حذف شدند
             reasons = reasons,
             rugScore = rugScore,
             rugWarnings = rugWarnings,
@@ -199,7 +218,7 @@ object MemeRadar {
     }
 
     /**
-     * 🚀 Commit 85 (M1 + M2): چک Rug Safety با GoPlus API.
+     * چک Rug Safety با GoPlus API (model سه‌حالته).
      *
      * بسته به chain، به دو تابع امتیازدهی متفاوت dispatch می‌کند:
      *   - EVM: از مدل GoPlusTokenSecurity استفاده می‌کند (با lp_holders به‌صورت List)
@@ -223,7 +242,6 @@ object MemeRadar {
                 Triple(null, listOf("⚠️ داده امنیتی در دسترس نیست"), "EMPTY")
             }
             is SecurityResult.Ready -> {
-                // 🚀 Commit 85 (M2): dispatch بر اساس نوع SecurityData
                 when (val data = result.security) {
                     is SecurityData.Evm -> scoreEvmSecurity(data.data)
                     is SecurityData.Solana -> scoreSolanaSecurity(data.data)
@@ -233,11 +251,7 @@ object MemeRadar {
     }
 
     /**
-     * 🚀 Commit 85 (M1): امتیازدهی امنیتی EVM با مدل درست.
-     *
-     * تفاوت‌ها با نسخهٔ قبلی:
-     *   - lp_holders حالا List است (نه Map) → `.values` حذف شد
-     *   - end_time با parseLockEndTime پارس می‌شود (هم epoch و هم ISO)
+     * امتیازدهی امنیتی EVM با مدل درست (Commit 85).
      */
     private fun scoreEvmSecurity(security: GoPlusTokenSecurity): Triple<Int?, List<String>, String> {
         val warnings = mutableListOf<String>()
@@ -290,14 +304,12 @@ object MemeRadar {
             warnings.add("⚠️ Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
         }
 
-        // 🚀 Commit 85 (M1): lp_holders حالا List است (نه Map)، پس .values حذف شد
         val lpHolders = security.lp_holders
         val lpLocked = lpHolders?.any { it.is_locked == "1" } ?: false
         if (!lpLocked) {
             score -= 30
             warnings.add("🚨 Liquidity قفل نیست (خطر Rug Pull)")
         } else {
-            // 🚀 Commit 85 (M1): end_time با parseLockEndTime پارس می‌شود
             val lockedDetails = lpHolders?.flatMap { it.locked_detail ?: emptyList() }
             val maxEndTime = lockedDetails?.maxOfOrNull { parseLockEndTime(it.end_time) ?: 0L }
             if (maxEndTime != null && maxEndTime > 0) {
@@ -318,46 +330,37 @@ object MemeRadar {
     }
 
     /**
-     * 🚀 Commit 85 (M2): امتیازدهی امنیتی Solana با فیلدهای واقعی endpoint سولانا.
-     *
-     * Solana endpoint فیلدهای EVM مثل is_honeypot/lp_holders/is_open_source را ندارد.
-     * به‌جای آن‌ها فیلدهای mintable/freezable/closable/balance_mutable_authority/transfer_fee را دارد.
+     * امتیازدهی امنیتی Solana با فیلدهای واقعی endpoint سولانا (Commit 85).
      */
     private fun scoreSolanaSecurity(security: SolanaTokenSecurity): Triple<Int?, List<String>, String> {
         val warnings = mutableListOf<String>()
         var score = 100
 
-        // Mintable: آیا می‌توان توکن جدید ساخت (supply inflation)
         if (anyToBool(security.mintable) == true) {
             score -= 25
             warnings.add("🚨 Mintable: می‌توان توکن جدید ضرب کرد")
         }
 
-        // Freezable: آیا می‌توان حساب کاربر را مسدود کرد
         if (anyToBool(security.freezable) == true) {
             score -= 20
             warnings.add("🚨 Freezable: می‌توان حساب‌ها را مسدود کرد")
         }
 
-        // Closable: آیا می‌توان توکن را به‌طور کامل بست
         if (anyToBool(security.closable) == true) {
             score -= 15
             warnings.add("⚠️ Closable: contract قابل بستن است")
         }
 
-        // Balance Mutable: آیا می‌توان موجودی کاربر را دستکاری کرد
         if (anyToBool(security.balance_mutable_authority) == true) {
             score -= 40
             warnings.add("🚨 Balance Mutable: موجودی‌ها قابل تغییرند")
         }
 
-        // Non-transferable: آیا انتقال ممنوع است
         if (anyToBool(security.non_transferable) == true) {
             score -= 50
             warnings.add("🚨 Non-transferable: نمی‌توانید توکن را بفروشید")
         }
 
-        // Transfer Fee: کارمزد پنهان روی هر انتقال
         val transferFee = security.transfer_fee
         val feePercent = extractTransferFeePercent(transferFee)
         if (feePercent != null && feePercent > 10.0) {
@@ -365,7 +368,6 @@ object MemeRadar {
             warnings.add("⚠️ Transfer Fee بالا: ${feePercent.toInt()}%")
         }
 
-        // Creator concentration
         val creatorPercent = security.creator_percent ?: 0.0
         if (creatorPercent > 0.30) {
             score -= 25
@@ -375,7 +377,6 @@ object MemeRadar {
             warnings.add("⚠️ Creator ${(creatorPercent * 100).toInt()}% دارد")
         }
 
-        // Top holders
         val topHolders = security.top_holders?.take(10)
         val topHoldersPercent = topHolders?.sumOf { it.percent ?: 0.0 } ?: 0.0
         if (topHoldersPercent > 0.50) {
@@ -383,7 +384,6 @@ object MemeRadar {
             warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
         }
 
-        // Trusted token (verified) → پاداش
         if (anyToBool(security.trusted_token) == true || anyToBool(security.is_true_token) == true) {
             score += 10
         }
@@ -393,12 +393,6 @@ object MemeRadar {
 
     /**
      * استخراج درصد کارمزد انتقال از فیلد transfer_fee که ساختارش متغیر است.
-     *
-     * ممکن است:
-     *   - String باشد: "5%" یا "5"
-     *   - Number باشد: 5
-     *   - Object باشد: {buy_tax: "5", sell_tax: "5"}
-     *   - Array باشد
      */
     private fun extractTransferFeePercent(fee: Any?): Double? {
         if (fee == null) return null
