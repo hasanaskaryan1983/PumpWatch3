@@ -17,7 +17,7 @@ interface GeckoPriceApi {
     suspend fun tokenInfo(@Path("network") network: String, @Path("address") address: String): GtTokenInfo
 
     @GET("networks/{network}/pools/{address}/trades")
-    suspend fun poolTrades(@Path("network") network: String, @Path("address") address: String, @Query("before") before: Long? = null): GtTrades
+    suspend fun poolTrades(@Path("network") network: String, @Path("address") address: String, @Query("before") Long? = null): GtTrades
 }
 
 data class GtTokenInfo(val data: GtTokenData?)
@@ -26,16 +26,46 @@ data class GtTokenAttrs(val name: String?, val symbol: String?, val price_usd: S
 
 data class GtTrades(val data: List<GtTrade>?)
 data class GtTrade(val attributes: GtTradeAttrs?)
+
+/**
+ * 🚀 Commit 82 (فاز ۳ — W1): مدل دقیق مطابق مستندات رسمی GeckoTerminal API v2.
+ *
+ * تغییرات نسبت به مدل قبلی:
+ *   - `type` حذف شد (فیلد ثابت "trade" برای نوع resource، جهت نیست)
+ *   - `kind` اضافه شد ("buy" | "sell" از دید base token)
+ *   - `block_timestamp` از `Any?` به `String?` (ISO-8601)
+ *   - `price_in_usd` → `price_from_in_usd` + `price_to_in_usd`
+ *   - `volume_in_usd` از `Any?` به `String?`
+ *   - `tx_hash` اضافه شد (برای dedup و commitهای آینده)
+ *   - `tx_from_address` / `tx_to_address` حفظ شدند (آدرس کیف نهنگ)
+ *   - `token_amount` اضافه شد (حجم توکن)
+ */
 data class GtTradeAttrs(
-    val block_timestamp: Any?, val tx_from_address: String?, val tx_to_address: String?,
-    val volume_in_usd: Any?, val price_in_usd: Any?, val price: Any?, val type: String?
+    val block_timestamp: String?,      // "2026-09-27T21:10:03Z" ISO-8601 UTC
+    val kind: String?,                 // "buy" | "sell"
+    val volume_in_usd: String?,        // رشته (مثلاً "1234.56")
+    val price_from_in_usd: String?,    // قیمت قبل از معامله
+    val price_to_in_usd: String?,      // قیمت بعد از معامله
+    val tx_hash: String?,              // هش تراکنش (برای dedup)
+    val tx_from_address: String?,      // آدرس واقعی خریدار/فروشنده (نهنگ!)
+    val tx_to_address: String?,
+    val token_amount: String?          // مقدار توکن
 )
 
 /**
- * 🚀 Commit 73 (فاز ۲ — provider governance): وصل به ThrottledHttp.
- * قبلاً: بدون .client() → client پیش‌فرض Retrofit (بدون throttle/timeout مشترک).
- * حالا: از همان مسیر مرکزی که ScanApi/CoinApi/NewsApi استفاده می‌کنند.
+ * 🚀 Commit 82: مدل غنی برای Commitهای بعدی (92: ردیابی نهنگ DEX).
+ * آدرس کیف و هش تراکنش را نگهداری می‌کند تا در لایه موتور بتوانیم
+ * هر آدرسی که ترید بزرگ زده را جمع‌آوری کنیم → لیدربورد نهنگ‌های کشف‌شده.
  */
+data class DexTrade(
+    val priceUsd: Double,
+    val notionalUsd: Double,
+    val timeMs: Long,
+    val isSell: Boolean,
+    val walletAddress: String?,
+    val txHash: String?
+)
+
 object GeckoPrice {
     val api: GeckoPriceApi by lazy {
         Retrofit.Builder().baseUrl("https://api.geckoterminal.com/api/v2/")
@@ -105,7 +135,6 @@ object SolanaRpc2 {
     }
 }
 
-// 🚀 Commit 27: endpoint عمومی سوم برای پخش بار وقتی کلید شخصی نیست
 object SolanaRpc3 {
     val api: SolanaRpcApi by lazy {
         Retrofit.Builder().baseUrl("https://solana.drpc.org/")
@@ -117,15 +146,6 @@ private fun heliusClient(apiKey: String): SolanaRpcApi = Retrofit.Builder()
     .baseUrl("https://mainnet.helius-rpc.com/?api-key=$apiKey")
     .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
 
-// 🚀 Commit 44: object RpcKeyStore از این فایل حذف شد و به
-// app/src/main/java/com/pumpwatch/app/data/RpcKeyStore.kt منتقل شد
-// (روی SecureStorage با رفتار fail-closed + کش حافظه‌ای cachedKey).
-
-/**
- * 🚀 Commit 26/27: چرخش هوشمند + backoff روی 429.
- * ترتیب: کلید شخصی (اگر هست) → سه endpoint عمومی.
- * اگر ctx نبود، از کش حافظه‌ای استفاده می‌کند → همهٔ موتورها پوشش می‌گیرند.
- */
 suspend fun solanaRaw(
     body: Map<String, @JvmSuppressWildcards Any?>,
     preferAlt: Boolean = false,
@@ -142,7 +162,7 @@ suspend fun solanaRaw(
     }
 
     var lastError: Exception? = null
-    for (client in endpoints) {  // 🚀 Commit 27-fix: بدون destructuring
+    for (client in endpoints) {
         var waitMs = 2000L
         for (attempt in 0 until 4) {
             try {
@@ -184,7 +204,7 @@ suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>, ctx: Cont
     endpoints.add(SolanaRpc2.api)
     endpoints.add(SolanaRpc3.api)
 
-    for (client in endpoints) {  // 🚀 Commit 27-fix: بدون destructuring
+    for (client in endpoints) {
         try {
             val r = client.rpc(body)
             if (r.result != null) return r
