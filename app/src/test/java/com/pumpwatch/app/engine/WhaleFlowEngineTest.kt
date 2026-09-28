@@ -9,12 +9,7 @@ import org.junit.Test
 /**
  * 🚀 Commit 83: تست pure برای WhaleFlowEngine.computeFromTrades.
  *
- * این تابع حالا pure است (بدون suspend) و می‌توان در JVM unit test صدا زد.
- *
- * 🚀 Commit 83-fix: threshold در تست‌های accumulation/distribution
- *   به 50_000 کاهش یافت تا هر دو trade به‌عنوان «نهنگ» محاسبه شوند.
- *   قبلاً با threshold = 100_000، یکی از trade‌ها زیر آستانه بود و
- *   whaleTrades = 1 می‌شد → buyRatio محاسبه‌شده با انتظار mismatch بود.
+ * 🚀 Commit 87 (W8): تست‌های جدید برای آستانهٔ نسبی (adaptive threshold).
  */
 class WhaleFlowEngineTest {
 
@@ -69,7 +64,6 @@ class WhaleFlowEngineTest {
 
     @Test
     fun `accumulation when buy ratio 60 percent or more`() {
-        // 🚀 Commit 83-fix: threshold = 50_000 تا هر دو trade به‌عنوان «نهنگ» محاسبه شوند
         val trades = listOf(
             AggTradeNormalized(price = 50000.0, qty = 3.0, time = 1000L, buyerIsMaker = false), // buy 150K
             AggTradeNormalized(price = 50000.0, qty = 1.0, time = 2000L, buyerIsMaker = true)   // sell 50K
@@ -78,7 +72,7 @@ class WhaleFlowEngineTest {
             symbol = "BTCUSDT",
             source = "BINANCE",
             trades = trades,
-            whaleThresholdUsd = 50_000.0   // ← کاهش آستانه
+            whaleThresholdUsd = 50_000.0
         )
         assertNotNull(result)
         assertEquals(2, result!!.whaleTrades)
@@ -90,7 +84,6 @@ class WhaleFlowEngineTest {
 
     @Test
     fun `distribution when buy ratio 40 percent or less`() {
-        // 🚀 Commit 83-fix: threshold = 50_000 تا هر دو trade به‌عنوان «نهنگ» محاسبه شوند
         val trades = listOf(
             AggTradeNormalized(price = 50000.0, qty = 1.0, time = 1000L, buyerIsMaker = false), // buy 50K
             AggTradeNormalized(price = 50000.0, qty = 3.0, time = 2000L, buyerIsMaker = true)   // sell 150K
@@ -99,7 +92,7 @@ class WhaleFlowEngineTest {
             symbol = "BTCUSDT",
             source = "BINANCE",
             trades = trades,
-            whaleThresholdUsd = 50_000.0   // ← کاهش آستانه
+            whaleThresholdUsd = 50_000.0
         )
         assertNotNull(result)
         assertEquals(2, result!!.whaleTrades)
@@ -170,5 +163,86 @@ class WhaleFlowEngineTest {
         val end = start + 5L * 24 * 60 * 60 * 1000L // 5 days
         val label = formatWindowLabel(start, end, 1000)
         assert(label.contains("5 روز")) { "expected days, got: $label" }
+    }
+
+    // 🚀 Commit 87 (W8): تست‌های جدید برای آستانهٔ نسبی
+
+    @Test
+    fun `adaptive threshold uses volume24h when available`() {
+        val trades = listOf(
+            AggTradeNormalized(price = 50000.0, qty = 1.0, time = 1000L, buyerIsMaker = false)
+        )
+        // حجم ۲۴ ساعته = ۱۰۰M → threshold = 100M * 0.001 = 100K
+        val threshold = WhaleFlowEngine.computeAdaptiveThreshold(trades, 100_000_000.0, null)
+        assertEquals(100_000.0, threshold, 0.01)
+    }
+
+    @Test
+    fun `adaptive threshold respects floor when volume is low`() {
+        val trades = listOf(
+            AggTradeNormalized(price = 50000.0, qty = 1.0, time = 1000L, buyerIsMaker = false)
+        )
+        // حجم ۲۴ ساعته = ۱M → threshold = 1M * 0.001 = 1K → floor = 10K
+        val threshold = WhaleFlowEngine.computeAdaptiveThreshold(trades, 1_000_000.0, null)
+        assertEquals(10_000.0, threshold, 0.01)
+    }
+
+    @Test
+    fun `adaptive threshold respects ceiling when volume is high`() {
+        val trades = listOf(
+            AggTradeNormalized(price = 50000.0, qty = 1.0, time = 1000L, buyerIsMaker = false)
+        )
+        // حجم ۲۴ ساعته = ۱B → threshold = 1B * 0.001 = 1M → ceiling = 500K
+        val threshold = WhaleFlowEngine.computeAdaptiveThreshold(trades, 1_000_000_000.0, null)
+        assertEquals(500_000.0, threshold, 0.01)
+    }
+
+    @Test
+    fun `adaptive threshold uses percentile99 when volume24h is null and enough trades`() {
+        // ساخت ۲۰۰ ترید با اندازه‌های متفاوت
+        val trades = (1..200).map { i ->
+            AggTradeNormalized(price = 50000.0, qty = i.toDouble(), time = i.toLong(), buyerIsMaker = false)
+        }
+        // صدک ۹۹ از ۲۰۰ ترید = ترید شماره ۱۹۸ (اندازه = 198 * 50000 = 9.9M)
+        val threshold = WhaleFlowEngine.computeAdaptiveThreshold(trades, null, null)
+        // باید نزدیک 9.9M باشد، ولی با ceiling 500K محدود می‌شود
+        assertEquals(500_000.0, threshold, 0.01)
+    }
+
+    @Test
+    fun `adaptive threshold falls back to 100K when not enough trades and no volume`() {
+        // فقط ۵۰ ترید (کمتر از MIN_TRADES_FOR_PERCENTILE = 100)
+        val trades = (1..50).map { i ->
+            AggTradeNormalized(price = 50000.0, qty = i.toDouble(), time = i.toLong(), buyerIsMaker = false)
+        }
+        val threshold = WhaleFlowEngine.computeAdaptiveThreshold(trades, null, null)
+        assertEquals(100_000.0, threshold, 0.01)
+    }
+
+    @Test
+    fun `adaptive threshold respects user override`() {
+        val trades = listOf(
+            AggTradeNormalized(price = 50000.0, qty = 1.0, time = 1000L, buyerIsMaker = false)
+        )
+        // کاربر ۲۵۰K را مشخص کرده، باید همان استفاده شود (حتی اگر volume24h موجود باشد)
+        val threshold = WhaleFlowEngine.computeAdaptiveThreshold(trades, 100_000_000.0, 250_000.0)
+        assertEquals(250_000.0, threshold, 0.01)
+    }
+
+    @Test
+    fun `computeFromTrades includes adaptiveThresholdUsed in result`() {
+        val trades = listOf(
+            AggTradeNormalized(price = 50000.0, qty = 3.0, time = 1000L, buyerIsMaker = false) // 150K
+        )
+        val result = WhaleFlowEngine.computeFromTrades(
+            symbol = "BTCUSDT",
+            source = "BINANCE",
+            trades = trades,
+            whaleThresholdUsd = null,
+            volume24h = 100_000_000.0  // → threshold = 100K
+        )
+        assertNotNull(result)
+        assertEquals(100_000.0, result!!.adaptiveThresholdUsed, 0.01)
+        assertEquals(1, result.whaleTrades)  // 150K >= 100K → ۱ ترید نهنگی
     }
 }
