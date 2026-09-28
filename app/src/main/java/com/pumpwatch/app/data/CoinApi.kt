@@ -5,6 +5,8 @@ import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
@@ -15,6 +17,7 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 import com.pumpwatch.app.store.OfflineCache
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -31,9 +34,7 @@ data class CoinMarket(
     val market_cap_rank: Int?,
     @SerializedName("price_change_percentage_1h_in_currency") val change1h: Double?,
     @SerializedName("price_change_percentage_7d_in_currency") val change7d: Double?,
-    // 🚀 Sprint 12 (C4a): درصد رشد ۱ ساله از endpoint markets
     @SerializedName("price_change_percentage_1y_in_currency") val change1y: Double?,
-    // 🚀 Sprint 12 (C4a): All-Time High/Low (تمام تاریخ)
     val ath: Double?,
     val atl: Double?,
     val ath_change_percentage: Double?,
@@ -42,7 +43,6 @@ data class CoinMarket(
     @SerializedName("low_24h") val low24h: Double?
 )
 
-// دادهٔ خام /coins/list?include_platform=true
 data class CoinListItem(
     val id: String,
     val symbol: String?,
@@ -58,7 +58,6 @@ interface CoinGeckoApi {
         @Query("order") order: String = "market_cap_desc",
         @Query("per_page") perPage: Int = 250,
         @Query("page") page: Int = 1,
-        // 🚀 Sprint 12 (C4a): +1y برای محاسبهٔ درصد رشد یک‌ساله
         @Query("price_change_percentage") pcp: String = "1h,24h,7d,1y"
     ): List<CoinMarket>
 
@@ -82,28 +81,112 @@ interface CoinGeckoApi {
     ): List<CoinListItem>
 }
 
+/**
+ * 🚀 Commit 88 (A1): محدودکنندهٔ نرخ به‌ازای هاست.
+ *
+ * قبلاً ThrottledHttp یک قفل سراسری و یک فاصلهٔ ۱.۵ ثانیه برای همهٔ هاست‌ها داشت.
+ * این باعث می‌شد:
+ *   - Binance (1200 req/min) مجبور به انتظار ۱.۵ ثانیه شود (در حالی که ۱۰۰ms کافی است)
+ *   - اسکن ۱۲ شبکه × ۲ درخواست × ۱.۵ ثانیه = ۳۶ ثانیه صرفاً انتظار
+ *   - همهٔ ترد‌ها پشت یک قفل منتظر بمانند
+ *
+ * حالا:
+ *   - ConcurrentHashMap<String, Mutex> برای mutex به‌ازای هر هاست
+ *   - delay() به‌جای Thread.sleep() (suspend به‌جای blocking)
+ *   - تنظیمات مختلف برای هر هاست (minIntervalMs)
+ *
+ * @param minIntervalMs فاصلهٔ حداقل بین درخواست‌ها به‌ازای هر هاست (میلی‌ثانیه)
+ * @param defaultIntervalMs فاصلهٔ پیش‌فرض برای هاست‌های ناشناخته
+ */
+class HostLimiter(
+    private val minIntervalMs: Map<String, Long>,
+    private val defaultIntervalMs: Long = 1000L
+) {
+    private val mutexes = ConcurrentHashMap<String, Mutex>()
+    private val lastRequestMs = ConcurrentHashMap<String, Long>()
+
+    /**
+     * کسب مجوز برای ارسال درخواست به هاست مشخص.
+     *
+     * این تابع suspend است و از delay() استفاده می‌کند (نه Thread.sleep).
+     * این یعنی ترد اصلی بلاک نمی‌شود و coroutine می‌تواند در حین انتظار،
+     * ترد را آزاد کند.
+     *
+     * @param host نام هاست (مثلاً "api.binance.com")
+     */
+    suspend fun acquire(host: String) {
+        val mutex = mutexes.getOrPut(host) { Mutex() }
+        mutex.withLock {
+            val interval = minIntervalMs[host] ?: defaultIntervalMs
+            val lastMs = lastRequestMs[host] ?: 0L
+            val waitMs = lastMs + interval - System.currentTimeMillis()
+            if (waitMs > 0) {
+                delay(waitMs)
+            }
+            lastRequestMs[host] = System.currentTimeMillis()
+        }
+    }
+
+    /**
+     * پاک کردن state (برای تست یا ریست).
+     */
+    fun clear() {
+        mutexes.clear()
+        lastRequestMs.clear()
+    }
+}
+
+/**
+ * 🚀 Commit 88 (A1): HostLimiter سراسری با تنظیمات بهینه برای هر هاست.
+ *
+ * تنظیمات بر اساس محدودیت‌های رسمی API ها:
+ *   - Binance: 1200 req/min → 100ms (۱۰ req/sec)
+ *   - CoinGecko (رایگان): 10-30 req/min → 1500ms
+ *   - GeckoTerminal (رایگان): 30 req/min → 2000ms
+ *   - GoPlus (رایگان): ~60 req/min → 1000ms
+ *   - Bybit: 600 req/min → 200ms
+ *   - OKX: 600 req/min → 200ms
+ *   - Gate: 900 req/min → 200ms
+ *   - DexScreener: بدون محدودیت مشخص → 500ms
+ *   - TonAPI: 100 req/min → 600ms
+ *   - Sui RPC: عمومی → 500ms
+ *   - Default: 1000ms
+ */
+val GlobalHostLimiter = HostLimiter(
+    minIntervalMs = mapOf(
+        "api.binance.com" to 100L,
+        "api.coingecko.com" to 1500L,
+        "api.geckoterminal.com" to 2000L,
+        "api.gopluslabs.io" to 1000L,
+        "api.bybit.com" to 200L,
+        "www.okx.com" to 200L,
+        "api.gateio.ws" to 200L,
+        "api.dexscreener.com" to 500L,
+        "tonapi.io" to 600L,
+        "fullnode.mainnet.sui.io" to 500L
+    ),
+    defaultIntervalMs = 1000L
+)
+
+/**
+ * 🚀 Commit 88 (A1): ThrottledHttp با HostLimiter به‌ازای هاست.
+ *
+ * تغییرات نسبت به نسخهٔ قبلی:
+ *   - حذف قفل سراسری (synchronized) و Thread.sleep
+ *   - استفاده از HostLimiter.acquire(host) قبل از هر درخواست
+ *   - Interceptor فقط برای ۴۲۹ retry باقی می‌ماند (نه throttle عادی)
+ */
 object ThrottledHttp {
 
-    private const val MIN_INTERVAL_MS = 1500L
     private const val MAX_RETRIES = 5
     private const val BASE_BACKOFF_MS = 3000L
     private const val MAX_BACKOFF_MS = 60_000L
 
-    private val lastRequestMs = AtomicLong(0L)
-    private val lock = Any()
-
     private val interceptor = object : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
-            synchronized(lock) {
-                val wait = lastRequestMs.get() + MIN_INTERVAL_MS - System.currentTimeMillis()
-                if (wait > 0) Thread.sleep(wait)
-                lastRequestMs.set(System.currentTimeMillis())
-            }
-
             var retries = 0
             while (retries < MAX_RETRIES) {
                 val response = chain.proceed(chain.request())
-                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
                 if (response.code != 429) return response
 
                 response.close()
@@ -116,24 +199,26 @@ object ThrottledHttp {
                     (BASE_BACKOFF_MS * (1L shl (retries - 1))).coerceAtMost(MAX_BACKOFF_MS)
                 }
 
+                // 🚀 Commit 88: Thread.sleep به‌جای delay (چون Interceptor سنکرون است)
+                // این فقط برای ۴۲۹ retry است، نه throttle عادی
                 Thread.sleep(backoffMs)
-                synchronized(lock) { lastRequestMs.set(System.currentTimeMillis()) }
             }
-            throw RateLimitedException("CoinGecko rate limit exceeded after $MAX_RETRIES retries")
+            throw RateLimitedException("Rate limit exceeded after $MAX_RETRIES retries")
         }
     }
 
     /**
-     * 🚀 Commit 81: OkHttpClient با دو interceptor:
+     * 🚀 Commit 88: OkHttpClient با دو interceptor:
      *   1. Metrics.interceptor (اول اجرا می‌شود — شمارش request/latency/429)
-     *   2. interceptor (retry logic برای 429)
+     *   2. interceptor (retry logic برای ۴۲۹)
      *
-     * ترتیب addInterceptor مهم است: اول اضافه‌شده اول اجرا می‌شود.
+     * throttle عادی حالا در لایهٔ بالاتر (ProviderGateway یا قبل از fetch)
+     * با HostLimiter.acquire(host) انجام می‌شود.
      */
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .addInterceptor(Metrics.interceptor)  // 🚀 Commit 81: metrics اول
-            .addInterceptor(interceptor)           // retry logic دوم
+            .addInterceptor(Metrics.interceptor)
+            .addInterceptor(interceptor)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
@@ -168,10 +253,8 @@ object ApiClient {
     private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
     private val platformsTimeRef = AtomicLong(0L)
 
-    // 🚀 Sprint 14 (مرحله ۲ / Commit 5): متادیتای provenance — سن و مبدأ واقعی دادهٔ بازار
     private val marketMetaRef = AtomicReference(MarketMeta(0L, ServedFrom.UNKNOWN, 0))
 
-    /** UI با این تابع بفهمد عددی که نشان می‌دهد زنده است یا کش/دیسک */
     fun marketMeta(): MarketMeta = marketMetaRef.get()
 
     private fun setMeta(observedAt: Long, from: ServedFrom, count: Int) {
@@ -190,6 +273,8 @@ object ApiClient {
     suspend fun getQuickCoins(): List<CoinMarket> {
         cache1000Ref.get().takeIf { it.isNotEmpty() }?.let { return it }
         loadList("m250")?.let { return it }
+        // 🚀 Commit 88: acquire قبل از درخواست
+        GlobalHostLimiter.acquire("api.coingecko.com")
         val p1 = api.getMarkets(perPage = 250, page = 1)
         OfflineCache.save(app, "m250", gson.toJson(p1))
         return p1
@@ -199,7 +284,6 @@ object ApiClient {
         val cached = cache1000Ref.get()
         val cachedTime = cache1000TimeRef.get()
 
-        // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = کش حافظه
         if (!forceRefresh && cached.isNotEmpty() &&
             System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
         ) {
@@ -214,7 +298,6 @@ object ApiClient {
             ) {
                 cache1000Ref.set(disk)
                 cache1000TimeRef.set(System.currentTimeMillis())
-                // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = دیسک (هرگز «زنده» نیست)
                 setMeta(OfflineCache.time(app, "m1000"), ServedFrom.DISK_CACHE, disk.size)
                 return disk
             }
@@ -223,6 +306,8 @@ object ApiClient {
         return try {
             val results = mutableListOf<CoinMarket>()
             for (page in 1..4) {
+                // 🚀 Commit 88: acquire قبل از هر درخواست
+                GlobalHostLimiter.acquire("api.coingecko.com")
                 results.addAll(api.getMarkets(perPage = 250, page = page))
                 if (page < 4) delay(2000)
             }
@@ -230,12 +315,10 @@ object ApiClient {
             val nowMs = System.currentTimeMillis()
             cache1000Ref.set(sorted)
             cache1000TimeRef.set(nowMs)
-            // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = شبکه
             setMeta(nowMs, ServedFrom.NETWORK, sorted.size)
             OfflineCache.save(app, "m1000", gson.toJson(sorted))
             sorted
         } catch (e: Exception) {
-            // 🚀 Sprint 14 (Commit 5): کلید دیسک واقعی ثبت می‌شود (m1000 یا m250)
             var diskKey = "m1000"
             var disk = loadList(diskKey)
             if (disk == null) {
@@ -255,7 +338,6 @@ object ApiClient {
         val cached = cache100Ref.get()
         val cachedTime = cache100TimeRef.get()
 
-        // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = کش حافظه
         if (!forceRefresh && cached.isNotEmpty() &&
             System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
         ) {
@@ -270,18 +352,18 @@ object ApiClient {
             ) {
                 cache100Ref.set(disk)
                 cache100TimeRef.set(System.currentTimeMillis())
-                // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = دیسک
                 setMeta(OfflineCache.time(app, "m100"), ServedFrom.DISK_CACHE, disk.size)
                 return disk
             }
         }
 
         return try {
+            // 🚀 Commit 88: acquire قبل از درخواست
+            GlobalHostLimiter.acquire("api.coingecko.com")
             val fresh = api.getMarkets(perPage = 100, page = 1)
             val nowMs = System.currentTimeMillis()
             cache100Ref.set(fresh)
             cache100TimeRef.set(nowMs)
-            // 🚀 Sprint 14 (Commit 5): برچسب مبدأ = شبکه
             setMeta(nowMs, ServedFrom.NETWORK, fresh.size)
             OfflineCache.save(app, "m100", gson.toJson(fresh))
             fresh
@@ -307,6 +389,8 @@ object ApiClient {
             } catch (_: Exception) { }
         }
         return try {
+            // 🚀 Commit 88: acquire قبل از درخواست
+            GlobalHostLimiter.acquire("api.coingecko.com")
             val chart = api.getMarketChart(id, days = days)
             OfflineCache.save(app, key, gson.toJson(chart))
             chart
@@ -343,6 +427,8 @@ object ApiClient {
         }
 
         return try {
+            // 🚀 Commit 88: acquire قبل از درخواست
+            GlobalHostLimiter.acquire("api.coingecko.com")
             val list = api.getCoinsList(includePlatform = true)
             val map = HashMap<String, Map<String, String>>()
             for (item in list) {
