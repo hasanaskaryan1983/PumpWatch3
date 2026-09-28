@@ -8,6 +8,10 @@ import org.junit.Test
 
 /**
  * 🚀 Sprint 14 (مرحله ۲ / Commit 5): تست pure زیرساخت Provenance
+ *
+ * 🚀 Commit 83-fix: `WhaleFlowResult` حالا ۱۲ پارامتر دارد
+ *   (windowStartMs و windowEndMs در Commit 83 اضافه شدند برای W2).
+ *   از named parameters استفاده می‌کنیم تا readable باشد.
  */
 class ProvenanceTest {
 
@@ -33,7 +37,22 @@ class ProvenanceTest {
 
     @Test
     fun whale_source_labels_are_honest() {
-        fun res(src: String) = WhaleFlowResult("BTC", src, 0L, 0, 0, 0.0, 0.0, 0.0, 0.5, "BALANCED")
+        // 🚀 Commit 83-fix: WhaleFlowResult حالا ۱۲ پارامتر دارد.
+        // از named parameters استفاده می‌کنیم — این تست فقط `source` و `sourceLabel` را می‌سنجد.
+        fun res(src: String) = WhaleFlowResult(
+            symbol = "BTC",
+            source = src,
+            fetchedAt = 0L,
+            windowStartMs = 0L,
+            windowEndMs = 0L,
+            windowTrades = 0,
+            whaleTrades = 0,
+            whaleBuyNotional = 0.0,
+            whaleSellNotional = 0.0,
+            largestTrade = 0.0,
+            buyRatio = 0.5,
+            pressure = "BALANCED"
+        )
         assertEquals("Binance", res("BINANCE").sourceLabel())
         assertEquals("Binance", res("BINANCE_AGG").sourceLabel())
         assertEquals("Bybit", res("BYBIT").sourceLabel())
