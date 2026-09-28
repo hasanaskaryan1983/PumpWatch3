@@ -42,7 +42,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -152,16 +151,19 @@ private val NOISE_SYMBOLS = setOf(
     "BTCB", "STETH", "WSTETH", "CBBTC", "LBTC"
 )
 
-private data class ChartCandle(val o: Double, val h: Double, val l: Double, val c: Double, val marker: Int)
+// 🚀 Commit 83: marker حذف شد — کندل‌ها فقط قیمت‌اند، نه سیگنال نهنگ
+private data class ChartCandle(val o: Double, val h: Double, val l: Double, val c: Double)
 private data class FlowRow(val label: String, val buy: Double, val sell: Double)
 
 private data class AnalysisData(
     val candles: List<ChartCandle>,
-    val zone: Double?,
     val flows: List<FlowRow>,
     val changePct: Double,
     val poolName: String?,
-    val source: String = "DEX"
+    val source: String = "DEX",
+    val whaleTrades: Int = 0,          // 🚀 Commit 83: برای نمایش "بدون فعالیت نهنگ"
+    val windowStartMs: Long = 0L,     // 🚀 Commit 83: برای برچسب زمانی واقعی
+    val windowEndMs: Long = 0L
 )
 
 private data class WhalePick(
@@ -360,8 +362,14 @@ private fun poolStats(p: GeckoPool): WhalePick? {
     )
 }
 
+/**
+ * 🚀 Commit 83: marker/zone حذف شدند — کندل‌ها فقط قیمت‌اند، نه سیگنال نهنگ.
+ *
+ * قبلاً دایره‌های سبز/قرمز روی کندل‌ها نمایش داده می‌شدند که ادعا می‌کردند
+ * "نقطهٔ ورود نهنگ" هستند، در حالی که فقط کندل‌های صعودی/نزولی قیمت بودند.
+ */
 @Composable
-private fun WhaleFlowChart(candles: List<ChartCandle>, zone: Double?) {
+private fun WhaleFlowChart(candles: List<ChartCandle>) {
     Canvas(modifier = Modifier.fillMaxWidth().height(190.dp)) {
         if (candles.size < 2) return@Canvas
         val vals = candles.flatMap { listOf(it.h, it.l) }
@@ -385,16 +393,6 @@ private fun WhaleFlowChart(candles: List<ChartCandle>, zone: Double?) {
             val top = min(yO, yC)
             val bh = max(3f, abs(yO - yC))
             drawRect(col, topLeft = Offset(x - bodyW / 2, top), size = Size(bodyW, bh))
-            if (c.marker == 1) drawCircle(WGreen, radius = 7f, center = Offset(x, y(c.l) + 18f))
-            else if (c.marker == -1) drawCircle(WRed, radius = 6f, center = Offset(x, y(c.h) - 18f))
-        }
-
-        if (zone != null && zone in minValue..maxValue) {
-            drawLine(
-                WGold, Offset(0f, y(zone)), Offset(w, y(zone)),
-                strokeWidth = 2f,
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
-            )
         }
 
         val paint = android.graphics.Paint().apply {
@@ -420,6 +418,38 @@ private fun FlowLine(label: String, b: Double, s: Double, vol: Double) {
             fontSize = 10.sp, fontWeight = FontWeight.Black,
             color = if (r >= 0.5) WGreen else WRed
         )
+    }
+}
+
+/**
+ * 🚀 Commit 83 (W2): برچسب زمانی واقعی از روی min/max timestamp تریدها.
+ *
+ * قبلاً همیشه "۱ ساعته" نمایش داده می‌شد که دروغ بود (برای BTC چند دقیقه،
+ * برای آلت‌کوین‌های کم‌حجم چند روز). حالا:
+ *   - اگر پنجره < 60 دقیقه: "از HH:mm تا HH:mm (N ترید، X دقیقه)"
+ *   - اگر پنجره >= 60 دقیقه: "از HH:mm تا HH:mm (N ترید، X ساعت)"
+ *   - اگر پنجره >= 24 ساعت: "از MM/dd تا MM/dd (N ترید، X روز)"
+ */
+internal fun formatWindowLabel(startMs: Long, endMs: Long, trades: Int): String {
+    if (startMs <= 0L || endMs <= 0L || endMs <= startMs) {
+        return "$trades ترید (پنجره نامشخص)"
+    }
+    val durationMin = ((endMs - startMs) / 60_000L).coerceAtLeast(1)
+    return when {
+        durationMin < 60 -> {
+            val sdf = SimpleDateFormat("HH:mm", Locale.US)
+            "از ${sdf.format(Date(startMs))} تا ${sdf.format(Date(endMs))} ($trades ترید، $durationMin دقیقه)"
+        }
+        durationMin < 24 * 60 -> {
+            val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
+            val hours = durationMin / 60
+            "از ${sdf.format(Date(startMs))} تا ${sdf.format(Date(endMs))} ($trades ترید، ~$hours ساعت)"
+        }
+        else -> {
+            val sdf = SimpleDateFormat("MM/dd", Locale.US)
+            val days = durationMin / (24 * 60)
+            "از ${sdf.format(Date(startMs))} تا ${sdf.format(Date(endMs))} ($trades ترید، ~$days روز)"
+        }
     }
 }
 
@@ -607,38 +637,34 @@ fun WhaleRadarScreen() {
             analysisError = null
             try {
                 val coins = ApiClient.getTop1000Coins()
-                // 🚀 Sprint 15 (Commit 15): ۱۰۰ → ۱۰۰۰ ارز برتر
                 val coin = coins.firstOrNull {
                     it.symbol.equals(symbol, true) && it.market_cap_rank != null && it.market_cap_rank <= 1000
                 } ?: throw Exception("not in top 1000")
 
-                val days: Int; val chunk: Int; val take: Int; val th: Double
+                val days: Int; val chunk: Int; val take: Int
                 when (tf) {
-                    "1h" -> { days = 1; chunk = 1; take = 70; th = 0.0015 }
-                    "4h" -> { days = 1; chunk = 3; take = 70; th = 0.003 }
-                    "12h" -> { days = 1; chunk = 6; take = 70; th = 0.005 }
-                    "1d" -> { days = 2; chunk = 2; take = 24; th = 0.008 }
-                    "3d" -> { days = 6; chunk = 8; take = 18; th = 0.015 }
-                    else -> { days = 89; chunk = 24; take = 7; th = 0.03 }
+                    "1h" -> { days = 1; chunk = 1; take = 70 }
+                    "4h" -> { days = 1; chunk = 3; take = 70 }
+                    "12h" -> { days = 1; chunk = 6; take = 70 }
+                    "1d" -> { days = 2; chunk = 2; take = 24 }
+                    "3d" -> { days = 6; chunk = 8; take = 18 }
+                    else -> { days = 89; chunk = 24; take = 7 }
                 }
 
                 val chart = ApiClient.getCoinChart(coin.id, days = days)
                 val prices = chart.prices.map { it[1] }
                 val chunked = prices.chunked(chunk).filter { it.size == chunk }
+
+                // 🚀 Commit 83: marker/th/buyZones حذف شدند (W3) — کندل فقط قیمت است
                 val candles = mutableListOf<ChartCandle>()
-                val buyZones = mutableListOf<Double>()
                 for (c in chunked) {
                     val o = c.first()
                     val cl = c.last()
                     val hh = c.max()
                     val ll = c.min()
-                    val body = if (o > 0) (cl - o) / o else 0.0
-                    val marker = if (body > th) 1 else if (body < -th) -1 else 0
-                    if (marker == 1) buyZones.add(cl)
-                    candles.add(ChartCandle(o, hh, ll, cl, marker))
+                    candles.add(ChartCandle(o, hh, ll, cl))
                 }
                 val shown = candles.takeLast(take)
-                val zone = if (buyZones.isNotEmpty()) buyZones.average() else null
                 val first = prices.first()
                 val last = prices.last()
                 val chg = if (first > 0) (last - first) / first * 100 else 0.0
@@ -646,6 +672,9 @@ fun WhaleRadarScreen() {
                 var poolName: String? = null
                 val flows = mutableListOf<FlowRow>()
                 var source = "DEX"
+                var whaleTrades = 0
+                var windowStart = 0L
+                var windowEnd = 0L
 
                 try {
                     val whaleResult = withContext(Dispatchers.IO) {
@@ -655,9 +684,21 @@ fun WhaleRadarScreen() {
                             limit = 1000
                         )
                     }
-                    if (whaleResult != null && whaleResult.whaleTrades > 0) {
+                    if (whaleResult != null) {
                         source = whaleResult.source
-                        flows.add(FlowRow("۱ ساعته (${whaleResult.source})", whaleResult.whaleBuyNotional, whaleResult.whaleSellNotional))
+                        whaleTrades = whaleResult.whaleTrades
+                        windowStart = whaleResult.windowStartMs
+                        windowEnd = whaleResult.windowEndMs
+
+                        // 🚀 Commit 83 (W2): برچسب زمانی واقعی از پنجره
+                        val windowLabel = formatWindowLabel(
+                            whaleResult.windowStartMs,
+                            whaleResult.windowEndMs,
+                            whaleResult.windowTrades
+                        )
+                        flows.add(FlowRow("$windowLabel (${whaleResult.source})",
+                            whaleResult.whaleBuyNotional, whaleResult.whaleSellNotional))
+
                         val pool = GeckoTerminal.api.searchPools(coin.symbol).data?.firstOrNull { it.attributes != null }
                         if (pool != null) {
                             poolName = pool.attributes?.name
@@ -697,10 +738,9 @@ fun WhaleRadarScreen() {
                 }
 
                 analysisSymbol = coin.symbol.uppercase(Locale.US)
-                analysis = AnalysisData(shown, zone, flows, chg, poolName, source)
+                analysis = AnalysisData(shown, flows, chg, poolName, source, whaleTrades, windowStart, windowEnd)
             } catch (e: Exception) {
                 analysis = null
-                // 🚀 Sprint 15 (Commit 15): پیام خطا ۱۰۰ → ۱۰۰۰
                 analysisError = "ارز در ۱۰۰۰ ارز برتر CoinGecko پیدا نشد 🤔 (فقط ۱۰۰۰ تای برتر مجاز است)"
             }
             analyzing = false
@@ -858,7 +898,6 @@ fun WhaleRadarScreen() {
             item {
                 Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // 🚀 Sprint 15 (Commit 15): عنوان ۱۰۰ → ۱۰۰۰
                         Text("🔍 تحلیل نهنگی ارز دلخواه (۱۰۰۰ ارز برتر CoinGecko)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -900,11 +939,18 @@ fun WhaleRadarScreen() {
                                 val an = analysis!!
                                 val (srcText, srcColor) = sourceLabel(an.source)
                                 Text("📈 نمودار کندلی $analysisSymbol", fontSize = 10.sp, color = WGray)
-                                WhaleFlowChart(an.candles, an.zone)
-                                if (an.zone != null) {
-                                    Text("🐳 نهنگ‌ها حوالی ${String.format(Locale.US, "$%,.6f", an.zone)} شروع به خرید کردن", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = WGold)
-                                }
+                                // 🚀 Commit 83: zone حذف شد — فقط قیمت (W3)
+                                WhaleFlowChart(an.candles)
                                 Text("تغییر بازه: ${String.format(Locale.US, "%+.2f%%", an.changePct)}", fontSize = 11.sp, color = WGreen)
+
+                                // 🚀 Commit 83 (W9): پیام صادقانه برای حالت NO_WHALE_ACTIVITY
+                                if (an.whaleTrades == 0 && an.flows.isNotEmpty()) {
+                                    Text(
+                                        "⚠️ در پنجرهٔ نمایش داده‌شده هیچ معاملهٔ نهنگی (≥ ۱۰۰K$) ثبت نشد. " +
+                                        "اعداد جریان پول فقط از حجم استخر DEX تخمین زده شده‌اند — آستانه را پایین‌تر بیاور یا بازهٔ بلندتر انتخاب کن.",
+                                        fontSize = 11.sp, fontWeight = FontWeight.Bold, color = WGold
+                                    )
+                                }
 
                                 if (an.flows.isNotEmpty()) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
