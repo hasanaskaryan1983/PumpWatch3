@@ -47,13 +47,13 @@ class HostLimiterTest {
         )
 
         val timestamps = mutableListOf<Long>()
-        val mutex = kotlinx.coroutines.sync.Mutex()
+        val lock = Any()
 
         coroutineScope {
             val jobs = (1..10).map {
                 async {
                     limiter.acquire("host1")
-                    mutex.withLock {
+                    synchronized(lock) {
                         timestamps.add(System.currentTimeMillis())
                     }
                 }
