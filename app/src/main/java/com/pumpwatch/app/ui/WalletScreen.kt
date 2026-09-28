@@ -54,6 +54,7 @@ import com.pumpwatch.app.data.SecureStorage
 import com.pumpwatch.app.data.SuiClient
 import com.pumpwatch.app.data.TonClient
 import com.pumpwatch.app.data.bestPriceUsd
+import com.pumpwatch.app.data.findCoinByContractOrId  // 🚀 Commit 84: contract-based lookup
 import com.pumpwatch.app.data.solanaRaw
 import com.pumpwatch.app.data.solanaTyped
 import com.pumpwatch.app.data.suiAmount
@@ -246,7 +247,9 @@ fun WalletScreen() {
                                         if (pairs.size > 2) delay(500L)
                                     }
                                 }
-                                val suiPx = coinsS.firstOrNull { it.symbol.equals("SUI", true) }?.current_price
+                                // 🚀 Commit 84 (L1): SUI native است — اول با id، بعد ticker
+                                val suiPx = coinsS.firstOrNull { it.id == "sui" }?.current_price
+                                    ?: coinsS.firstOrNull { it.symbol.equals("SUI", true) }?.current_price
                                 val finalList = held.map { h ->
                                     if (h.symbol == "SUI" && suiPx != null && suiPx > 0) h.copy(price = suiPx, value = h.amount * suiPx) else h
                                 }.toMutableList()
@@ -329,7 +332,9 @@ fun WalletScreen() {
                                 info = "⚠️ اتصال به TonAPI ناموفق بود — دوباره تلاش کن"
                             } else {
                                 val coinsT = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
-                                val tonPx = coinsT.firstOrNull { it.symbol.equals("TON", true) }?.current_price
+                                // 🚀 Commit 84 (L1): TON native است — اول با id، بعد ticker
+                                val tonPx = coinsT.firstOrNull { it.id == "the-open-network" }?.current_price
+                                    ?: coinsT.firstOrNull { it.symbol.equals("TON", true) }?.current_price
                                 val list = mutableListOf<WalletHolding>()
 
                                 val tonBal = tonAmount(acc?.balance?.toString(), 9) ?: 0.0
@@ -537,6 +542,9 @@ fun WalletScreen() {
 
                             val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
 
+                            // 🚀 Commit 84 (L1): platform map برای تطبیق contract→coin (در ApiClient کش می‌شود)
+                            val platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { null }
+
                             data class HostResult(val holdings: List<WalletHolding>, val cfg: ChainCfg?)
                             val hostResults = coroutineScope {
                                 hosts.map { h ->
@@ -559,7 +567,17 @@ fun WalletScreen() {
                                                                 var px = try {
                                                                     GeckoPrice.api.tokenInfo(h.gt, contract).data?.attributes?.price_usd?.toDoubleOrNull()
                                                                 } catch (_: Exception) { null }
-                                                                if (px == null || px <= 0) px = coins.firstOrNull { it.symbol.equals(t.symbol ?: "", true) }?.current_price
+                                                                // 🚀 Commit 84 (L1): fallback با contract+chain (نه ticker خام)
+                                                                if (px == null || px <= 0) {
+                                                                    val (coinMatch, _) = findCoinByContractOrId(
+                                                                        coins = coins,
+                                                                        contract = contract,
+                                                                        chain = h.key,
+                                                                        ticker = t.symbol,
+                                                                        platformMap = platformMap
+                                                                    )
+                                                                    px = coinMatch?.current_price
+                                                                }
                                                                 WalletHolding("${t.symbol ?: "?"}·${h.key}", t.name ?: "", amt, px, amt * (px ?: 0.0), contract = contract, host = h.bs, dexChainId = dexChainIdFor(h.key))
                                                             } catch (_: Exception) { null }
                                                         }
@@ -1215,14 +1233,12 @@ private fun ChainForensicsSection(
                             if (ts <= 0L || ts < fromTs || ts > toTs) continue
                             val wallet = a.tx_from_address ?: continue
                             val vol = a.volume_in_usd?.toDoubleOrNull() ?: continue
-                            // 🚀 Commit 82-fix: price_in_usd → price_to_in_usd (نزدیک‌تر به قیمت اجرای ترید)
-                            //                     price → price_from_in_usd (fallback)
-                            //                     fیلدها String? هستند، نه Any?
+                            // 🚀 Commit 82: price_to_in_usd (نزدیک‌تر به قیمت اجرای ترید) با fallback به price_from_in_usd
                             val px = a.price_to_in_usd?.toDoubleOrNull()
                                 ?: a.price_from_in_usd?.toDoubleOrNull()
                                 ?: continue
                             if (px < minPx) minPx = px
-                            // 🚀 Commit 82-fix: type (که همیشه "trade" ثابت بود) → kind ("buy" | "sell")
+                            // 🚀 Commit 82: kind ("buy" | "sell") به‌جای type (که "trade" ثابت بود)
                             if ((a.kind ?: "").equals("buy", true)) {
                                 if (vol >= thr) {
                                     val ag = buys.getOrPut(wallet) { Agg() }
