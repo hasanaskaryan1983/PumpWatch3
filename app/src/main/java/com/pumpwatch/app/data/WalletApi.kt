@@ -17,7 +17,7 @@ interface GeckoPriceApi {
     suspend fun tokenInfo(@Path("network") network: String, @Path("address") address: String): GtTokenInfo
 
     @GET("networks/{network}/pools/{address}/trades")
-    suspend fun poolTrades(@Path("network") network: String, @Path("address") address: String, @Query("before") Long? = null): GtTrades
+    suspend fun poolTrades(@Path("network") network: String, @Path("address") address: String, @Query("before") before: Long? = null): GtTrades
 }
 
 data class GtTokenInfo(val data: GtTokenData?)
