@@ -53,6 +53,7 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.engine.WhaleFlowEngine
+import com.pumpwatch.app.engine.formatWindowLabel  // 🚀 Commit 83: import از engine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -364,9 +365,6 @@ private fun poolStats(p: GeckoPool): WhalePick? {
 
 /**
  * 🚀 Commit 83: marker/zone حذف شدند — کندل‌ها فقط قیمت‌اند، نه سیگنال نهنگ.
- *
- * قبلاً دایره‌های سبز/قرمز روی کندل‌ها نمایش داده می‌شدند که ادعا می‌کردند
- * "نقطهٔ ورود نهنگ" هستند، در حالی که فقط کندل‌های صعودی/نزولی قیمت بودند.
  */
 @Composable
 private fun WhaleFlowChart(candles: List<ChartCandle>) {
@@ -418,38 +416,6 @@ private fun FlowLine(label: String, b: Double, s: Double, vol: Double) {
             fontSize = 10.sp, fontWeight = FontWeight.Black,
             color = if (r >= 0.5) WGreen else WRed
         )
-    }
-}
-
-/**
- * 🚀 Commit 83 (W2): برچسب زمانی واقعی از روی min/max timestamp تریدها.
- *
- * قبلاً همیشه "۱ ساعته" نمایش داده می‌شد که دروغ بود (برای BTC چند دقیقه،
- * برای آلت‌کوین‌های کم‌حجم چند روز). حالا:
- *   - اگر پنجره < 60 دقیقه: "از HH:mm تا HH:mm (N ترید، X دقیقه)"
- *   - اگر پنجره >= 60 دقیقه: "از HH:mm تا HH:mm (N ترید، X ساعت)"
- *   - اگر پنجره >= 24 ساعت: "از MM/dd تا MM/dd (N ترید، X روز)"
- */
-internal fun formatWindowLabel(startMs: Long, endMs: Long, trades: Int): String {
-    if (startMs <= 0L || endMs <= 0L || endMs <= startMs) {
-        return "$trades ترید (پنجره نامشخص)"
-    }
-    val durationMin = ((endMs - startMs) / 60_000L).coerceAtLeast(1)
-    return when {
-        durationMin < 60 -> {
-            val sdf = SimpleDateFormat("HH:mm", Locale.US)
-            "از ${sdf.format(Date(startMs))} تا ${sdf.format(Date(endMs))} ($trades ترید، $durationMin دقیقه)"
-        }
-        durationMin < 24 * 60 -> {
-            val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
-            val hours = durationMin / 60
-            "از ${sdf.format(Date(startMs))} تا ${sdf.format(Date(endMs))} ($trades ترید، ~$hours ساعت)"
-        }
-        else -> {
-            val sdf = SimpleDateFormat("MM/dd", Locale.US)
-            val days = durationMin / (24 * 60)
-            "از ${sdf.format(Date(startMs))} تا ${sdf.format(Date(endMs))} ($trades ترید، ~$days روز)"
-        }
     }
 }
 
@@ -691,6 +657,7 @@ fun WhaleRadarScreen() {
                         windowEnd = whaleResult.windowEndMs
 
                         // 🚀 Commit 83 (W2): برچسب زمانی واقعی از پنجره
+                        // فرمت از engine package import می‌شود
                         val windowLabel = formatWindowLabel(
                             whaleResult.windowStartMs,
                             whaleResult.windowEndMs,
