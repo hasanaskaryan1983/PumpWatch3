@@ -10,7 +10,8 @@ import java.util.TimeZone
 /**
  * نتیجهٔ جریان واقعی نهنگ‌ها از زنجیرهٔ چندصرافی.
  *
- * 🚀 Commit 83 (فاز ۳ — W2 + W9): فیلدهای جدید برای صداقت زمانی و حالت نهنگ صفر.
+ * 🚀 Commit 83 (W2 + W9): فیلدهای جدید برای صداقت زمانی و حالت نهنگ صفر.
+ * 🚀 Commit 87 (W8): فیلد `adaptiveThresholdUsed` برای شفافیت آستانهٔ استفاده‌شده.
  *
  * @property symbol نماد (مثلاً BTCUSDT)
  * @property source نام منبعی که واقعاً پاسخ داد (BINANCE / BYBIT / OKX / GATE / GECKO_DEX)
@@ -28,6 +29,7 @@ import java.util.TimeZone
  *   - "DISTRIBUTION" (ratio ≤ 0.4)
  *   - "BALANCED" (0.4 < ratio < 0.6)
  *   - "NO_WHALE_ACTIVITY" (whaleTrades == 0)
+ * @property adaptiveThresholdUsed آستانهٔ واقعی استفاده‌شده (دلار) — برای شفافیت
  *
  * اگر null برگردد یعنی هیچ منبعی داده نداشت.
  */
@@ -43,7 +45,8 @@ data class WhaleFlowResult(
     val whaleSellNotional: Double,
     val largestTrade: Double,
     val buyRatio: Double,
-    val pressure: String
+    val pressure: String,
+    val adaptiveThresholdUsed: Double  // 🚀 Commit 87 (W8)
 )
 
 /**
@@ -58,11 +61,21 @@ data class WhaleFlowResult(
  * 🚀 Commit 83:
  *   - محاسبهٔ windowStartMs/windowEndMs از min/max timestamp تریدها
  *   - حالت NO_WHALE_ACTIVITY جدا از BALANCED
+ *
+ * 🚀 Commit 87 (W8):
+ *   - آستانهٔ نسبی بر اساس حجم ۲۴ ساعته یا صدک ۹۹ تریدها
+ *   - فیلد adaptiveThresholdUsed در خروجی برای شفافیت
  */
 object WhaleFlowEngine {
 
     const val SOURCE_BINANCE = "BINANCE_AGG"
     private const val DEFAULT_WHALE_THRESHOLD = 100_000.0
+
+    // 🚀 Commit 87 (W8): Floor و Ceiling برای آستانهٔ نسبی
+    private const val MIN_THRESHOLD = 10_000.0
+    private const val MAX_THRESHOLD = 500_000.0
+    private const val VOLUME_RATIO = 0.001  // ۰.۱٪ از حجم ۲۴ ساعته
+    private const val MIN_TRADES_FOR_PERCENTILE = 100
 
     /** ثابت‌های pressure برای اجتناب از typo و سازگاری با UI */
     const val PRESSURE_ACCUMULATION = "ACCUMULATION"
@@ -70,9 +83,18 @@ object WhaleFlowEngine {
     const val PRESSURE_BALANCED = "BALANCED"
     const val PRESSURE_NO_WHALE = "NO_WHALE_ACTIVITY"
 
+    /**
+     * 🚀 Commit 87 (W8): پارامتر `volume24h` اضافه شد برای آستانهٔ نسبی.
+     *
+     * @param symbol نماد ارز (مثلاً BTCUSDT)
+     * @param volume24h حجم ۲۴ ساعته (دلار) — اگر null باشد، از صدک ۹۹ تریدها استفاده می‌شود
+     * @param whaleThresholdUsd آستانهٔ دستی — اگر null باشد، نسبی محاسبه می‌شود
+     * @param limit تعداد تریدهای درخواستی
+     */
     suspend fun analyze(
         symbol: String,
-        whaleThresholdUsd: Double = DEFAULT_WHALE_THRESHOLD,
+        volume24h: Double? = null,
+        whaleThresholdUsd: Double? = null,
         limit: Int = 1000
     ): WhaleFlowResult? {
         for (provider in WhaleProviders.all) {
@@ -82,7 +104,7 @@ object WhaleFlowEngine {
                 emptyList()
             }
             if (trades.isEmpty()) continue
-            val result = computeFromTrades(symbol, provider.name, trades, whaleThresholdUsd)
+            val result = computeFromTrades(symbol, provider.name, trades, whaleThresholdUsd, volume24h)
             if (result != null) return result
         }
         return null
@@ -90,15 +112,21 @@ object WhaleFlowEngine {
 
     /**
      * 🚀 Commit 83: تست‌پذیر به‌عنوان یک تابع pure (بدون suspend).
-     * ورودی: لیست تریدها. خروجی: WhaleFlowResult.
+     * 🚀 Commit 87 (W8): پارامتر `volume24h` اضافه شد.
+     *
+     * ورودی: لیست تریدها + volume24h اختیاری. خروجی: WhaleFlowResult.
      */
     fun computeFromTrades(
         symbol: String,
         source: String,
         trades: List<AggTradeNormalized>,
-        whaleThresholdUsd: Double
+        whaleThresholdUsd: Double? = null,
+        volume24h: Double? = null
     ): WhaleFlowResult? {
         if (trades.isEmpty()) return null
+
+        // 🚀 Commit 87 (W8): محاسبهٔ آستانهٔ نسبی
+        val threshold = computeAdaptiveThreshold(trades, volume24h, whaleThresholdUsd)
 
         var buy = 0.0
         var sell = 0.0
@@ -106,7 +134,7 @@ object WhaleFlowEngine {
         var whaleCount = 0
         var total = 0
 
-        // 🚀 Commit 83: min/max timestamp برای پنجرهٔ واقعی
+        // محاسبهٔ min/max timestamp برای پنجرهٔ واقعی
         var minTs = Long.MAX_VALUE
         var maxTs = Long.MIN_VALUE
 
@@ -116,14 +144,14 @@ object WhaleFlowEngine {
             if (t.time < minTs) minTs = t.time
             if (t.time > maxTs) maxTs = t.time
 
-            if (notional >= whaleThresholdUsd) {
+            if (notional >= threshold) {
                 whaleCount++
                 if (notional > largest) largest = notional
                 if (t.buyerIsMaker) sell += notional else buy += notional
             }
         }
 
-        // 🚀 Commit 83: NO_WHALE_ACTIVITY وقتی هیچ ترید نهنگی نیست
+        // حالت NO_WHALE_ACTIVITY وقتی هیچ ترید نهنگی نیست
         val pressure = if (whaleCount == 0) {
             PRESSURE_NO_WHALE
         } else {
@@ -149,8 +177,61 @@ object WhaleFlowEngine {
             whaleSellNotional = sell,
             largestTrade = largest,
             buyRatio = ratio,
-            pressure = pressure
+            pressure = pressure,
+            adaptiveThresholdUsed = threshold  // 🚀 Commit 87 (W8)
         )
+    }
+
+    /**
+     * 🚀 Commit 87 (W8): محاسبهٔ آستانهٔ نسبی بر اساس حجم ۲۴ ساعته یا صدک ۹۹.
+     *
+     * رویکرد ترکیبی (Hybrid):
+     * 1. اگر `userThreshold` مشخص شده باشد، از آن استفاده کن (override دستی)
+     * 2. اگر `volume24h` موجود است، threshold = volume24h * 0.001 (با floor/ceiling)
+     * 3. اگر نیست ولی داده کافی داریم (≥ 100 ترید)، صدک ۹۹ اندازهٔ تریدها
+     * 4. Fallback: 100K
+     *
+     * @param trades لیست تریدها
+     * @param volume24h حجم ۲۴ ساعته (دلار) — اختیاری
+     * @param userThreshold آستانهٔ دستی — اختیاری
+     * @return آستانهٔ محاسبه‌شده (دلار)
+     */
+    internal fun computeAdaptiveThreshold(
+        trades: List<AggTradeNormalized>,
+        volume24h: Double?,
+        userThreshold: Double?
+    ): Double {
+        // ۱. Override دستی (اگر کاربر مشخص کرده)
+        if (userThreshold != null && userThreshold > 0) {
+            return userThreshold
+        }
+
+        // ۲. Volume-based: ۰.۱٪ از حجم ۲۴ ساعته
+        if (volume24h != null && volume24h > 0) {
+            val volumeBased = volume24h * VOLUME_RATIO
+            return volumeBased.coerceIn(MIN_THRESHOLD, MAX_THRESHOLD)
+        }
+
+        // ۳. Percentile-based: صدک ۹۹ اندازهٔ تریدها
+        if (trades.size >= MIN_TRADES_FOR_PERCENTILE) {
+            return percentile99(trades)
+        }
+
+        // ۴. Fallback: 100K
+        return DEFAULT_WHALE_THRESHOLD
+    }
+
+    /**
+     * محاسبهٔ صدک ۹۹ اندازهٔ تریدها.
+     *
+     * صدک ۹۹ یعنی ۹۹٪ تریدها کوچکتر از این مقدارند.
+     * این مقدار به‌عنوان "آستانهٔ نهنگ" در نظر گرفته می‌شود.
+     */
+    private fun percentile99(trades: List<AggTradeNormalized>): Double {
+        val notionals = trades.map { it.notional }.sorted()
+        if (notionals.isEmpty()) return DEFAULT_WHALE_THRESHOLD
+        val index = (notionals.size * 0.99).toInt().coerceAtMost(notionals.size - 1)
+        return notionals[index].coerceIn(MIN_THRESHOLD, MAX_THRESHOLD)
     }
 }
 
