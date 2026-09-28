@@ -4,7 +4,12 @@ import android.util.Log
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.GoPlusClient
+import com.pumpwatch.app.data.GoPlusTokenSecurity
+import com.pumpwatch.app.data.SecurityData
 import com.pumpwatch.app.data.SecurityResult
+import com.pumpwatch.app.data.SolanaTokenSecurity
+import com.pumpwatch.app.data.anyToBool
+import com.pumpwatch.app.data.parseLockEndTime
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -29,14 +34,10 @@ data class MemeSignal(
     val target1: Double,
     val target2: Double,
     val reasons: List<String>,
-    // P0-1: nullable — null یعنی "UNKNOWN" (داده امنیتی در دسترس نیست)
     val rugScore: Int? = null,
     val rugWarnings: List<String> = emptyList(),
-    // P0-1: وضعیت داده امنیتی
-    val securityStatus: String = "UNKNOWN",  // "READY" | "EMPTY" | "FAILED" | "UNKNOWN"
-    // 🚀 Sprint 10 (V2b): آدرس کانترکت توکن (برای کپی/پیست در CoinGecko/GoPlus)
+    val securityStatus: String = "UNKNOWN",
     val contract: String? = null,
-    // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#4): آدرس pool واقعی (برای لینک GeckoTerminal)
     val poolAddress: String? = null
 )
 
@@ -46,9 +47,7 @@ object MemeRadar {
 
     private const val TAG = "MemeRadar"
 
-    // 🚀 Sprint 11 (C1 + C1b): پوشش گسترده — ۸ زنجیره
-    // زنجیره‌های ناشناخته برای GeckoTerminal با try/catch بی‌صدا رد می‌شوند،
-    // پس افزودن یک id اشتباه هرگز اسکن را نمی‌شکند.
+    // پوشش ۸ زنجیره
     private val CHAINS = listOf(
         "solana", "bsc", "base", "ethereum",
         "ton", "robinhood", "avalanche", "sei"
@@ -78,9 +77,6 @@ object MemeRadar {
         val pools = mutableListOf<GeckoPool>()
         for (chain in CHAINS) {
             onProgress(10 + CHAINS.indexOf(chain) * 8, "اسکن زنجیره $chain...")
-            // 🚀 Sprint 11 (C1): دو منبع برای هر زنجیره —
-            // trending = پرتوجه‌ترین‌ها، new = تازه‌های قبل از ترند
-            // (فیلتر ایمنی سن ≥ ۱ ساعت بعداً در analyze اعمال می‌شود)
             try {
                 val r = GeckoTerminal.api.trendingPools(chain).data
                 if (r != null) {
@@ -103,7 +99,6 @@ object MemeRadar {
         }
 
         onProgress(75, "تحلیل معیارهای اعتماد + Rug Safety Check...")
-        // 🚀 Sprint 11 (C1): حذف تکراری‌ها (یک استخر ممکن است هم ترند باشد هم تازه)
         val seen = mutableSetOf<String>()
         val unique = pools.filter { p -> seen.add(p.id ?: "") }
         val results = unique.mapNotNull { analyze(it) }
@@ -127,7 +122,7 @@ object MemeRadar {
         val age = ageHours(a.createdAt)
         val fdv = a.fdvUsd ?: 0.0
 
-        // ---------- فیلترهای ایمنی پایه ----------
+        // فیلترهای ایمنی پایه
         if (liq < 20_000) return null
         if (vol24 < 50_000) return null
         if (s1 <= 0) return null
@@ -163,20 +158,13 @@ object MemeRadar {
         val sym = fullName.split("/").firstOrNull()?.trim() ?: "?"
         val chain = p.relationships?.network?.data?.id ?: "?"
 
-        // 🚀 Sprint 10 (V2b): استخراج آدرس کانترکت توکن (base_token)
-        // pool.relationships.base_token.data.id = "{chain}_{address}"
         val contractAddress = p.relationships?.base_token?.data?.id?.substringAfter('_', "")
-
-        // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#4): استخراج آدرس pool واقعی
-        // pool.id = "{chain}_{poolAddress}"
         val poolAddress = p.id?.substringAfter('_', "")
 
-        // ---------- چک Rug Safety با GoPlus API (مدل سه‌حالته) ----------
-        // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#3): پاس دادن contractAddress به checkRugSafety
+        // چک Rug Safety با GoPlus API (model سه‌حالته، dispatch بر اساس chain)
         val (rugScore, rugWarnings, securityStatus) = checkRugSafety(chain, contractAddress)
 
-        // P0-1: فقط وقتی rugScore واقعاً پایین است فیلتر کن
-        // null (UNKNOWN) یا score بالا → توکن را نگه دار
+        // فقط وقتی rugScore واقعاً پایین است فیلتر کن
         if (rugScore != null && rugScore < 40) {
             Log.w(TAG, "🚨 $sym rug score too low: $rugScore — $rugWarnings")
             return null
@@ -211,30 +199,20 @@ object MemeRadar {
     }
 
     /**
-     * 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#3): چک Rug Safety با GoPlus API (مدل سه‌حالته)
-     * 
-     * @param chain نام زنجیره (solana, bsc, base, ...)
-     * @param contractAddress آدرس **توکن** (نه pool!) برای بررسی امنیتی
-     * @return Triple(rugScore: Int?, warnings: List<String>, status: String)
+     * 🚀 Commit 85 (M1 + M2): چک Rug Safety با GoPlus API.
      *
-     * - Ready: rugScore = عدد واقعی (0-100)
-     * - Empty: rugScore = null، status = "EMPTY" (توکن در GoPlus نیست)
-     * - Failed: rugScore = null، status = "FAILED" (API شکست خورد)
-     *
-     * هیچ‌کدام به score خنثی تبدیل نمی‌شوند — UI باید برای UNKNOWN برچسب نمایش دهد.
+     * بسته به chain، به دو تابع امتیازدهی متفاوت dispatch می‌کند:
+     *   - EVM: از مدل GoPlusTokenSecurity استفاده می‌کند (با lp_holders به‌صورت List)
+     *   - Solana: از مدل SolanaTokenSecurity استفاده می‌کند (فیلدهای mintable/freezable/...)
      */
     private suspend fun checkRugSafety(
         chain: String,
         contractAddress: String?
     ): Triple<Int?, List<String>, String> {
-        val warnings = mutableListOf<String>()
-
-        // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#3): استفاده از contractAddress (توکن) نه poolAddress
         if (contractAddress.isNullOrEmpty()) {
             return Triple(null, listOf("⚠️ آدرس contract توکن در دسترس نیست"), "FAILED")
         }
 
-        // P0-1: استفاده از مدل سه‌حالته
         return when (val result = GoPlusClient.getTokenSecurityResult(chain, contractAddress)) {
             is SecurityResult.Failed -> {
                 Log.w(TAG, "GoPlus API failed for $contractAddress: ${result.reason}")
@@ -245,90 +223,197 @@ object MemeRadar {
                 Triple(null, listOf("⚠️ داده امنیتی در دسترس نیست"), "EMPTY")
             }
             is SecurityResult.Ready -> {
-                val security = result.security
-                var score = 100
-
-                // چک Honeypot
-                if (security.is_honeypot == "1") {
-                    score -= 80
-                    warnings.add("🚨 Honeypot: نمی‌توانید بفروشید!")
+                // 🚀 Commit 85 (M2): dispatch بر اساس نوع SecurityData
+                when (val data = result.security) {
+                    is SecurityData.Evm -> scoreEvmSecurity(data.data)
+                    is SecurityData.Solana -> scoreSolanaSecurity(data.data)
                 }
-
-                // چک Mintable
-                if (security.is_mintable == "1") {
-                    score -= 20
-                    warnings.add("⚠️ Mintable: تیم می‌تواند توکن جدید بسازد")
-                }
-
-                // چک Owner Change Balance
-                if (security.owner_change_balance == "1") {
-                    score -= 30
-                    warnings.add("🚨 Owner می‌تواند balance را تغییر دهد")
-                }
-
-                // چک Hidden Owner
-                if (security.hidden_owner == "1") {
-                    score -= 15
-                    warnings.add("⚠️ Owner مخفی")
-                }
-
-                // چک Self Destruct
-                if (security.selfdestruct == "1") {
-                    score -= 50
-                    warnings.add("🚨 Contract می‌تواند خود را حذف کند")
-                }
-
-                // چک Proxy Contract
-                if (security.is_proxy == "1") {
-                    score -= 10
-                    warnings.add("⚠️ Proxy Contract (ممکن است منطق تغییر کند)")
-                }
-
-                // چک Buy/Sell Tax
-                val buyTax = security.buy_tax?.toDoubleOrNull() ?: 0.0
-                val sellTax = security.sell_tax?.toDoubleOrNull() ?: 0.0
-                if (buyTax > 0.10 || sellTax > 0.10) {
-                    score -= 20
-                    warnings.add("⚠️ Tax بالا: Buy ${(buyTax * 100).toInt()}% / Sell ${(sellTax * 100).toInt()}%")
-                }
-
-                // چک Top 10 Holders
-                val topHolders = security.holders?.take(10)
-                val topHoldersPercent = topHolders?.sumOf { it.percent ?: 0.0 } ?: 0.0
-                if (topHoldersPercent > 0.50) {
-                    score -= 25
-                    warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}% (تمرکز بالا)")
-                } else if (topHoldersPercent > 0.30) {
-                    score -= 10
-                    warnings.add("⚠️ Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
-                }
-
-                // چک Liquidity Lock
-                val lpHolders = security.lp_holders
-                val lpLocked = lpHolders?.values?.any { it.is_locked == "1" } ?: false
-                if (!lpLocked) {
-                    score -= 30
-                    warnings.add("🚨 Liquidity قفل نیست (خطر Rug Pull)")
-                } else {
-                    val lockedDetails = lpHolders?.values?.flatMap { it.locked_detail ?: emptyList() }
-                    val maxEndTime = lockedDetails?.maxOfOrNull { it.end_time?.toLongOrNull() ?: 0L }
-                    if (maxEndTime != null && maxEndTime > 0) {
-                        val lockDays = (maxEndTime - System.currentTimeMillis() / 1000) / 86400
-                        if (lockDays < 30) {
-                            score -= 15
-                            warnings.add("⚠️ Liquidity فقط $lockDays روز قفل است")
-                        }
-                    }
-                }
-
-                // چک Open Source
-                if (security.is_open_source != "1") {
-                    score -= 20
-                    warnings.add("⚠️ Contract Open Source نیست")
-                }
-
-                Triple(score.coerceIn(0, 100), warnings, "READY")
             }
+        }
+    }
+
+    /**
+     * 🚀 Commit 85 (M1): امتیازدهی امنیتی EVM با مدل درست.
+     *
+     * تفاوت‌ها با نسخهٔ قبلی:
+     *   - lp_holders حالا List است (نه Map) → `.values` حذف شد
+     *   - end_time با parseLockEndTime پارس می‌شود (هم epoch و هم ISO)
+     */
+    private fun scoreEvmSecurity(security: GoPlusTokenSecurity): Triple<Int?, List<String>, String> {
+        val warnings = mutableListOf<String>()
+        var score = 100
+
+        if (security.is_honeypot == "1") {
+            score -= 80
+            warnings.add("🚨 Honeypot: نمی‌توانید بفروشید!")
+        }
+
+        if (security.is_mintable == "1") {
+            score -= 20
+            warnings.add("⚠️ Mintable: تیم می‌تواند توکن جدید بسازد")
+        }
+
+        if (security.owner_change_balance == "1") {
+            score -= 30
+            warnings.add("🚨 Owner می‌تواند balance را تغییر دهد")
+        }
+
+        if (security.hidden_owner == "1") {
+            score -= 15
+            warnings.add("⚠️ Owner مخفی")
+        }
+
+        if (security.selfdestruct == "1") {
+            score -= 50
+            warnings.add("🚨 Contract می‌تواند خود را حذف کند")
+        }
+
+        if (security.is_proxy == "1") {
+            score -= 10
+            warnings.add("⚠️ Proxy Contract (ممکن است منطق تغییر کند)")
+        }
+
+        val buyTax = security.buy_tax?.toDoubleOrNull() ?: 0.0
+        val sellTax = security.sell_tax?.toDoubleOrNull() ?: 0.0
+        if (buyTax > 0.10 || sellTax > 0.10) {
+            score -= 20
+            warnings.add("⚠️ Tax بالا: Buy ${(buyTax * 100).toInt()}% / Sell ${(sellTax * 100).toInt()}%")
+        }
+
+        val topHolders = security.holders?.take(10)
+        val topHoldersPercent = topHolders?.sumOf { it.percent ?: 0.0 } ?: 0.0
+        if (topHoldersPercent > 0.50) {
+            score -= 25
+            warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}% (تمرکز بالا)")
+        } else if (topHoldersPercent > 0.30) {
+            score -= 10
+            warnings.add("⚠️ Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
+        }
+
+        // 🚀 Commit 85 (M1): lp_holders حالا List است (نه Map)، پس .values حذف شد
+        val lpHolders = security.lp_holders
+        val lpLocked = lpHolders?.any { it.is_locked == "1" } ?: false
+        if (!lpLocked) {
+            score -= 30
+            warnings.add("🚨 Liquidity قفل نیست (خطر Rug Pull)")
+        } else {
+            // 🚀 Commit 85 (M1): end_time با parseLockEndTime پارس می‌شود
+            val lockedDetails = lpHolders?.flatMap { it.locked_detail ?: emptyList() }
+            val maxEndTime = lockedDetails?.maxOfOrNull { parseLockEndTime(it.end_time) ?: 0L }
+            if (maxEndTime != null && maxEndTime > 0) {
+                val lockDays = (maxEndTime - System.currentTimeMillis()) / (86400L * 1000L)
+                if (lockDays < 30) {
+                    score -= 15
+                    warnings.add("⚠️ Liquidity فقط $lockDays روز قفل است")
+                }
+            }
+        }
+
+        if (security.is_open_source != "1") {
+            score -= 20
+            warnings.add("⚠️ Contract Open Source نیست")
+        }
+
+        return Triple(score.coerceIn(0, 100), warnings, "READY")
+    }
+
+    /**
+     * 🚀 Commit 85 (M2): امتیازدهی امنیتی Solana با فیلدهای واقعی endpoint سولانا.
+     *
+     * Solana endpoint فیلدهای EVM مثل is_honeypot/lp_holders/is_open_source را ندارد.
+     * به‌جای آن‌ها فیلدهای mintable/freezable/closable/balance_mutable_authority/transfer_fee را دارد.
+     */
+    private fun scoreSolanaSecurity(security: SolanaTokenSecurity): Triple<Int?, List<String>, String> {
+        val warnings = mutableListOf<String>()
+        var score = 100
+
+        // Mintable: آیا می‌توان توکن جدید ساخت (supply inflation)
+        if (anyToBool(security.mintable) == true) {
+            score -= 25
+            warnings.add("🚨 Mintable: می‌توان توکن جدید ضرب کرد")
+        }
+
+        // Freezable: آیا می‌توان حساب کاربر را مسدود کرد
+        if (anyToBool(security.freezable) == true) {
+            score -= 20
+            warnings.add("🚨 Freezable: می‌توان حساب‌ها را مسدود کرد")
+        }
+
+        // Closable: آیا می‌توان توکن را به‌طور کامل بست
+        if (anyToBool(security.closable) == true) {
+            score -= 15
+            warnings.add("⚠️ Closable: contract قابل بستن است")
+        }
+
+        // Balance Mutable: آیا می‌توان موجودی کاربر را دستکاری کرد
+        if (anyToBool(security.balance_mutable_authority) == true) {
+            score -= 40
+            warnings.add("🚨 Balance Mutable: موجودی‌ها قابل تغییرند")
+        }
+
+        // Non-transferable: آیا انتقال ممنوع است
+        if (anyToBool(security.non_transferable) == true) {
+            score -= 50
+            warnings.add("🚨 Non-transferable: نمی‌توانید توکن را بفروشید")
+        }
+
+        // Transfer Fee: کارمزد پنهان روی هر انتقال
+        val transferFee = security.transfer_fee
+        val feePercent = extractTransferFeePercent(transferFee)
+        if (feePercent != null && feePercent > 10.0) {
+            score -= 20
+            warnings.add("⚠️ Transfer Fee بالا: ${feePercent.toInt()}%")
+        }
+
+        // Creator concentration
+        val creatorPercent = security.creator_percent ?: 0.0
+        if (creatorPercent > 0.30) {
+            score -= 25
+            warnings.add("🚨 Creator ${(creatorPercent * 100).toInt()}% دارد (تمرکز بالا)")
+        } else if (creatorPercent > 0.15) {
+            score -= 10
+            warnings.add("⚠️ Creator ${(creatorPercent * 100).toInt()}% دارد")
+        }
+
+        // Top holders
+        val topHolders = security.top_holders?.take(10)
+        val topHoldersPercent = topHolders?.sumOf { it.percent ?: 0.0 } ?: 0.0
+        if (topHoldersPercent > 0.50) {
+            score -= 20
+            warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
+        }
+
+        // Trusted token (verified) → پاداش
+        if (anyToBool(security.trusted_token) == true || anyToBool(security.is_true_token) == true) {
+            score += 10
+        }
+
+        return Triple(score.coerceIn(0, 100), warnings, "READY")
+    }
+
+    /**
+     * استخراج درصد کارمزد انتقال از فیلد transfer_fee که ساختارش متغیر است.
+     *
+     * ممکن است:
+     *   - String باشد: "5%" یا "5"
+     *   - Number باشد: 5
+     *   - Object باشد: {buy_tax: "5", sell_tax: "5"}
+     *   - Array باشد
+     */
+    private fun extractTransferFeePercent(fee: Any?): Double? {
+        if (fee == null) return null
+        return when (fee) {
+            is Number -> fee.toDouble()
+            is String -> fee.trim().trimEnd('%').toDoubleOrNull()
+            is Map<*, *> -> {
+                val buy = (fee["buy_tax"] as? String)?.trimEnd('%')?.toDoubleOrNull() ?: 0.0
+                val sell = (fee["sell_tax"] as? String)?.trimEnd('%')?.toDoubleOrNull() ?: 0.0
+                maxOf(buy, sell).takeIf { it > 0 }
+            }
+            is List<*> -> {
+                fee.mapNotNull { extractTransferFeePercent(it) }.maxOrNull()
+            }
+            else -> null
         }
     }
 }
