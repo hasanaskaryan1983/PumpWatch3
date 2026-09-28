@@ -2,6 +2,10 @@ package com.pumpwatch.app.engine
 
 import com.pumpwatch.app.data.AggTradeNormalized
 import com.pumpwatch.app.data.WhaleProviders
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * نتیجهٔ جریان واقعی نهنگ‌ها از زنجیرهٔ چندصرافی.
@@ -147,5 +151,47 @@ object WhaleFlowEngine {
             buyRatio = ratio,
             pressure = pressure
         )
+    }
+}
+
+/**
+ * 🚀 Commit 83 (W2): برچسب زمانی واقعی از روی min/max timestamp تریدها.
+ *
+ * این تابع top-level در package `engine` است تا از package‌های دیگر
+ * (UI و تست) در دسترس باشد.
+ *
+ * قبلاً همیشه "۱ ساعته" نمایش داده می‌شد که دروغ بود (برای BTC چند دقیقه،
+ * برای آلت‌کوین‌های کم‌حجم چند روز). حالا:
+ *   - اگر پنجره < 60 دقیقه: "از HH:mm تا HH:mm (N ترید، X دقیقه)"
+ *   - اگر پنجره >= 60 دقیقه: "از HH:mm تا HH:mm (N ترید، X ساعت)"
+ *   - اگر پنجره >= 24 ساعت: "از MM/dd تا MM/dd (N ترید، X روز)"
+ *   - اگر unknown: "N ترید (پنجره نامشخص)"
+ */
+fun formatWindowLabel(startMs: Long, endMs: Long, trades: Int): String {
+    if (startMs <= 0L || endMs <= 0L || endMs <= startMs) {
+        return "$trades ترید (پنجره نامشخص)"
+    }
+    val durationMin = ((endMs - startMs) / 60_000L).coerceAtLeast(1)
+    val sdfMin = SimpleDateFormat("HH:mm", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+    val sdfHour = SimpleDateFormat("MM/dd HH:mm", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+    val sdfDay = SimpleDateFormat("MM/dd", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+    return when {
+        durationMin < 60 -> {
+            "از ${sdfMin.format(Date(startMs))} تا ${sdfMin.format(Date(endMs))} ($trades ترید، $durationMin دقیقه)"
+        }
+        durationMin < 24 * 60 -> {
+            val hours = durationMin / 60
+            "از ${sdfHour.format(Date(startMs))} تا ${sdfHour.format(Date(endMs))} ($trades ترید، ~$hours ساعت)"
+        }
+        else -> {
+            val days = durationMin / (24 * 60)
+            "از ${sdfDay.format(Date(startMs))} تا ${sdfDay.format(Date(endMs))} ($trades ترید، ~$days روز)"
+        }
     }
 }
