@@ -121,7 +121,6 @@ private fun dexChainIdFor(key: String): String? = when (key) {
     else -> null
 }
 
-// ✅ کلمه private از اینجا حذف شد
 data class WalletHolding(
     val symbol: String, val name: String, val amount: Double, val price: Double?, val value: Double,
     val contract: String? = null, val host: String? = null,
@@ -129,7 +128,6 @@ data class WalletHolding(
     var firstBuyTs: Long? = null, var buyPrice: Double? = null
 )
 
-// ✅ کلمه private از اینجا حذف شد
 data class WalletTx(val dateText: String, val dateDay: String, val symbol: String, val amount: Double, val incoming: Boolean, var priceUsd: Double?)
 
 private data class SusWallet(
@@ -1216,10 +1214,16 @@ private fun ChainForensicsSection(
                             val ts = parseTs(a.block_timestamp)
                             if (ts <= 0L || ts < fromTs || ts > toTs) continue
                             val wallet = a.tx_from_address ?: continue
-                            val vol = num(a.volume_in_usd) ?: continue
-                            val px = num(a.price_in_usd) ?: num(a.price) ?: continue
+                            val vol = a.volume_in_usd?.toDoubleOrNull() ?: continue
+                            // 🚀 Commit 82-fix: price_in_usd → price_to_in_usd (نزدیک‌تر به قیمت اجرای ترید)
+                            //                     price → price_from_in_usd (fallback)
+                            //                     fیلدها String? هستند، نه Any?
+                            val px = a.price_to_in_usd?.toDoubleOrNull()
+                                ?: a.price_from_in_usd?.toDoubleOrNull()
+                                ?: continue
                             if (px < minPx) minPx = px
-                            if ((a.type ?: "").equals("buy", true)) {
+                            // 🚀 Commit 82-fix: type (که همیشه "trade" ثابت بود) → kind ("buy" | "sell")
+                            if ((a.kind ?: "").equals("buy", true)) {
                                 if (vol >= thr) {
                                     val ag = buys.getOrPut(wallet) { Agg() }
                                     ag.usd += vol; ag.n++
