@@ -81,6 +81,21 @@ internal val isoFmt: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
     }
 }
 
+/**
+ * 🚀 Commit 82/83: پارسر ISO-8601 برای block_timestamp.
+ *
+ * Public است تا از package‌های دیگر (مخصوصاً تست در `com.pumpwatch.app.app.data`
+ * که ساختار دایرکتوری‌اش یک `app` اضافی دارد) قابل دسترسی باشد.
+ *
+ * @param s رشتهٔ ISO-8601 (مثلاً "2026-09-27T21:10:03Z")
+ * @return epoch milliseconds، یا null اگر رشته نامعتبر یا null باشد
+ */
+fun parseIso8601(s: String?): Long? {
+    if (s == null) return null
+    val fmt = isoFmt.get() ?: return null
+    return runCatching { fmt.parse(s)?.time }.getOrNull()
+}
+
 fun normalizeSymbol(symbol: String, exchange: String): String {
     val cleaned = symbol.uppercase(Locale.US).trim()
     if (cleaned.isEmpty()) return cleaned
@@ -337,7 +352,7 @@ private val poolCache = ConcurrentHashMap<String, Pair<String, String>>()
  *
  * اصلاحات نسبت به نسخهٔ اولیه:
  *   1. `a.kind` برای جهت معامله (به‌جای `a.type` که "trade" ثابت بود)
- *   2. `a.block_timestamp` با `isoFmt` ThreadLocal (ISO-8601 → epoch ms)
+ *   2. `a.block_timestamp` با `parseIso8601` (ISO-8601 → epoch ms)
  *   3. `price_to_in_usd` یا `price_from_in_usd` برای قیمت (به‌جای `price_in_usd`)
  *   4. `volume_in_usd` رشته است → `toDoubleOrNull` مستقیم
  *
@@ -377,12 +392,8 @@ object GeckoDexProvider : WhaleProvider {
                 // 🚀 Commit 82: volume_in_usd رشته است
                 val vol = a.volume_in_usd?.toDoubleOrNull() ?: return@mapNotNull null
 
-                // 🚀 Commit 83-fix: block_timestamp ISO-8601 است (با ThreadLocal برای thread safety)
-                val tsMs = a.block_timestamp?.let { tsStr ->
-                    isoFmt.get()?.let { fmt ->
-                        runCatching { fmt.parse(tsStr)?.time }.getOrNull()
-                    }
-                } ?: return@mapNotNull null
+                // 🚀 Commit 83-fix: block_timestamp ISO-8601 است
+                val tsMs = parseIso8601(a.block_timestamp) ?: return@mapNotNull null
 
                 // 🚀 Commit 82: kind = "buy" | "sell" (نه type که "trade" ثابت است)
                 val isSell = a.kind.equals("sell", ignoreCase = true)
