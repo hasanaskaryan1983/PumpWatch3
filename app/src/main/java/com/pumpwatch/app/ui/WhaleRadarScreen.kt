@@ -1,7 +1,5 @@
 package com.pumpwatch.app.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,7 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight // 🚀 اضافه شد
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -207,7 +205,7 @@ private fun WhaleAnalysisTab(
                                 FollowedWhalesStore.addWhale(
                                     context,
                                     FollowedWhale(
-                                        address = "N/A", // آمار تجمعی است، آدرس خاصی ندارد
+                                        address = "N/A",
                                         symbol = symbol.trim().uppercase(),
                                         alertThreshold = res.largestTrade.coerceAtLeast(10_000.0)
                                     )
