@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -74,9 +74,12 @@ fun WhaleRadarScreen() {
             }
             if (info.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(info, fontSize = 10.sp, color = VGreen, modifier = Modifier.weight(1f))
-                        Button(onClick = { info = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("✖", fontSize = 10.sp) }
+                    // 🚀 اصلاح: استفاده از Arrangement.SpaceBetween به‌جای weight برای جلوگیری از باگ کامپایلر
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(info, fontSize = 10.sp, color = VGreen)
+                        Button(onClick = { info = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { 
+                            Text("✖", fontSize = 10.sp) 
+                        }
                     }
                 }
             }
@@ -100,8 +103,9 @@ private fun WhaleAnalysisTab(
     var result by remember { mutableStateOf<WhaleFlowResult?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
+    // 🚀 اصلاح: استفاده از fillMaxSize به‌جای weight
     Column(
-        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -148,7 +152,8 @@ private fun WhaleAnalysisTab(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (loading) {
-                        CircularProgressIndicator(modifier = Modifier.width(14.dp).height(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                        // 🚀 اصلاح: استفاده از size به‌جای width و height جداگانه
+                        CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.Black, strokeWidth = 2.dp)
                     }
                     Text("🔍 تحلیل نهنگ‌ها", fontSize = 12.sp)
                 }
@@ -241,8 +246,9 @@ private fun FollowedWhalesTab(
         followedWhales = FollowedWhalesStore.load(context)
     }
 
+    // 🚀 اصلاح: استفاده از fillMaxSize به‌جای weight
     Column(
-        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -277,7 +283,8 @@ private fun FollowedWhalesTab(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("🐋", fontSize = 16.sp)
                                 Spacer(Modifier.width(6.dp))
-                                Column(modifier = Modifier.weight(1f)) {
+                                // 🚀 اصلاح: استفاده از fillMaxWidth به‌جای weight برای ستون
+                                Column(modifier = Modifier.fillMaxWidth()) {
                                     Text(
                                         whale.symbol,
                                         fontWeight = FontWeight.Bold,
