@@ -54,6 +54,13 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
 
+private val VGreen = Color(0xFF00E676)
+private val VRed = Color(0xFFFF5252)
+private val VBlue = Color(0xFF40C4FF)
+private val VGold = Color(0xFFFFC107)
+private val VGray = Color(0xFF8B949E)
+private val VCard = Color(0xFF1A2230)
+
 internal val forensicsSigsCache = mutableMapOf<String, List<Pair<String, Long>>>()
 internal val forensicsDepthCache = mutableMapOf<String, Long>()
 internal val forensicsParsedCache = mutableMapOf<String, List<Triple<String, Double, Long>>>()
@@ -727,7 +734,7 @@ internal fun ChainForensicsSection(
                     20_000.0 to "≥۲۰K",
                     50_000.0 to "≥۵۰K",
                     100_000.0 to "≥۱۰۰K",
-                    200_000.0 to "≥۲۰۰K",
+                    200_000.0 to "≥۲۰K",
                     500_000.0 to "≥۵۰۰K"
                 ).forEach { (v, label) ->
                     FilterChip(
