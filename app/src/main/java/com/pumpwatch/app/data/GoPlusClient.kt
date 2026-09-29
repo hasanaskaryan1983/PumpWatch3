@@ -1,11 +1,16 @@
 package com.pumpwatch.app.data
 
+import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
+import retrofit2.HttpException
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.TimeUnit
 
 /**
  * GoPlus Security API — رایگان، بدون کلید API.
@@ -16,6 +21,13 @@ import java.util.TimeZone
  *   - M1: `end_time` با پارسر تحمل‌پذیر (`parseLockEndTime`) که هم epoch و هم ISO را می‌خواند.
  *   - M2: `SolanaTokenSecurity` به‌عنوان مدل جدا با فیلدهای واقعی endpoint سولانا.
  *   - M2: `SecurityData` sealed class با دو زیرکلاس Evm و Solana برای type-safe dispatch.
+ *
+ * 🚀 Commit 89 (A2): تاب‌آوری مستقل:
+ *   - OkHttpClient اختصاصی با timeout (connect 8s / read 12s / call 15s)
+ *   - throttle با GlobalHostLimiter.acquire("api.gopluslabs.io") قبل از هر تلاش
+ *   - retry هوشمند: حداکثر ۳ تلاش، فقط برای خطاهای retryable (429/5xx/network)،
+ *     با backoff نمایی (۲s → ۴s → ۸s، سقف ۱۵s)
+ *   - خطاهای terminal (400/404/451) فوراً رد می‌شوند (بدون retry بیهوده)
  */
 
 // ============================================
@@ -128,7 +140,7 @@ data class GoPlusResponse(
  *
  * - Ready: دادهٔ کامل معتبر برای این contract دریافت شد.
  * - Empty: API پاسخ داد ولی نتیجه برای این contract خالی بود.
- * - Failed: درخواست API شکست خورد.
+ * - Failed: درخواست API شکست خورد (بعد از همهٔ retryها).
  */
 sealed class SecurityResult {
     data class Ready(val security: SecurityData) : SecurityResult()
@@ -142,9 +154,6 @@ sealed class SecurityResult {
 
 /**
  * 🚀 Commit 85 (M1): پارسر `end_time` که هم epoch و هم ISO را می‌خواند.
- *
- * GoPlus EVM `end_time` را به‌صورت رشته‌ای مثل "2026-12-31 23:59:59" برمی‌گرداند،
- * نه epoch number. این تابع هر دو فرمت را تحمل می‌کند.
  *
  * @return epoch milliseconds، یا null اگر قابل پارس نباشد
  */
@@ -180,8 +189,6 @@ internal fun parseLockEndTime(s: String?): Long? {
 
 /**
  * 🚀 Commit 85 (M2): تشخیص "1"/"0"/true/false به‌صورت تحمل‌پذیر.
- *
- * برخی فیلدهای Solana ممکن است String "0"/"1" باشند، برخی Boolean واقعی.
  */
 internal fun anyToBool(v: Any?): Boolean? = when (v) {
     null -> null
@@ -193,6 +200,51 @@ internal fun anyToBool(v: Any?): Boolean? = when (v) {
         else -> null
     }
     else -> null
+}
+
+// ============================================
+// 🚀 Commit 89 (A2): توابع pure تاب‌آوری (تست‌پذیر)
+// ============================================
+
+/** هاست GoPlus برای throttle */
+const val GOPLUS_HOST = "api.gopluslabs.io"
+
+/** حداکثر تعداد تلاش‌ها (شامل تلاش اول) */
+const val GOPLUS_MAX_RETRIES = 3
+
+/** backoff پایه: ۲ ثانیه */
+const val GOPLUS_BASE_BACKOFF_MS = 2_000L
+
+/** سقف backoff: ۱۵ ثانیه */
+const val GOPLUS_MAX_BACKOFF_MS = 15_000L
+
+/**
+ * 🚀 Commit 89 (A2): محاسبهٔ backoff نمایی (تابع pure برای تست).
+ *
+ * attempt 1 → 2s، attempt 2 → 4s، attempt 3 → 8s، ... سقف 15s.
+ * attempt ≤ 0 به base clamp می‌شود (ایمنی در برابر ورودی نامعتبر).
+ */
+fun goPlusBackoffMs(attempt: Int): Long {
+    val shift = (attempt - 1).coerceIn(0, 20)
+    return (GOPLUS_BASE_BACKOFF_MS shl shift).coerceAtMost(GOPLUS_MAX_BACKOFF_MS)
+}
+
+/**
+ * 🚀 Commit 89 (A2): تشخیص اینکه آیا خطا ارزش retry دارد (تابع pure برای تست).
+ *
+ * retryable:
+ *   - HTTP 429 (rate limit)
+ *   - HTTP 5xx (خطای سرور)
+ *   - IOException / SocketTimeoutException (شبکه)
+ *
+ * terminal (بدون retry):
+ *   - HTTP 4xx دیگر (400/404/451 = درخواست نامعتبر یا ژئوبلاک)
+ *   - خطاهای برنامه‌نویسی (RuntimeException و...)
+ */
+fun isRetryableError(e: Exception): Boolean = when (e) {
+    is HttpException -> e.code() == 429 || e.code() in 500..599
+    is IOException -> true
+    else -> false
 }
 
 // ============================================
@@ -213,9 +265,26 @@ interface GoPlusApi {
 }
 
 object GoPlusClient {
+
+    /**
+     * 🚀 Commit 89 (A2): OkHttpClient اختصاصی با timeout صریح.
+     *
+     * قبلاً Retrofit بدون client ساخته می‌شد → timeout پیش‌فرض OkHttp (۱۰s connect/read)
+     * ولی بدون callTimeout. حالا هر سه صریح‌اند تا یک endpoint کند
+     * کل اسکن میم را گروگان نگیرد.
+     */
+    private val httpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .callTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
+
     val api: GoPlusApi by lazy {
         val retrofit = retrofit2.Retrofit.Builder()
             .baseUrl("https://api.gopluslabs.io/")
+            .client(httpClient)  // 🚀 Commit 89
             .addConverterFactory(retrofit2.converter.gson.GsonConverterFactory.create())
             .build()
         retrofit.create(GoPlusApi::class.java)
@@ -236,9 +305,38 @@ object GoPlusClient {
         chainName.lowercase() == "solana" || chainName.lowercase() == "sol"
 
     /**
+     * 🚀 Commit 89 (A2): تماس تاب‌آور: throttle + retry هوشمند.
+     *
+     * جریان هر تلاش:
+     *   1. GlobalHostLimiter.acquire(GOPLUS_HOST) — فاصلهٔ حداقل بین درخواست‌ها
+     *   2. اجرای block
+     *   3. اگر خطا و retryable و هنوز تلاش باقی مانده → delay(backoff) و تلاش بعدی
+     *   4. اگر خطا و terminal → فوراً break (بدون اتلاف وقت)
+     *
+     * @throws Exception آخرین خطا اگر همهٔ تلاش‌ها شکست بخورند
+     */
+    private suspend fun <T> resilientCall(block: suspend () -> T): T {
+        var attempt = 0
+        var lastError: Exception? = null
+        while (attempt < GOPLUS_MAX_RETRIES) {
+            GlobalHostLimiter.acquire(GOPLUS_HOST)
+            try {
+                return block()
+            } catch (e: Exception) {
+                lastError = e
+                attempt++
+                if (attempt >= GOPLUS_MAX_RETRIES || !isRetryableError(e)) break
+                delay(goPlusBackoffMs(attempt))
+            }
+        }
+        throw lastError ?: IllegalStateException("GoPlus call failed without error")
+    }
+
+    /**
      * API اصلی برای مصرف‌کننده‌ها.
      *
      * 🚀 Commit 85 (M2): بسته به chain، `SecurityData.Evm` یا `SecurityData.Solana` برمی‌گرداند.
+     * 🚀 Commit 89 (A2): همهٔ تماس‌های شبکه از resilientCall عبور می‌کنند.
      */
     suspend fun getTokenSecurityResult(chain: String, address: String): SecurityResult {
         if (address.isBlank()) {
@@ -247,14 +345,14 @@ object GoPlusClient {
 
         return try {
             val response: GoPlusResponse = if (isSolana(chain)) {
-                api.getSolanaTokenSecurity(address)
+                resilientCall { api.getSolanaTokenSecurity(address) }
             } else {
                 val chainId = chainIdFor(chain)
                     ?: return SecurityResult.Failed(
                         "Unsupported chain: $chain",
                         retryable = false
                     )
-                api.getTokenSecurity(chainId, address)
+                resilientCall { api.getTokenSecurity(chainId, address) }
             }
 
             if (response.code != 1) {
@@ -276,8 +374,6 @@ object GoPlusClient {
             }
 
             // 🚀 Commit 85 (M2): deserialize به نوع مناسب بر اساس chain
-            // چون result به‌صورت Map<String, Any?> آمده، Gson آن را به‌عنوان LinkedTreeMap نگه داشته.
-            // باید با Gson دوباره به مدل صحیح serialize→deserialize کنیم.
             val gson = com.google.gson.Gson()
             val json = gson.toJson(raw)
             val securityData: SecurityData = if (isSolana(chain)) {
@@ -292,8 +388,9 @@ object GoPlusClient {
 
             SecurityResult.Ready(securityData)
         } catch (e: Exception) {
+            // 🚀 Commit 89: بعد از همهٔ retryها به اینجا می‌رسیم
             SecurityResult.Failed(
-                "Network error: ${e.javaClass.simpleName}: ${e.message ?: "unknown"}",
+                "Network error after $GOPLUS_MAX_RETRIES attempts: ${e.javaClass.simpleName}: ${e.message ?: "unknown"}",
                 retryable = true
             )
         }
