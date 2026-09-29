@@ -1,6 +1,9 @@
 package com.pumpwatch.app.wallet.gateway
 
 import kotlinx.coroutines.delay
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 🚀 Commit 52/53 (فاز ۷): خطاهای نوع‌مند منبع.
@@ -25,52 +28,102 @@ data class ProviderResult<T>(
     val isSuccess: Boolean get() = error == null && value != null
 }
 
+/**
+ * 🚀 Commit 90 (A3): TtlCache thread-safe با ConcurrentHashMap.
+ *
+ * تغییر نسبت به Commit 52:
+ *   - `mutableMapOf` → `ConcurrentHashMap` (thread-safe بدون قفل سراسری)
+ *   - lazy eviction در `get()`: اگر entry منقضی شده، حذف می‌شود
+ *   - `size()` برای تست/دیباگ
+ *
+ * قبلاً در concurrent access (چند coroutine همزمان `put`/`get`):
+ *   - ConcurrentModificationException می‌داد
+ *   - ممکن بود entry گم شود
+ */
 internal class TtlCache(private val clock: () -> Long) {
     private data class Entry(val value: Any?, val expiresAt: Long)
-    private val map = mutableMapOf<String, Entry>()
+    private val map = ConcurrentHashMap<String, Entry>()
 
     @Suppress("UNCHECKED_CAST")
-    fun <T> get(key: String): T? =
-        (map[key]?.takeIf { it.expiresAt > clock() }?.value) as T?
+    fun <T> get(key: String): T? {
+        val entry = map[key] ?: return null
+        if (entry.expiresAt <= clock()) {
+            map.remove(key)
+            return null
+        }
+        return entry.value as T?
+    }
 
     fun put(key: String, value: Any?, ttlMs: Long) {
         map[key] = Entry(value, clock() + ttlMs)
     }
 
     fun clear() = map.clear()
+
+    /** برای تست و دیباگ — تعداد entryهای فعلی */
+    fun size(): Int = map.size
 }
 
+/**
+ * 🚀 Commit 90 (A3): CircuitBreaker thread-safe با AtomicInteger/AtomicReference.
+ *
+ * تغییر نسبت به Commit 52:
+ *   - `consecutiveFailures: Int` → `AtomicInteger`
+ *   - `openedAt: Long?` → `AtomicReference<Long?>`
+ *   - `compareAndSet` برای انتقال اتمی به حالت open
+ *
+ * قبلاً:
+ *   - چند coroutine همزمان `recordFailure` کنند → counter اشتباه
+ *   - `openedAt` ممکن است در race از دست برود
+ *
+ * حالا:
+ *   - `incrementAndGet()` به‌طور اتمی counter را افزایش می‌دهد
+ *   - `compareAndSet(null, clock())` تضمین می‌کند فقط یک coroutine
+ *     breaker را به حالت open می‌برد
+ */
 internal class CircuitBreaker(
     private val failureThreshold: Int,
     private val cooldownMs: Long,
     private val clock: () -> Long
 ) {
-    private var consecutiveFailures = 0
-    private var openedAt: Long? = null
+    private val consecutiveFailures = AtomicInteger(0)
+    private val openedAt = AtomicReference<Long?>(null)
 
     val isOpen: Boolean get() {
-        val at = openedAt ?: return false
+        val at = openedAt.get() ?: return false
         return (clock() - at) < cooldownMs
     }
-    val isHalfOpen: Boolean get() = openedAt != null && !isOpen
+
+    val isHalfOpen: Boolean get() = openedAt.get() != null && !isOpen
 
     fun allowRequest(): Boolean = !isOpen
 
     fun recordSuccess() {
-        consecutiveFailures = 0
-        openedAt = null
+        consecutiveFailures.set(0)
+        openedAt.set(null)
     }
 
     fun recordFailure() {
-        consecutiveFailures++
-        if (openedAt == null && consecutiveFailures >= failureThreshold) openedAt = clock()
-        else if (isHalfOpen) openedAt = clock()
+        val newCount = consecutiveFailures.incrementAndGet()
+        // انتقال به open فقط اگر قبلاً open نبوده (race-safe)
+        if (openedAt.get() == null && newCount >= failureThreshold) {
+            openedAt.compareAndSet(null, clock())
+        } else if (isHalfOpen) {
+            openedAt.set(clock())
+        }
     }
+
+    /** برای تست و دیباگ */
+    fun failureCount(): Int = consecutiveFailures.get()
 }
 
 /**
  * 🚀 Commit 53: نسخهٔ suspend برای تماس‌های Retrofit اضافه شد؛
  * نسخهٔ سنکرون Commit 52 بدون تغییر باقی است.
+ *
+ * 🚀 Commit 90 (A3): thread-safe.
+ *   - breakers: ConcurrentHashMap + computeIfAbsent (اتمی)
+ *   - cache و breaker هر کدام thread-safe هستند
  */
 class ProviderGateway(
     private val clock: () -> Long = { System.currentTimeMillis() },
@@ -80,10 +133,10 @@ class ProviderGateway(
     private val cooldownMs: Long = 60_000L
 ) {
     private val cache = TtlCache(clock)
-    private val breakers = mutableMapOf<String, CircuitBreaker>()
+    private val breakers = ConcurrentHashMap<String, CircuitBreaker>()
 
     private fun breaker(source: String): CircuitBreaker =
-        breakers.getOrPut(source) { CircuitBreaker(failureThreshold, cooldownMs, clock) }
+        breakers.computeIfAbsent(source) { CircuitBreaker(failureThreshold, cooldownMs, clock) }
 
     // ---------- نسخهٔ سنکرون (Commit 52) ----------
     fun <T> call(
