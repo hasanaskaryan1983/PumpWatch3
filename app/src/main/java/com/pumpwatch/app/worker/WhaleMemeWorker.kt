@@ -18,14 +18,11 @@ import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 /**
  * 🚀 Commit 91 (A5) + Commit 93 (7.1): Worker پس‌زمینه برای نهنگ و میم.
- * هر ۱ دقیقه اجرا می‌شود و در صورت یافتن سیگنال قوی، نوتیفیکیشن ارسال می‌کند.
- *
- * 🚀 Commit 93: اضافه شدن چک FollowedWhales
- * - بررسی فعالیت نهنگ‌های دنبال‌شده
- * - ارسال نوتیفیکیشن هنگام خرید/فروش بزرگ
+ * هر ۱۵ دقیقه اجرا می‌شود و در صورت یافتن سیگنال قوی، نوتیفیکیشن ارسال می‌کند.
  */
 class WhaleMemeWorker(
     context: Context,
@@ -87,7 +84,7 @@ class WhaleMemeWorker(
         }
     }
 
-    //  Commit 93: چک نهنگ‌های دنبال‌شده
+    // 🚀 Commit 93: چک نهنگ‌های دنبال‌شده (بر اساس فعالیت تجمعی نماد)
     private suspend fun checkFollowedWhalesAlerts() {
         val followedWhales = FollowedWhalesStore.load(applicationContext)
         if (followedWhales.isEmpty()) return
@@ -99,13 +96,12 @@ class WhaleMemeWorker(
                     limit = 1000
                 ) ?: continue
 
-                // بررسی آیا تراکنش بزرگ‌تر از آستانه وجود دارد
-                val largeTrade = result.whaleTrades.any { it.usd >= whale.alertThreshold }
-                if (largeTrade) {
+                // اگر فعالیت نهنگی وجود دارد و بزرگ‌ترین معامله از آستانه بیشتر است
+                if (result.whaleTrades > 0 && result.largestTrade >= whale.alertThreshold) {
                     sendFollowedWhaleNotification(whale, result)
                 }
             } catch (_: Exception) {
-                // خطای یک نهنگ نباید بقیه را متوقف کند
+                // خطای یک نماد نباید بقیه را متوقف کند
             }
         }
     }
@@ -118,7 +114,7 @@ class WhaleMemeWorker(
         }
 
         val body = "نسبت خرید: ${(result.buyRatio * 100).toInt()}% • " +
-                "${result.whaleTrades.size} معاملهٔ نهنگی • منبع: ${result.source}"
+                "${result.whaleTrades} معاملهٔ نهنگی • منبع: ${result.source}"
 
         sendNotification(NOTIFICATION_ID_WHALE, pressureText, body)
     }
@@ -126,22 +122,25 @@ class WhaleMemeWorker(
     private fun sendMemeNotification(signals: List<MemeSignal>) {
         if (signals.isEmpty()) return
         val first = signals.first()
-        val title = " سیگنال میم جدید: ${first.symbol}"
+        val title = "🚀 سیگنال میم جدید: ${first.symbol}"
         val body = buildString {
             append("امتیاز: ${first.score}/100 • ")
             append("نقدینگی: $${(first.liquidity / 1000).toInt()}K • ")
-            append("تغییر ۱س: ${String.format("%.1f", first.changeH1)}%")
+            append("تغییر ۱س: ${String.format(Locale.US, "%.1f", first.changeH1)}%")
             if (signals.size > 1) append("\nو ${signals.size - 1} سیگنال دیگر")
         }
         sendNotification(NOTIFICATION_ID_MEME, title, body)
     }
 
-    // 🚀 Commit 93: نوتیفیکیشن برای نهنگ دنبال‌شده
-    private fun sendFollowedWhaleNotification(whale: com.pumpwatch.app.data.FollowedWhale, result: WhaleFlowResult) {
-        val title = "🐳 فعالیت نهنگ دنبال‌شده: ${whale.symbol}"
+    // 🚀 Commit 93: نوتیفیکیشن برای فعالیت نهنگی در نماد دنبال‌شده
+    private fun sendFollowedWhaleNotification(
+        whale: com.pumpwatch.app.data.FollowedWhale, 
+        result: WhaleFlowResult
+    ) {
+        val title = "🐳 فعالیت نهنگی در نماد دنبال‌شده: ${whale.symbol}"
         val body = buildString {
-            append("آدرس: ${whale.address.take(6)}...${whale.address.takeLast(4)}\n")
-            append("معاملات نهنگی: ${result.whaleTrades.size}\n")
+            append("تعداد معاملات نهنگی: ${result.whaleTrades}\n")
+            append("بزرگ‌ترین معامله: $${String.format(Locale.US, "%,.0f", result.largestTrade)}\n")
             append("نسبت خرید: ${(result.buyRatio * 100).toInt()}%")
         }
         sendNotification(NOTIFICATION_ID_FOLLOWED, title, body)
