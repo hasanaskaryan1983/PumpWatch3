@@ -3,9 +3,7 @@ package com.pumpwatch.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -64,20 +62,15 @@ private val VCard = Color(0xFF1A2230)
 fun WhaleRadarScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.US)
 
     var subTab by remember { mutableStateOf(0) }
     var info by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) {
-        // بارگذاری اولیه
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("🐳 رادار نهنگ‌ها", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
-            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("🏆 لیدربورد", fontSize = 11.sp) })
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("🏆 تحلیل نماد", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ دنبال‌شده‌ها", fontSize = 11.sp) })
             }
             if (info.isNotEmpty()) {
@@ -91,17 +84,16 @@ fun WhaleRadarScreen() {
         }
 
         when (subTab) {
-            0 -> WhaleLeaderboardTab(context, scope, sdf) { msg -> info = msg }
-            1 -> FollowedWhalesTab(context, scope, sdf) { msg -> info = msg }
+            0 -> WhaleAnalysisTab(context, scope) { msg -> info = msg }
+            1 -> FollowedWhalesTab(context, scope) { msg -> info = msg }
         }
     }
 }
 
 @Composable
-private fun WhaleLeaderboardTab(
+private fun WhaleAnalysisTab(
     context: Context,
     scope: kotlinx.coroutines.CoroutineScope,
-    sdf: SimpleDateFormat,
     onInfo: (String) -> Unit
 ) {
     var symbol by remember { mutableStateOf("") }
@@ -115,8 +107,8 @@ private fun WhaleLeaderboardTab(
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("🔍 تحلیل نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = VBlue)
-                Text("نماد توکن را وارد کنید تا فعالیت نهنگ‌ها را ببینید", fontSize = 10.sp, color = VGray)
+                Text("🔍 تحلیل فعالیت نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = VBlue)
+                Text("نماد توکن را وارد کنید تا آمار کلان نهنگ‌ها را ببینید", fontSize = 10.sp, color = VGray)
                 TextField(
                     value = symbol,
                     onValueChange = { symbol = it },
@@ -170,15 +162,16 @@ private fun WhaleLeaderboardTab(
         if (result != null) {
             val res = result!!
             Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("📊 خلاصه تحلیل", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("📊 آمار کلان نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
+                    
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("فشار:", fontSize = 10.sp, color = VGray)
+                        Text("وضعیت فشار:", fontSize = 10.sp, color = VGray)
                         Text(
                             when (res.pressure) {
                                 WhaleFlowEngine.PRESSURE_ACCUMULATION -> "🐳 تجمع (خرید)"
                                 WhaleFlowEngine.PRESSURE_DISTRIBUTION -> "📉 توزیع (فروش)"
-                                else -> "️ متعادل"
+                                else -> "⚖️ متعادل"
                             },
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -190,97 +183,45 @@ private fun WhaleLeaderboardTab(
                         )
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("تعداد معاملات نهنگی:", fontSize = 10.sp, color = VGray)
+                        Text("${res.whaleTrades}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VBlue)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("بزرگ‌ترین معامله:", fontSize = 10.sp, color = VGray)
+                        Text("$${String.format(Locale.US, "%,.0f", res.largestTrade)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGold)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("نسبت خرید:", fontSize = 10.sp, color = VGray)
                         Text("${(res.buyRatio * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGreen)
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("معاملات نهنگی:", fontSize = 10.sp, color = VGray)
-                        Text("${res.whaleTrades.size}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VBlue)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("منبع:", fontSize = 10.sp, color = VGray)
-                        Text(res.source, fontSize = 10.sp, color = VGray)
-                    }
-                }
-            }
 
-            if (res.whaleTrades.isNotEmpty()) {
-                Text("🐋 لیست نهنگ‌ها:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)
-                ) {
-                    items(res.whaleTrades.sortedByDescending { it.usd }) { trade ->
-                        val isFollowing = FollowedWhalesStore.isFollowing(context, trade.address)
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = VCard),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🐋", fontSize = 16.sp)
-                                    Spacer(Modifier.width(6.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "${trade.address.take(6)}...${trade.address.takeLast(4)}",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            "معامله: ${sdf.format(Date(trade.timestamp))}",
-                                            fontSize = 9.sp,
-                                            color = VGray
-                                        )
-                                    }
-                                    Text(
-                                        "$${String.format(Locale.US, "%,.0f", trade.usd)}",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (trade.usd > 0) VGreen else VRed
+                    Spacer(Modifier.height(8.dp))
+
+                    val isFollowing = FollowedWhalesStore.isFollowing(context, symbol.trim().uppercase())
+                    Button(
+                        onClick = {
+                            if (isFollowing) {
+                                FollowedWhalesStore.removeWhale(context, symbol.trim().uppercase())
+                                onInfo("❌ دنبال کردن لغو شد")
+                            } else {
+                                FollowedWhalesStore.addWhale(
+                                    context,
+                                    FollowedWhale(
+                                        address = "N/A", // آمار تجمعی است، آدرس خاصی ندارد
+                                        symbol = symbol.trim().uppercase(),
+                                        alertThreshold = res.largestTrade.coerceAtLeast(10_000.0)
                                     )
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(
-                                        onClick = {
-                                            try {
-                                                (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                                                    .setPrimaryClip(ClipData.newPlainText("addr", trade.address))
-                                                onInfo(" آدرس کپی شد")
-                                            } catch (_: Exception) { }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = VCard),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text("📋 کپی", fontSize = 9.sp)
-                                    }
-                                    Button(
-                                        onClick = {
-                                            if (isFollowing) {
-                                                FollowedWhalesStore.removeWhale(context, trade.address)
-                                                onInfo(" دنبال کردن لغو شد")
-                                            } else {
-                                                FollowedWhalesStore.addWhale(
-                                                    context,
-                                                    FollowedWhale(
-                                                        address = trade.address,
-                                                        symbol = symbol.trim()
-                                                    )
-                                                )
-                                                onInfo("✅ نهنگ دنبال شد")
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isFollowing) VRed else VGold
-                                        ),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(if (isFollowing) "❌ لغو دنبال" else "❤️ دنبال کن", fontSize = 9.sp)
-                                    }
-                                }
+                                )
+                                onInfo("✅ فعالیت نهنگی این نماد دنبال شد")
                             }
-                        }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isFollowing) VRed else VGold
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(if (isFollowing) "❌ لغو دنبال کردن" else "❤️ دنبال کردن فعالیت نهنگی", fontSize = 11.sp)
                     }
                 }
             }
@@ -292,10 +233,10 @@ private fun WhaleLeaderboardTab(
 private fun FollowedWhalesTab(
     context: Context,
     scope: kotlinx.coroutines.CoroutineScope,
-    sdf: SimpleDateFormat,
     onInfo: (String) -> Unit
 ) {
     var followedWhales by remember { mutableStateOf<List<FollowedWhale>>(emptyList()) }
+    val sdf = SimpleDateFormat("yyyy/MM/dd", Locale.US)
 
     LaunchedEffect(Unit) {
         followedWhales = FollowedWhalesStore.load(context)
@@ -307,8 +248,8 @@ private fun FollowedWhalesTab(
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Text("❤️ نهنگ‌های دنبال‌شده", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = VGreen)
-                Text("وقتی این نهنگ‌ها معامله بزرگ انجام دهند، نوتیفیکیشن دریافت می‌کنید", fontSize = 10.sp, color = VGray)
+                Text("❤️ نمادهای تحت رصد نهنگی", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = VGreen)
+                Text("وقتی در این نمادها معامله بزرگ انجام شود، نوتیفیکیشن دریافت می‌کنید", fontSize = 10.sp, color = VGray)
                 Spacer(Modifier.height(8.dp))
                 Text("تعداد: ${followedWhales.size}", fontSize = 11.sp, color = VBlue)
             }
@@ -317,9 +258,9 @@ private fun FollowedWhalesTab(
         if (followedWhales.isEmpty()) {
             Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("", fontSize = 32.sp)
-                    Text("هنوز نهنگی دنبال نکرده‌اید", fontSize = 11.sp, color = VGray)
-                    Text("از تب لیدربورد، نهنگ‌ها را دنبال کنید", fontSize = 10.sp, color = VGray)
+                    Text("🔍", fontSize = 32.sp)
+                    Text("هنوز نمادی را دنبال نکرده‌اید", fontSize = 11.sp, color = VGray)
+                    Text("از تب «تحلیل نماد»، فعالیت نهنگی یک ارز را دنبال کنید", fontSize = 10.sp, color = VGray)
                 }
             }
         } else {
@@ -339,13 +280,13 @@ private fun FollowedWhalesTab(
                                 Spacer(Modifier.width(6.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        "${whale.address.take(6)}...${whale.address.takeLast(4)}",
+                                        whale.symbol,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp,
                                         color = Color.White
                                     )
                                     Text(
-                                        "نماد: ${whale.symbol} • دنبال شده: ${sdf.format(Date(whale.followedAt))}",
+                                        "دنبال شده از: ${sdf.format(Date(whale.followedAt))}",
                                         fontSize = 9.sp,
                                         color = VGray
                                     )
@@ -357,9 +298,9 @@ private fun FollowedWhalesTab(
                             }
                             Button(
                                 onClick = {
-                                    FollowedWhalesStore.removeWhale(context, whale.address)
+                                    FollowedWhalesStore.removeWhale(context, whale.symbol)
                                     followedWhales = FollowedWhalesStore.load(context)
-                                    onInfo(" دنبال کردن لغو شد")
+                                    onInfo("❌ دنبال کردن لغو شد")
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = VRed.copy(alpha = 0.3f)),
                                 shape = RoundedCornerShape(6.dp),
