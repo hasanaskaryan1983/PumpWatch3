@@ -3,7 +3,7 @@ package com.pumpwatch.app.engine
 import android.util.Log
 import com.pumpwatch.app.data.GeckoPool
 import com.pumpwatch.app.data.GeckoTerminal
-import com.pumpwatch.app.data.GoPlusClient
+import com.pumpwatch.app.data.GoPlusGateway
 import com.pumpwatch.app.data.GoPlusTokenSecurity
 import com.pumpwatch.app.data.SecurityData
 import com.pumpwatch.app.data.SecurityResult
@@ -18,10 +18,6 @@ import java.util.TimeZone
  * سیگنال میم‌کوین از رادار.
  *
  * 🚀 Commit 86 (M4): فیلدهای `entry`, `stopLoss`, `target1`, `target2` حذف شدند.
- *   - این فیلدها با درصدهای ثابت (−۱۰٪، +۲۵٪، +۶۰٪) محاسبه می‌شدند
- *   - هیچ ارتباطی با نوسان، عمق نقدینگی یا slippage نداشتند
- *   - در MemeRadarScreen.kt هیچ‌جا استفاده نمی‌شدند (کد مرده)
- *   - اگر در آینده SL/TP نیاز باشد، باید بر پایهٔ ATR/liquidity محاسبه شود
  */
 data class MemeSignal(
     val symbol: String,
@@ -52,7 +48,6 @@ object MemeRadar {
 
     private const val TAG = "MemeRadar"
 
-    // پوشش ۸ زنجیره
     private val CHAINS = listOf(
         "solana", "bsc", "base", "ethereum",
         "ton", "robinhood", "avalanche", "sei"
@@ -111,14 +106,6 @@ object MemeRadar {
         return results.sortedByDescending { it.score }.take(20)
     }
 
-    /**
-     * 🚀 Commit 86 (M3): اگر امنیت نامشخص است (rugScore == null)، امتیاز را به ۵۰ محدود کن.
-     *
-     * قبلاً: توکن با امنیت نامشخص می‌توانست امتیاز ۹۰+ بگیرد و در رتبهٔ اول نمایش داده شود.
-     * حالا: توکن با امنیت نامشخص حداکثر امتیاز ۵۰ می‌گیرد (رتبهٔ «متوسط»).
-     *
-     * این تضمین می‌کند که توکن‌های امن با rugScore = 85 همیشه بالاتر از توکن‌های نامشخص رتبه‌بندی شوند.
-     */
     private suspend fun analyze(p: GeckoPool): MemeSignal? {
         val a = p.attributes ?: return null
         val price = a.priceUsd?.toDoubleOrNull() ?: return null
@@ -135,7 +122,6 @@ object MemeRadar {
         val age = ageHours(a.createdAt)
         val fdv = a.fdvUsd ?: 0.0
 
-        // فیلترهای ایمنی پایه
         if (liq < 20_000) return null
         if (vol24 < 50_000) return null
         if (s1 <= 0) return null
@@ -174,22 +160,16 @@ object MemeRadar {
         val contractAddress = p.relationships?.base_token?.data?.id?.substringAfter('_', "")
         val poolAddress = p.id?.substringAfter('_', "")
 
-        // چک Rug Safety با GoPlus API (model سه‌حالته، dispatch بر اساس chain)
+        // 🚀 Commit 90: استفاده از GoPlusGateway (کش + circuit breaker + thread-safe)
+        // به‌جای GoPlusClient.getTokenSecurityResult مستقیم.
+        // اثر: در اسکن ۳۰۰ استخر:
+        //   - توکن‌های تکراری در یک scan دوباره API زده نمی‌شوند (کش ۲ دقیقه)
+        //   - اگر GoPlus مشکل دارد، بعد از ۵ شکست، ۱ دقیقه circuit open
         val (rugScore, rugWarnings, securityStatus) = checkRugSafety(chain, contractAddress)
 
-        // فقط وقتی rugScore واقعاً پایین است فیلتر کن
         if (rugScore != null && rugScore < 40) {
             Log.w(TAG, "🚨 $sym rug score too low: $rugScore — $rugWarnings")
             return null
-        }
-
-        // 🚀 Commit 86 (M3): جریمه امتیاز برای امنیت نامشخص
-        // اگر rugScore == null (UNKNOWN/EMPTY/FAILED)، امتیاز را به ۵۰ محدود کن
-        val finalScore = if (rugScore == null) {
-            reasons.add("⚠️ امنیت نامشخص — حداکثر امتیاز ۵۰")
-            score.coerceAtMost(50)
-        } else {
-            score
         }
 
         return MemeSignal(
@@ -198,7 +178,12 @@ object MemeRadar {
             chain = chain,
             dex = p.relationships?.dex?.data?.id ?: "?",
             price = price,
-            score = finalScore.coerceAtMost(100),  // 🚀 Commit 86: استفاده از finalScore
+            score = if (rugScore == null) {
+                reasons.add("⚠️ امنیت نامشخص — حداکثر امتیاز ۵۰")
+                score.coerceAtMost(50)
+            } else {
+                score
+            }.coerceAtMost(100),
             liquidity = liq,
             volumeH1 = vol1,
             buyRatio = buyRatio,
@@ -207,7 +192,6 @@ object MemeRadar {
             changeH6 = h6,
             changeH24 = h24,
             fdv = fdv,
-            // 🚀 Commit 86 (M4): entry/stopLoss/target1/target2 حذف شدند
             reasons = reasons,
             rugScore = rugScore,
             rugWarnings = rugWarnings,
@@ -218,11 +202,7 @@ object MemeRadar {
     }
 
     /**
-     * چک Rug Safety با GoPlus API (model سه‌حالته).
-     *
-     * بسته به chain، به دو تابع امتیازدهی متفاوت dispatch می‌کند:
-     *   - EVM: از مدل GoPlusTokenSecurity استفاده می‌کند (با lp_holders به‌صورت List)
-     *   - Solana: از مدل SolanaTokenSecurity استفاده می‌کند (فیلدهای mintable/freezable/...)
+     * چک Rug Safety با GoPlus (از طریق GoPlusGateway).
      */
     private suspend fun checkRugSafety(
         chain: String,
@@ -232,9 +212,10 @@ object MemeRadar {
             return Triple(null, listOf("⚠️ آدرس contract توکن در دسترس نیست"), "FAILED")
         }
 
-        return when (val result = GoPlusClient.getTokenSecurityResult(chain, contractAddress)) {
+        // 🚀 Commit 90: GoPlusGateway به‌جای GoPlusClient
+        return when (val result = GoPlusGateway.getSecurity(chain, contractAddress)) {
             is SecurityResult.Failed -> {
-                Log.w(TAG, "GoPlus API failed for $contractAddress: ${result.reason}")
+                Log.w(TAG, "GoPlus failed for $contractAddress: ${result.reason}")
                 Triple(null, listOf("⚠️ خطا در دریافت داده امنیتی"), "FAILED")
             }
             is SecurityResult.Empty -> {
@@ -250,9 +231,6 @@ object MemeRadar {
         }
     }
 
-    /**
-     * امتیازدهی امنیتی EVM با مدل درست (Commit 85).
-     */
     private fun scoreEvmSecurity(security: GoPlusTokenSecurity): Triple<Int?, List<String>, String> {
         val warnings = mutableListOf<String>()
         var score = 100
@@ -329,9 +307,6 @@ object MemeRadar {
         return Triple(score.coerceIn(0, 100), warnings, "READY")
     }
 
-    /**
-     * امتیازدهی امنیتی Solana با فیلدهای واقعی endpoint سولانا (Commit 85).
-     */
     private fun scoreSolanaSecurity(security: SolanaTokenSecurity): Triple<Int?, List<String>, String> {
         val warnings = mutableListOf<String>()
         var score = 100
@@ -391,9 +366,6 @@ object MemeRadar {
         return Triple(score.coerceIn(0, 100), warnings, "READY")
     }
 
-    /**
-     * استخراج درصد کارمزد انتقال از فیلد transfer_fee که ساختارش متغیر است.
-     */
     private fun extractTransferFeePercent(fee: Any?): Double? {
         if (fee == null) return null
         return when (fee) {
