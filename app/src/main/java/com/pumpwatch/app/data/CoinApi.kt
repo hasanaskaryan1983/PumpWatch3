@@ -50,24 +50,6 @@ data class CoinListItem(
     val platforms: Map<String, String?>?
 )
 
-data class MarketMeta(
-    val observedAtMs: Long,
-    val servedFrom: ServedFrom,
-    val count: Int
-) {
-    fun ageSec(): Long = (System.currentTimeMillis() - observedAtMs) / 1000L
-}
-
-enum class ServedFrom {
-    UNKNOWN, MEM_CACHE, DISK_CACHE, NETWORK
-}
-
-data class MarketChart(
-    val prices: List<List<Double>>,
-    val market_caps: List<List<Double>>,
-    val total_volumes: List<List<Double>>
-)
-
 interface CoinGeckoApi {
 
     @GET("coins/markets")
@@ -101,20 +83,6 @@ interface CoinGeckoApi {
 
 /**
  * 🚀 Commit 88 (A1): محدودکنندهٔ نرخ به‌ازای هاست.
- *
- * قبلاً ThrottledHttp یک قفل سراسری و یک فاصلهٔ ۱.۵ ثانیه برای همهٔ هاست‌ها داشت.
- * این باعث می‌شد:
- *   - Binance (1200 req/min) مجبور به انتظار ۱.۵ ثانیه شود (در حالی که ۱۰۰ms کافی است)
- *   - اسکن ۱۲ شبکه × ۲ درخواست × ۱.۵ ثانیه = ۳۶ ثانیه صرفاً انتظار
- *   - همهٔ ترد‌ها پشت یک قفل منتظر بمانند
- *
- * حالا:
- *   - ConcurrentHashMap<String, Mutex> برای mutex به‌ازای هر هاست
- *   - delay() به‌جای Thread.sleep() (suspend به‌جای blocking)
- *   - تنظیمات مختلف برای هر هاست (minIntervalMs)
- *
- * @param minIntervalMs فاصلهٔ حداقل بین درخواست‌ها به‌ازای هر هاست (میلی‌ثانیه)
- * @param defaultIntervalMs فاصلهٔ پیش‌فرض برای هاست‌های ناشناخته
  */
 class HostLimiter(
     private val minIntervalMs: Map<String, Long>,
@@ -123,15 +91,6 @@ class HostLimiter(
     private val mutexes = ConcurrentHashMap<String, Mutex>()
     private val lastRequestMs = ConcurrentHashMap<String, Long>()
 
-    /**
-     * کسب مجوز برای ارسال درخواست به هاست مشخص.
-     *
-     * این تابع suspend است و از delay() استفاده می‌کند (نه Thread.sleep).
-     * این یعنی ترد اصلی بلاک نمی‌شود و coroutine می‌تواند در حین انتظار،
-     * ترد را آزاد کند.
-     *
-     * @param host نام هاست (مثلاً "api.binance.com")
-     */
     suspend fun acquire(host: String) {
         val mutex = mutexes.getOrPut(host) { Mutex() }
         mutex.withLock {
@@ -145,9 +104,6 @@ class HostLimiter(
         }
     }
 
-    /**
-     * پاک کردن state (برای تست یا ریست).
-     */
     fun clear() {
         mutexes.clear()
         lastRequestMs.clear()
@@ -156,19 +112,6 @@ class HostLimiter(
 
 /**
  * 🚀 Commit 88 (A1): HostLimiter سراسری با تنظیمات بهینه برای هر هاست.
- *
- * تنظیمات بر اساس محدودیت‌های رسمی API ها:
- *   - Binance: 1200 req/min → 100ms (۱۰ req/sec)
- *   - CoinGecko (رایگان): 10-30 req/min → 1500ms
- *   - GeckoTerminal (رایگان): 30 req/min → 2000ms
- *   - GoPlus (رایگان): ~60 req/min → 1000ms
- *   - Bybit: 600 req/min → 200ms
- *   - OKX: 600 req/min → 200ms
- *   - Gate: 900 req/min → 200ms
- *   - DexScreener: بدون محدودیت مشخص → 500ms
- *   - TonAPI: 100 req/min → 600ms
- *   - Sui RPC: عمومی → 500ms
- *   - Default: 1000ms
  */
 val GlobalHostLimiter = HostLimiter(
     minIntervalMs = mapOf(
@@ -189,11 +132,6 @@ val GlobalHostLimiter = HostLimiter(
 
 /**
  * 🚀 Commit 88 (A1): ThrottledHttp با HostLimiter به‌ازای هاست.
- *
- * تغییرات نسبت به نسخهٔ قبلی:
- *   - حذف قفل سراسری (synchronized) و Thread.sleep
- *   - استفاده از HostLimiter.acquire(host) قبل از هر درخواست
- *   - Interceptor فقط برای ۴۲۹ retry باقی می‌ماند (نه throttle عادی)
  */
 object ThrottledHttp {
 
@@ -218,22 +156,12 @@ object ThrottledHttp {
                     (BASE_BACKOFF_MS * (1L shl (retries - 1))).coerceAtMost(MAX_BACKOFF_MS)
                 }
 
-                // 🚀 Commit 88: Thread.sleep به‌جای delay (چون Interceptor سنکرون است)
-                // این فقط برای ۴۲۹ retry است، نه throttle عادی
                 Thread.sleep(backoffMs)
             }
             throw RateLimitedException("Rate limit exceeded after $MAX_RETRIES retries")
         }
     }
 
-    /**
-     * 🚀 Commit 88: OkHttpClient با دو interceptor:
-     *   1. Metrics.interceptor (اول اجرا می‌شود — شمارش request/latency/429)
-     *   2. interceptor (retry logic برای ۴۲۹)
-     *
-     * throttle عادی حالا در لایهٔ بالاتر (ProviderGateway یا قبل از fetch)
-     * با HostLimiter.acquire(host) انجام می‌شود.
-     */
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .addInterceptor(Metrics.interceptor)
@@ -292,7 +220,6 @@ object ApiClient {
     suspend fun getQuickCoins(): List<CoinMarket> {
         cache1000Ref.get().takeIf { it.isNotEmpty() }?.let { return it }
         loadList("m250")?.let { return it }
-        // 🚀 Commit 88: acquire قبل از درخواست
         GlobalHostLimiter.acquire("api.coingecko.com")
         val p1 = api.getMarkets(perPage = 250, page = 1)
         OfflineCache.save(app, "m250", gson.toJson(p1))
@@ -325,7 +252,6 @@ object ApiClient {
         return try {
             val results = mutableListOf<CoinMarket>()
             for (page in 1..4) {
-                // 🚀 Commit 88: acquire قبل از هر درخواست
                 GlobalHostLimiter.acquire("api.coingecko.com")
                 results.addAll(api.getMarkets(perPage = 250, page = page))
                 if (page < 4) delay(2000)
@@ -377,7 +303,6 @@ object ApiClient {
         }
 
         return try {
-            // 🚀 Commit 88: acquire قبل از درخواست
             GlobalHostLimiter.acquire("api.coingecko.com")
             val fresh = api.getMarkets(perPage = 100, page = 1)
             val nowMs = System.currentTimeMillis()
@@ -408,7 +333,6 @@ object ApiClient {
             } catch (_: Exception) { }
         }
         return try {
-            // 🚀 Commit 88: acquire قبل از درخواست
             GlobalHostLimiter.acquire("api.coingecko.com")
             val chart = api.getMarketChart(id, days = days)
             OfflineCache.save(app, key, gson.toJson(chart))
@@ -446,7 +370,6 @@ object ApiClient {
         }
 
         return try {
-            // 🚀 Commit 88: acquire قبل از درخواست
             GlobalHostLimiter.acquire("api.coingecko.com")
             val list = api.getCoinsList(includePlatform = true)
             val map = HashMap<String, Map<String, String>>()
@@ -543,4 +466,4 @@ fun platformContractOf(
         if (!v.isNullOrBlank()) return v
     }
     return platforms.values.firstOrNull { !it.isNullOrBlank() }
-}۹
+}
