@@ -3,9 +3,11 @@ package com.pumpwatch.app.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -277,7 +279,7 @@ internal fun TxHistorySection(txs: List<WalletTx>) {
                             fontSize = 14.sp
                         )
 
-                        androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(6.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
