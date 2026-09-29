@@ -92,6 +92,7 @@ private val forensicsParsedCache = mutableMapOf<String, List<Triple<String, Doub
 
 private data class ChainCfg(val key: String, val label: String, val gt: String, val bs: String?, val kind: String)
 
+// 🚀 Commit 92: اضافه شدن Arc Network به لیست زنجیره‌ها
 private val CHAINS = listOf(
     ChainCfg("auto", "Auto 🌐", "", null, "auto"),
     ChainCfg("solana", "Solana 🟣", "solana", null, "solana"),
@@ -106,9 +107,11 @@ private val CHAINS = listOf(
     ChainCfg("sui", "SUI 💧", "sui", null, "sui"),
     ChainCfg("sei", "SEI 🌊", "sei", null, "evm"),
     ChainCfg("gnosis", "Gnosis 🦉", "gnosis", "https://gnosis.blockscout.com/", "evm"),
-    ChainCfg("robinhood", "Robinhood 🪽", "robinhood", "https://robinhoodchain.blockscout.com/", "evm")
+    ChainCfg("robinhood", "Robinhood 🪽", "robinhood", "https://robinhoodchain.blockscout.com/", "evm"),
+    ChainCfg("arc", "Arc 🟣", "arc", null, "evm")  // 🚀 Commit 92: Arc Network (Chain ID: 5042)
 )
 
+// 🚀 Commit 92: اضافه شدن نگاشت arc برای DexScreener/GeckoTerminal
 private fun dexChainIdFor(key: String): String? = when (key) {
     "eth" -> "ethereum"
     "base" -> "base"
@@ -119,6 +122,7 @@ private fun dexChainIdFor(key: String): String? = when (key) {
     "avalanche" -> "avax"
     "sei" -> "sei"
     "gnosis" -> "gnosis"
+    "arc" -> "arc"  // 🚀 Commit 92: Arc Network
     else -> null
 }
 
@@ -688,7 +692,7 @@ fun WalletScreen() {
                             }
                             info = if (allHold.isEmpty()) {
                                 if (addr.startsWith("0x") && addr.length == 42)
-                                    "😴 موجودی توکنی روی ۷ شبکهٔ EVM فعال پیدا نشد • اگر آدرس BSC/Avax/Sei است: منبع این شبکه‌ها قطع شده (🚫)"
+                                    "😴 موجودی توکنی روی شبکه‌های EVM فعال پیدا نشد • اگر آدرس BSC/Avax/Sei/Arc است: منبع این شبکه‌ها قطع شده (🚫)"
                                 else "😴 موجودی پیدا نشد (آدرس یا شبکه رو چک کن)"
                             }
                             else "✅ ${allHold.size} توکن روی ${hosts.size} شبکه بررسی شد"
