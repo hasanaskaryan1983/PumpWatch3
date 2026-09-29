@@ -50,6 +50,24 @@ data class CoinListItem(
     val platforms: Map<String, String?>?
 )
 
+data class MarketMeta(
+    val observedAtMs: Long,
+    val servedFrom: ServedFrom,
+    val count: Int
+) {
+    fun ageSec(): Long = (System.currentTimeMillis() - observedAtMs) / 1000L
+}
+
+enum class ServedFrom {
+    UNKNOWN, MEM_CACHE, DISK_CACHE, NETWORK
+}
+
+data class MarketChart(
+    val prices: List<List<Double>>,
+    val market_caps: List<List<Double>>,
+    val total_volumes: List<List<Double>>
+)
+
 interface CoinGeckoApi {
 
     @GET("coins/markets")
@@ -163,7 +181,8 @@ val GlobalHostLimiter = HostLimiter(
         "api.gateio.ws" to 200L,
         "api.dexscreener.com" to 500L,
         "tonapi.io" to 600L,
-        "fullnode.mainnet.sui.io" to 500L
+        "fullnode.mainnet.sui.io" to 500L,
+        "rpc.mainnet.arc.io" to 500L  // 🚀 Commit 92: Arc Network RPC
     ),
     defaultIntervalMs = 1000L
 )
@@ -524,4 +543,4 @@ fun platformContractOf(
         if (!v.isNullOrBlank()) return v
     }
     return platforms.values.firstOrNull { !it.isNullOrBlank() }
-}
+}۹
