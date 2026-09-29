@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -39,14 +38,14 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-internal val VGreen = Color(0xFF00E676)
-internal val VRed = Color(0xFFFF5252)
-internal val VBlue = Color(0xFF40C4FF)
-internal val VGold = Color(0xFFFFC107)
-internal val VGray = Color(0xFF8B949E)
-internal val VPurple = Color(0xFFCE93D8)
-internal val VOrange = Color(0xFFFFA726)
-internal val VCard = Color(0xFF1A2230)
+private val VGreen = Color(0xFF00E676)
+private val VRed = Color(0xFFFF5252)
+private val VBlue = Color(0xFF40C4FF)
+private val VGold = Color(0xFFFFC107)
+private val VGray = Color(0xFF8B949E)
+private val VPurple = Color(0xFFCE93D8)
+private val VOrange = Color(0xFFFFA726)
+private val VCard = Color(0xFF1A2230)
 
 @Composable
 fun WalletScreen() {
