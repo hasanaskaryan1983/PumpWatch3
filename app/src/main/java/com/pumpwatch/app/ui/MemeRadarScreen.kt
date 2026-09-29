@@ -66,7 +66,7 @@ private val MEME_CHAINS = listOf(
     "robinhood" to "Robinhood 🪽",
     "avalanche" to "Avalanche 🔺",
     "sei" to "SEI 🌊",
-    "arc" to "Arc 🟣" // 🚀 Commit 92: اضافه شدن Arc
+    "arc" to "Arc 🟣"
 )
 
 private fun compact(v: Double): String = when {
@@ -91,7 +91,6 @@ private fun memeVerdict(ch1: Double, r1: Double): Pair<String, Color> = when {
     else -> "😴 فعلاً حرکت خاصی نداره" to MGray
 }
 
-// 🚀 Commit 94: محاسبه قابلیت خروج (Exit Feasibility) بر اساس نقدینگی
 private fun exitFeasibility(liq: Double): Pair<String, Color> = when {
     liq < 10_000 -> "🔴 تله نقدینگی (فروش > ۵۰$ = اسلیپیج شدید)" to MRed
     liq < 50_000 -> "🟡 خروج با احتیاط (فروش > ۱K$ تاثیرگذار است)" to MGold
@@ -142,8 +141,6 @@ fun MemeRadarScreen() {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var lastUpdate by remember { mutableStateOf("") }
-    
-    // 🚀 Commit 94: حالت اسنایپر
     var sniperMode by remember { mutableStateOf(false) }
 
     fun scan() {
@@ -151,7 +148,7 @@ fun MemeRadarScreen() {
             loading = true
             error = null
             try {
-                val signals = MemeRadar.scan { progress, msg -> }
+                val signals = MemeRadar.scan { _, _ -> }
                 items = signals
                 if (signals.isEmpty()) {
                     error = if (MemeRadar.lastScanFailed) {
@@ -170,7 +167,6 @@ fun MemeRadarScreen() {
 
     LaunchedEffect(Unit) { scan() }
 
-    // 🚀 Commit 94: فیلتر کردن لیست بر اساس حالت اسنایپر
     val displayItems = if (sniperMode) {
         items.filter { 
             it.ageHours < 24.0 && 
@@ -236,7 +232,6 @@ fun MemeRadarScreen() {
             } else {
                 itemsIndexed(displayItems) { i, m ->
                     val (verdict, vColor) = memeVerdict(m.changeH1, m.buyRatio)
-                    val chainName = MEME_CHAINS.firstOrNull { it.first == m.chain }?.second ?: m.chain
                     val poolUrl = if (m.poolAddress.isNullOrEmpty()) null
                     else "https://www.geckoterminal.com/${m.chain}/pools/${m.poolAddress}"
 
@@ -277,46 +272,40 @@ fun MemeRadarScreen() {
 
                             Text(verdict, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = vColor)
 
-                            Text(
-                                "📡 منبع: GeckoTerminal • 🛡️ امنیت: " + when (m.securityStatus) {
-                                    "READY" -> "GoPlus ✅"
-                                    "EMPTY" -> "GoPlus: ناشناخته ❓"
-                                    "FAILED" -> "GoPlus: خطا ⚠️"
-                                    else -> "نامشخص ⚪"
-                                },
-                                fontSize = 8.sp, color = MGray
-                            )
+                            val securityText = when (m.securityStatus) {
+                                "READY" -> "GoPlus ✅"
+                                "EMPTY" -> "GoPlus: ناشناخته ❓"
+                                "FAILED" -> "GoPlus: خطا ⚠️"
+                                else -> "نامشخص ⚪"
+                            }
+                            Text("📡 منبع: GeckoTerminal • 🛡️ امنیت: $securityText", fontSize = 8.sp, color = MGray)
 
+                            val rugColor = when {
+                                rug == null -> MGray
+                                rug >= 80 -> MGreen
+                                rug >= 60 -> MGold
+                                else -> MRed
+                            }
+                            val rugEmoji = when {
+                                rug == null -> "❓"
+                                rug >= 80 -> "✅"
+                                rug >= 60 -> "⚠️"
+                                else -> "🚨"
+                            }
+                            
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                val rugColor = when {
-                                    rug == null -> MGray
-                                    rug >= 80 -> MGreen
-                                    rug >= 60 -> MGold
-                                    else -> MRed
-                                }
-                                val rugEmoji = when {
-                                    rug == null -> "❓"
-                                    rug >= 80 -> "✅"
-                                    rug >= 60 -> "⚠️"
-                                    else -> "🚨"
-                                }
-                                Text(
-                                    if (rug == null) "$rugEmoji Rug Safety: UNKNOWN"
-                                    else "$rugEmoji Rug Safety: $rug/100",
-                                    fontSize = 11.sp, color = rugColor, fontWeight = FontWeight.Bold
-                                )
+                                val rugLabel = if (rug == null) "$rugEmoji Rug Safety: UNKNOWN" else "$rugEmoji Rug Safety: $rug/100"
+                                Text(rugLabel, fontSize = 11.sp, color = rugColor, fontWeight = FontWeight.Bold)
                                 Text("Score: ${m.score}/100", fontSize = 10.sp, color = MBlue, fontWeight = FontWeight.Bold)
                             }
 
                             if (rug == null) {
-                                Text(
-                                    when (m.securityStatus) {
-                                        "EMPTY" -> "❓ GoPlus این توکن را نمی‌شناسد — به‌عنوان safe در نظر گرفته نشده"
-                                        "FAILED" -> "❓ بررسی امنیتی انجام نشد — به‌عنوان safe در نظر گرفته نشده"
-                                        else -> "❓ وضعیت امنیتی نامشخص — به‌عنوان safe در نظر گرفته نشده"
-                                    },
-                                    fontSize = 9.sp, color = MGray, fontWeight = FontWeight.Bold
-                                )
+                                val warningText = when (m.securityStatus) {
+                                    "EMPTY" -> "❓ GoPlus این توکن را نمی‌شناسد — به‌عنوان safe در نظر گرفته نشده"
+                                    "FAILED" -> "❓ بررسی امنیتی انجام نشد — به‌عنوان safe در نظر گرفته نشده"
+                                    else -> "❓ وضعیت امنیتی نامشخص — به‌عنوان safe در نظر گرفته نشده"
+                                }
+                                Text(warningText, fontSize = 9.sp, color = MGray, fontWeight = FontWeight.Bold)
                             }
 
                             if (m.rugWarnings.isNotEmpty()) {
@@ -325,13 +314,15 @@ fun MemeRadarScreen() {
                                         Text(warning, fontSize = 9.sp, color = if (rug == null) MGray else MRed)
                                     }
                                     if (m.rugWarnings.size > 3) {
-                                        Text("... و ${m.rugWarnings.size - 3} هشدار دیگر", fontSize = 8.sp, color = MGray)
+                                        val remaining = m.rugWarnings.size - 3
+                                        Text("... و $remaining هشدار دیگر", fontSize = 8.sp, color = MGray)
                                     }
                                 }
                             }
 
+                            val buyRatioPct = String.format(Locale.US, "%.0f", m.buyRatio * 100)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("🐳 فشار خرید: ${String.format(Locale.US, "%.0f", m.buyRatio * 100)}٪", fontSize = 10.sp, color = if (m.buyRatio >= 0.55) MGreen else MRed, fontWeight = FontWeight.Bold)
+                                Text("🐳 فشار خرید: $buyRatioPct٪", fontSize = 10.sp, color = if (m.buyRatio >= 0.55) MGreen else MRed, fontWeight = FontWeight.Bold)
                                 Text("حجم ۱س: ${compact(m.volumeH1)}", fontSize = 10.sp, color = MGray)
                             }
 
@@ -341,9 +332,24 @@ fun MemeRadarScreen() {
                                 Text("سن: ${ageText(m.ageHours)}", fontSize = 9.sp, color = MGray)
                             }
 
-                            // 🚀 Commit 94: نمایش قابلیت خروج (Exit Feasibility)
                             val (exitText, exitColor) = exitFeasibility(m.liquidity)
                             Text(exitText, fontSize = 9.sp, color = exitColor, fontWeight = FontWeight.Bold)
 
-                            Text(
-                                "تغییر ۲۴س: ${String.format(Locale.US, "%+.1
+                            val change24 = String.format(Locale.US, "%+.1f%%", m.changeH24)
+                            val vol24 = compact(m.volumeH1 * 24)
+                            Text("تغییر ۲۴س: $change24 • حجم ۲۴س: $vol24", fontSize = 9.sp, color = MGray)
+
+                            ContractRow(context, m.contract)
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        "⚠️ میم‌کوین‌ها = ریسک بسیار بالا! فقط با پولی که توان از دست دادنش رو داری وارد شو. این توصیه مالی نیست.",
+                        fontSize = 10.sp, color = MGold
+                    )
+                }
+            }
+        }
+    }
+}
