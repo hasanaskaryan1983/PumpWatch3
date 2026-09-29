@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -22,6 +23,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,10 +63,10 @@ private val MEME_CHAINS = listOf(
     "base" to "Base 🔵",
     "ethereum" to "Ethereum ⚪",
     "ton" to "TON 🔵",
-    // 🚀 Sprint 11 (C3): برچسب زنجیره‌های جدید رادار میم
     "robinhood" to "Robinhood 🪽",
     "avalanche" to "Avalanche 🔺",
-    "sei" to "SEI 🌊"
+    "sei" to "SEI 🌊",
+    "arc" to "Arc 🟣" // 🚀 Commit 92: اضافه شدن Arc
 )
 
 private fun compact(v: Double): String = when {
@@ -89,7 +91,13 @@ private fun memeVerdict(ch1: Double, r1: Double): Pair<String, Color> = when {
     else -> "😴 فعلاً حرکت خاصی نداره" to MGray
 }
 
-// 🚀 Sprint 10 (V2a): ایموجی واقعی زنجیره — نه take(2) روی برچسب
+// 🚀 Commit 94: محاسبه قابلیت خروج (Exit Feasibility) بر اساس نقدینگی
+private fun exitFeasibility(liq: Double): Pair<String, Color> = when {
+    liq < 10_000 -> "🔴 تله نقدینگی (فروش > ۵۰$ = اسلیپیج شدید)" to MRed
+    liq < 50_000 -> "🟡 خروج با احتیاط (فروش > ۱K$ تاثیرگذار است)" to MGold
+    else -> "🟢 خروج آسان (نقدینگی کافی برای فروش متوسط)" to MGreen
+}
+
 private fun chainEmoji(chain: String): String {
     val label = MEME_CHAINS.firstOrNull { it.first == chain }?.second ?: return "⛓️"
     val emoji = label.substringAfterLast(' ', "").trim()
@@ -99,7 +107,6 @@ private fun chainEmoji(chain: String): String {
 @Composable
 private fun ContractRow(ctx: Context, contract: String?) {
     if (contract.isNullOrEmpty()) {
-        // 🚀 Sprint 10 (V2a): برچسب صادقانه برای نبود کانترکت
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
             Text("⛓️ بومی / بدون کانترکت", fontSize = 9.sp, color = MGray)
         }
@@ -135,16 +142,16 @@ fun MemeRadarScreen() {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var lastUpdate by remember { mutableStateOf("") }
+    
+    // 🚀 Commit 94: حالت اسنایپر
+    var sniperMode by remember { mutableStateOf(false) }
 
     fun scan() {
         scope.launch {
             loading = true
             error = null
             try {
-                val signals = MemeRadar.scan { progress, msg ->
-                    // می‌توانید progress bar اضافه کنید
-                }
-
+                val signals = MemeRadar.scan { progress, msg -> }
                 items = signals
                 if (signals.isEmpty()) {
                     error = if (MemeRadar.lastScanFailed) {
@@ -163,13 +170,33 @@ fun MemeRadarScreen() {
 
     LaunchedEffect(Unit) { scan() }
 
+    // 🚀 Commit 94: فیلتر کردن لیست بر اساس حالت اسنایپر
+    val displayItems = if (sniperMode) {
+        items.filter { 
+            it.ageHours < 24.0 && 
+            it.rugScore != null && it.rugScore >= 70 && 
+            it.liquidity >= 10_000.0 
+        }
+    } else {
+        items
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("🐸 رادار میم‌کوین", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("🐸 رادار میم‌کوین", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🎯 حالت اسنایپر", fontSize = 11.sp, color = if (sniperMode) MGreen else MGray, fontWeight = FontWeight.Bold)
+                    Switch(
+                        checked = sniperMode,
+                        onCheckedChange = { sniperMode = it },
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+            }
             TextButton(onClick = { scan() }, enabled = !loading) {
                 Text(if (loading) "در حال اسکن..." else "اسکن 🔄")
             }
@@ -182,35 +209,38 @@ fun MemeRadarScreen() {
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("شناسایی قبل از پامپ • خروج قبل از دامپ", fontSize = 11.sp, color = MGray)
+                    if (sniperMode) {
+                        Surface(color = MGreen.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Text("🎯 فقط توکن‌های زیر ۲۴ ساعت با Rug Score ≥ ۷۰ و نقدینگی ≥ ۱۰K$ نمایش داده می‌شوند.", 
+                                fontSize = 10.sp, color = MGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
+                        }
+                    } else {
+                        Text("شناسایی قبل از پامپ • خروج قبل از دامپ", fontSize = 11.sp, color = MGray)
+                    }
                     Text("🛡️ Rug Safety Check فعال — هر توکن ۱۲ چک امنیتی می‌شود", fontSize = 10.sp, color = MGreen)
                     Text("❓ اگر دادهٔ امنیتی موجود نباشد: برچسب UNKNOWN — هرگز safe", fontSize = 10.sp, color = MGray)
                     Text("📊 ضربه روی هر کارت = نمودار کامل استخر در GeckoTerminal", fontSize = 10.sp, color = MGray)
-                    Text("شبکه‌ها: ${MEME_CHAINS.joinToString(" • ") { it.second }}", fontSize = 9.sp, color = MBlue)
-                    // 🚀 Sprint 11 (C3): یادداشت صادقانهٔ پوشش
-                    Text("پوشش: فقط استخرهای ترند/تازهٔ همین شبکه‌ها در لحظهٔ اسکن دیده می‌شوند. پامپ‌های زیر ۱ ساعت یا استخرهای خارج از لیست ترند ممکن است دیده نشوند — این رادار کامل نیست، صادق است.", fontSize = 9.sp, color = MGold, lineHeight = 15.sp)
                     Text(lastUpdate, fontSize = 9.sp, color = MGray)
                 }
             }
 
-            if (loading && items.isEmpty()) {
-                item { Text("⏳ در حال اسکن ${MEME_CHAINS.size} شبکه + Rug Safety Check...", fontSize = 12.sp, color = MGray) }
-            } else if (error != null && items.isEmpty()) {
+            if (loading && displayItems.isEmpty()) {
+                item { Text("⏳ در حال اسکن شبکه‌ها + Rug Safety Check...", fontSize = 12.sp, color = MGray) }
+            } else if (error != null && displayItems.isEmpty()) {
                 item { Text(error ?: "", fontSize = 12.sp, color = MGold, textAlign = TextAlign.Center) }
+            } else if (sniperMode && displayItems.isEmpty() && items.isNotEmpty()) {
+                item { 
+                    Text("😴 در حالت اسنایپر، توکن امن و تازه‌ای یافت نشد. فیلترها را غیرفعال کنید یا بعداً سر بزنید.", 
+                        fontSize = 12.sp, color = MGold, textAlign = TextAlign.Center) 
+                }
             } else {
-                itemsIndexed(items) { i, m ->
+                itemsIndexed(displayItems) { i, m ->
                     val (verdict, vColor) = memeVerdict(m.changeH1, m.buyRatio)
                     val chainName = MEME_CHAINS.firstOrNull { it.first == m.chain }?.second ?: m.chain
-
-                    // 🚀 Sprint 14 (مرحله ۱ / Commit 2 — P0#4): لینک استخر از poolAddress واقعی
-                    // قبلاً از m.name ساخته می‌شد و کاربر را به صفحهٔ دارایی دیگری می‌برد.
                     val poolUrl = if (m.poolAddress.isNullOrEmpty()) null
                     else "https://www.geckoterminal.com/${m.chain}/pools/${m.poolAddress}"
 
-                    // P0-1: val محلی برای smart cast روی Int?
                     val rug = m.rugScore
-
-                    // رنگ کارت بر اساس Rug Score — UNKNOWN = خاکستری (هرگز سبز)
                     val cardColor = when {
                         rug == null -> MUnknown
                         rug >= 80 -> if (i % 2 == 0) MCardA else MCardB
@@ -222,8 +252,6 @@ fun MemeRadarScreen() {
                         color = cardColor,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().then(
-                            // 🚀 Sprint 14: اگر لینک معتبر نداریم، کارت کلیک‌پذیر نیست
-                            // (به‌جای بازکردن صفحهٔ اشتباه، هیچ اتفاقی نمی‌افتد)
                             if (poolUrl != null) Modifier.clickable {
                                 try {
                                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(poolUrl))
@@ -234,10 +262,8 @@ fun MemeRadarScreen() {
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // 🚀 Sprint 10 (V2a): ایموجی واقعی زنجیره
                                 Text(chainEmoji(m.chain), fontSize = 18.sp)
                                 Spacer(Modifier.width(6.dp))
-                                // 🚀 Sprint 10 (V2a): رنگ سفید برای خوانا بودن روی کارت تیره
                                 Text(m.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                                 Spacer(Modifier.weight(1f))
                                 Text(String.format(Locale.US, "$%.8f", m.price), fontSize = 10.sp, color = MGray)
@@ -251,19 +277,16 @@ fun MemeRadarScreen() {
 
                             Text(verdict, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = vColor)
 
-                            // 🚀 Sprint 14 (مرحله ۲ / Commit 6A): provenance هر کارت
-                            // منبع دادهٔ استخر + وضعیت واقعی بررسی امنیتی (هرگز «safe» پیش‌فرض)
                             Text(
-                                "📡 منبع داده: GeckoTerminal • 🛡️ بررسی امنیتی: " + when (m.securityStatus) {
+                                "📡 منبع: GeckoTerminal • 🛡️ امنیت: " + when (m.securityStatus) {
                                     "READY" -> "GoPlus ✅"
-                                    "EMPTY" -> "GoPlus: توکن ناشناخته ❓"
-                                    "FAILED" -> "GoPlus: انجام نشد ⚠️"
+                                    "EMPTY" -> "GoPlus: ناشناخته ❓"
+                                    "FAILED" -> "GoPlus: خطا ⚠️"
                                     else -> "نامشخص ⚪"
                                 },
                                 fontSize = 8.sp, color = MGray
                             )
 
-                            // 🛡️ نمایش Rug Safety Score — سه‌حالته (P0-1)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 val rugColor = when {
                                     rug == null -> MGray
@@ -285,19 +308,17 @@ fun MemeRadarScreen() {
                                 Text("Score: ${m.score}/100", fontSize = 10.sp, color = MBlue, fontWeight = FontWeight.Bold)
                             }
 
-                            // P0-1: پیام جدا برای EMPTY و FAILED — هیچ‌وقت safe نیست
                             if (rug == null) {
                                 Text(
                                     when (m.securityStatus) {
                                         "EMPTY" -> "❓ GoPlus این توکن را نمی‌شناسد — به‌عنوان safe در نظر گرفته نشده"
-                                        "FAILED" -> "❓ بررسی امنیتی انجام نشد (خطای اتصال) — به‌عنوان safe در نظر گرفته نشده"
+                                        "FAILED" -> "❓ بررسی امنیتی انجام نشد — به‌عنوان safe در نظر گرفته نشده"
                                         else -> "❓ وضعیت امنیتی نامشخص — به‌عنوان safe در نظر گرفته نشده"
                                     },
                                     fontSize = 9.sp, color = MGray, fontWeight = FontWeight.Bold
                                 )
                             }
 
-                            // 🆕 نمایش هشدارهای Rug Safety (اگر وجود دارد)
                             if (m.rugWarnings.isNotEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     m.rugWarnings.take(3).forEach { warning ->
@@ -320,23 +341,9 @@ fun MemeRadarScreen() {
                                 Text("سن: ${ageText(m.ageHours)}", fontSize = 9.sp, color = MGray)
                             }
 
-                            Text(
-                                "تغییر ۲۴س: ${String.format(Locale.US, "%+.1f%%", m.changeH24)} • حجم ۲۴س: ${compact(m.volumeH1 * 24)}",
-                                fontSize = 9.sp, color = MGray
-                            )
+                            // 🚀 Commit 94: نمایش قابلیت خروج (Exit Feasibility)
+                            val (exitText, exitColor) = exitFeasibility(m.liquidity)
+                            Text(exitText, fontSize = 9.sp, color = exitColor, fontWeight = FontWeight.Bold)
 
-                            // 🚀 Sprint 10 (V2a/V2b): کانترکت واقعی از MemeSignal
-                            ContractRow(context, m.contract)
-                        }
-                    }
-                }
-                item {
-                    Text(
-                        "⚠️ میم‌کوین‌ها = ریسک بسیار بالا! فقط با پولی که توان از دست دادنش رو داری وارد شو. این توصیه مالی نیست.",
-                        fontSize = 10.sp, color = MGold
-                    )
-                }
-            }
-        }
-    }
-}
+                            Text(
+                                "تغییر ۲۴س: ${String.format(Locale.US, "%+.1
