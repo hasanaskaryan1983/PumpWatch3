@@ -43,6 +43,13 @@ import retrofit2.http.GET
 import retrofit2.http.Query
 import java.math.BigInteger
 
+private val VGreen = Color(0xFF00E676)
+private val VRed = Color(0xFFFF5252)
+private val VBlue = Color(0xFF40C4FF)
+private val VGold = Color(0xFFFFC107)
+private val VGray = Color(0xFF8B949E)
+private val VCard = Color(0xFF1A2230)
+
 data class BlockscoutTokenApproval(
     @SerializedName("contract_address") val contractAddress: String?,
     @SerializedName("token_symbol") val tokenSymbol: String?,
