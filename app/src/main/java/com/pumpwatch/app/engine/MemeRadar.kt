@@ -14,11 +14,6 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * سیگنال میم‌کوین از رادار.
- *
- * 🚀 Commit 86 (M4): فیلدهای `entry`, `stopLoss`, `target1`, `target2` حذف شدند.
- */
 data class MemeSignal(
     val symbol: String,
     val name: String,
@@ -42,15 +37,15 @@ data class MemeSignal(
     val poolAddress: String? = null
 )
 
-// ---------- رادار میم‌کوین (GeckoTerminal + Rug Safety Check با GoPlus) ----------
-
 object MemeRadar {
 
     private const val TAG = "MemeRadar"
 
+    // 🚀 Commit 92: اضافه شدن Arc Network
     private val CHAINS = listOf(
         "solana", "bsc", "base", "ethereum",
-        "ton", "robinhood", "avalanche", "sei"
+        "ton", "robinhood", "avalanche", "sei",
+        "arc"
     )
 
     var lastScanFailed = false
@@ -145,7 +140,7 @@ object MemeRadar {
         if (h1 in 2.0..20.0) { score += 15; reasons.add("شروع حرکت صعودی 🚀") }
         else if (h1 in 0.0..2.0) score += 5
 
-        if (h24 in -20.0..80.0) { score += 10; reasons.add("هنوز پارابولیک نشده 📈") }
+        if (h24 in -20.0..80.0) { score += 10; reasons.add("هنوز پارابولیک نشده ") }
         if (h24 > 200) score -= 15
 
         if (age in 24.0..720.0) { score += 10; reasons.add("توکن جاافتاده (۱-۳۰ روز)") }
@@ -160,11 +155,6 @@ object MemeRadar {
         val contractAddress = p.relationships?.base_token?.data?.id?.substringAfter('_', "")
         val poolAddress = p.id?.substringAfter('_', "")
 
-        // 🚀 Commit 90: استفاده از GoPlusGateway (کش + circuit breaker + thread-safe)
-        // به‌جای GoPlusClient.getTokenSecurityResult مستقیم.
-        // اثر: در اسکن ۳۰۰ استخر:
-        //   - توکن‌های تکراری در یک scan دوباره API زده نمی‌شوند (کش ۲ دقیقه)
-        //   - اگر GoPlus مشکل دارد، بعد از ۵ شکست، ۱ دقیقه circuit open
         val (rugScore, rugWarnings, securityStatus) = checkRugSafety(chain, contractAddress)
 
         if (rugScore != null && rugScore < 40) {
@@ -179,7 +169,7 @@ object MemeRadar {
             dex = p.relationships?.dex?.data?.id ?: "?",
             price = price,
             score = if (rugScore == null) {
-                reasons.add("⚠️ امنیت نامشخص — حداکثر امتیاز ۵۰")
+                reasons.add("️ امنیت نامشخص — حداکثر امتیاز ۵۰")
                 score.coerceAtMost(50)
             } else {
                 score
@@ -201,9 +191,6 @@ object MemeRadar {
         )
     }
 
-    /**
-     * چک Rug Safety با GoPlus (از طریق GoPlusGateway).
-     */
     private suspend fun checkRugSafety(
         chain: String,
         contractAddress: String?
@@ -212,7 +199,6 @@ object MemeRadar {
             return Triple(null, listOf("⚠️ آدرس contract توکن در دسترس نیست"), "FAILED")
         }
 
-        // 🚀 Commit 90: GoPlusGateway به‌جای GoPlusClient
         return when (val result = GoPlusGateway.getSecurity(chain, contractAddress)) {
             is SecurityResult.Failed -> {
                 Log.w(TAG, "GoPlus failed for $contractAddress: ${result.reason}")
@@ -235,35 +221,12 @@ object MemeRadar {
         val warnings = mutableListOf<String>()
         var score = 100
 
-        if (security.is_honeypot == "1") {
-            score -= 80
-            warnings.add("🚨 Honeypot: نمی‌توانید بفروشید!")
-        }
-
-        if (security.is_mintable == "1") {
-            score -= 20
-            warnings.add("⚠️ Mintable: تیم می‌تواند توکن جدید بسازد")
-        }
-
-        if (security.owner_change_balance == "1") {
-            score -= 30
-            warnings.add("🚨 Owner می‌تواند balance را تغییر دهد")
-        }
-
-        if (security.hidden_owner == "1") {
-            score -= 15
-            warnings.add("⚠️ Owner مخفی")
-        }
-
-        if (security.selfdestruct == "1") {
-            score -= 50
-            warnings.add("🚨 Contract می‌تواند خود را حذف کند")
-        }
-
-        if (security.is_proxy == "1") {
-            score -= 10
-            warnings.add("⚠️ Proxy Contract (ممکن است منطق تغییر کند)")
-        }
+        if (security.is_honeypot == "1") { score -= 80; warnings.add("🚨 Honeypot: نمی‌توانید بفروشید!") }
+        if (security.is_mintable == "1") { score -= 20; warnings.add("⚠️ Mintable: تیم می‌تواند توکن جدید بسازد") }
+        if (security.owner_change_balance == "1") { score -= 30; warnings.add("🚨 Owner می‌تواند balance را تغییر دهد") }
+        if (security.hidden_owner == "1") { score -= 15; warnings.add("⚠️ Owner مخفی") }
+        if (security.selfdestruct == "1") { score -= 50; warnings.add("🚨 Contract می‌تواند خود را حذف کند") }
+        if (security.is_proxy == "1") { score -= 10; warnings.add("⚠️ Proxy Contract") }
 
         val buyTax = security.buy_tax?.toDoubleOrNull() ?: 0.0
         val sellTax = security.sell_tax?.toDoubleOrNull() ?: 0.0
@@ -276,7 +239,7 @@ object MemeRadar {
         val topHoldersPercent = topHolders?.sumOf { it.percent ?: 0.0 } ?: 0.0
         if (topHoldersPercent > 0.50) {
             score -= 25
-            warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}% (تمرکز بالا)")
+            warnings.add("🚨 Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
         } else if (topHoldersPercent > 0.30) {
             score -= 10
             warnings.add("⚠️ Top 10 Holders: ${(topHoldersPercent * 100).toInt()}%")
@@ -311,30 +274,11 @@ object MemeRadar {
         val warnings = mutableListOf<String>()
         var score = 100
 
-        if (anyToBool(security.mintable) == true) {
-            score -= 25
-            warnings.add("🚨 Mintable: می‌توان توکن جدید ضرب کرد")
-        }
-
-        if (anyToBool(security.freezable) == true) {
-            score -= 20
-            warnings.add("🚨 Freezable: می‌توان حساب‌ها را مسدود کرد")
-        }
-
-        if (anyToBool(security.closable) == true) {
-            score -= 15
-            warnings.add("⚠️ Closable: contract قابل بستن است")
-        }
-
-        if (anyToBool(security.balance_mutable_authority) == true) {
-            score -= 40
-            warnings.add("🚨 Balance Mutable: موجودی‌ها قابل تغییرند")
-        }
-
-        if (anyToBool(security.non_transferable) == true) {
-            score -= 50
-            warnings.add("🚨 Non-transferable: نمی‌توانید توکن را بفروشید")
-        }
+        if (anyToBool(security.mintable) == true) { score -= 25; warnings.add("🚨 Mintable") }
+        if (anyToBool(security.freezable) == true) { score -= 20; warnings.add(" Freezable") }
+        if (anyToBool(security.closable) == true) { score -= 15; warnings.add("⚠️ Closable") }
+        if (anyToBool(security.balance_mutable_authority) == true) { score -= 40; warnings.add(" Balance Mutable") }
+        if (anyToBool(security.non_transferable) == true) { score -= 50; warnings.add("🚨 Non-transferable") }
 
         val transferFee = security.transfer_fee
         val feePercent = extractTransferFeePercent(transferFee)
@@ -346,7 +290,7 @@ object MemeRadar {
         val creatorPercent = security.creator_percent ?: 0.0
         if (creatorPercent > 0.30) {
             score -= 25
-            warnings.add("🚨 Creator ${(creatorPercent * 100).toInt()}% دارد (تمرکز بالا)")
+            warnings.add("🚨 Creator ${(creatorPercent * 100).toInt()}% دارد")
         } else if (creatorPercent > 0.15) {
             score -= 10
             warnings.add("⚠️ Creator ${(creatorPercent * 100).toInt()}% دارد")
@@ -376,9 +320,7 @@ object MemeRadar {
                 val sell = (fee["sell_tax"] as? String)?.trimEnd('%')?.toDoubleOrNull() ?: 0.0
                 maxOf(buy, sell).takeIf { it > 0 }
             }
-            is List<*> -> {
-                fee.mapNotNull { extractTransferFeePercent(it) }.maxOrNull()
-            }
+            is List<*> -> fee.mapNotNull { extractTransferFeePercent(it) }.maxOrNull()
             else -> null
         }
     }
