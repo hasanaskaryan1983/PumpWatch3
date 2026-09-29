@@ -3,12 +3,9 @@ package com.pumpwatch.app.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +24,12 @@ import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private val VGreen = Color(0xFF00E676)
+private val VRed = Color(0xFFFF5252)
+private val VGold = Color(0xFFFFC107)
+private val VGray = Color(0xFF8B949E)
+private val VCard = Color(0xFF1A2230)
 
 @Composable
 internal fun HoldingsSection(
@@ -274,7 +277,7 @@ internal fun TxHistorySection(txs: List<WalletTx>) {
                             fontSize = 14.sp
                         )
 
-                        Spacer(Modifier.width(6.dp))
+                        androidx.compose.foundation.layout.Spacer(Modifier.width(6.dp))
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
