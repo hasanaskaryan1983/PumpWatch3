@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.platformContractOf
+import com.pumpwatch.app.engine.SignalLogger
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -164,9 +165,9 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var filter by remember { mutableStateOf("ALL") }
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
 
-    // 🚀 Commit 96: state برای جمع/باز بودن کارنامه + ریست
     var accuracyExpanded by remember { mutableStateOf(false) }
     var accuracyResetKey by remember { mutableStateOf(0) }
+    var resetMsg by remember { mutableStateOf<String?>(null) }
 
     fun load() {
         scope.launch {
@@ -195,6 +196,20 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
                 loading = false
+            }
+        }
+    }
+
+    fun resetAccuracy() {
+        scope.launch {
+            try {
+                SignalLogger.clear(ctx)
+                accuracyResetKey++
+                resetMsg = "✅ آمار سیگنال‌ها پاک شد"
+                kotlinx.coroutines.delay(2500)
+                resetMsg = null
+            } catch (e: Exception) {
+                resetMsg = "⚠️ خطا در پاک‌سازی: ${e.message}"
             }
         }
     }
@@ -237,7 +252,16 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         )
 
-        // 🚀 Commit 96: کارنامهٔ جمع‌شونده + دکمه ریست
+        if (resetMsg != null) {
+            Text(
+                resetMsg ?: "",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                fontSize = 10.sp,
+                color = AGreen,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -267,8 +291,8 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                         modifier = Modifier.weight(1f)
                     )
                     Button(
-                        onClick = { accuracyResetKey++ },
-                        colors = ButtonDefaults.buttonColors(containerColor = AGray.copy(alpha = 0.3f)),
+                        onClick = { resetAccuracy() },
+                        colors = ButtonDefaults.buttonColors(containerColor = ARed.copy(alpha = 0.3f)),
                         shape = RoundedCornerShape(6.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                     ) {
@@ -385,12 +409,8 @@ private fun AlertSmartCard(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            // خط ۱: emoji + symbol + level + early + score
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (isPump) "🚀" else "🩸",
-                    fontSize = 16.sp
-                )
+                Text(if (isPump) "🚀" else "🩸", fontSize = 16.sp)
                 Spacer(Modifier.width(6.dp))
                 Text(
                     c.symbol.uppercase(Locale.US),
@@ -413,7 +433,6 @@ private fun AlertSmartCard(
                 )
             }
 
-            // خط ۲: name + price
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -433,10 +452,8 @@ private fun AlertSmartCard(
                 )
             }
 
-            // خط ۳: کانترکت (همیشه نمایش داده می‌شود)
             ContractRow(ctx, contract, c.id)
 
-            // خط ۴: آمار درصدی در یک خط
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -460,7 +477,6 @@ private fun AlertSmartCard(
                 )
             }
 
-            // خط ۵: progress bar جمع‌وجور
             val high = c.high24h ?: 0.0
             val low = c.low24h ?: 0.0
             if (high > low) {
@@ -474,7 +490,6 @@ private fun AlertSmartCard(
                 )
             }
 
-            // خط ۶: فقط اولین دلیل (صرفه‌جویی در فضا)
             if (a.reasons.isNotEmpty()) {
                 Text(
                     "• ${a.reasons.first()}",
