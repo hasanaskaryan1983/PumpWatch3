@@ -27,13 +27,6 @@ import com.pumpwatch.app.engine.SignalAccuracyStats
 import com.pumpwatch.app.engine.SignalLogger
 import java.util.Locale
 
-/**
- * 🚀 Sprint 15 (فاز ۴ / Commit 21): کارت کارنامهٔ دقت سیگنال‌ها
- *
- * این Composable کپسوله از هر جایی قابل استفاده است.
- * داده از SignalLogger.accuracyStats() می‌آید (pure, قابل‌تست).
- */
-
 private val AGreen = Color(0xFF00E676)
 private val ARed = Color(0xFFFF5252)
 private val AGold = Color(0xFFFFC107)
@@ -44,13 +37,14 @@ private val ACard = Color(0xFF1A2230)
 @Composable
 fun SignalAccuracyCard(
     modifier: Modifier = Modifier,
-    accent: Color = AGreen
+    accent: Color = AGreen,
+    key: Int = 0
 ) {
     val context = LocalContext.current
     var stats by remember { mutableStateOf<SignalAccuracyStats?>(null) }
     var byMode by remember { mutableStateOf<Map<String, SignalAccuracyStats>>(emptyMap()) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(key) {
         val logs = SignalLogger.load(context)
         stats = SignalLogger.accuracyStats(logs)
         byMode = SignalLogger.accuracyByMode(logs)
@@ -82,7 +76,6 @@ fun SignalAccuracyCard(
             } else {
                 val s = stats!!
 
-                // ---------- خط اصلی: وین‌ریت ----------
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -112,7 +105,6 @@ fun SignalAccuracyCard(
 
                 Spacer(Modifier.height(4.dp))
 
-                // ---------- تفکیک mode ----------
                 if (byMode.isNotEmpty()) {
                     Text("به تفکیک مود:", fontSize = 10.sp, color = AGray, fontWeight = FontWeight.Bold)
                     byMode.forEach { (mode, m) ->
@@ -170,12 +162,6 @@ private fun ModeRow(mode: String, m: SignalAccuracyStats) {
     }
 }
 
-/**
- * 🚀 Commit 21: محاسبهٔ حاشیهٔ خطای ۹۵٪ برای وین‌ریت
- * فرمول Wilson score interval (نسخهٔ ساده‌شده):
- *   margin ≈ 1.96 * sqrt(p*(1-p)/n)
- * برای n کوچک، عدد بزرگ می‌شود → صداقت حفظ می‌شود.
- */
 internal fun marginOfError(n: Int, winRatePct: Double): String {
     if (n < 2) return "؟"
     val p = winRatePct / 100.0
