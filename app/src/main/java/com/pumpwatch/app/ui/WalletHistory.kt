@@ -490,7 +490,6 @@ fun WalletHistorySection() {
                     }
 
                     // 🚀 Sprint 10 (ممیزی 2026-09-16): پیام صادقانه برای EVM خالی
-                    // به‌جای سکوت کامل، بگوییم چرا هیچ چیز پیدا نشد
                     if (res.isEmpty() && kindOf(addr) == "evm" && summary.isEmpty()) {
                         summary = "😴 هیچ تراکنشی روی ۷ شبکهٔ EVM فعال پیدا نشد • اگر آدرس BSC/Avax/Sei است: منبع Blockscout این شبکه‌ها قطع شده (🚫)"
                     }
@@ -570,7 +569,7 @@ fun WalletHistorySection() {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Card(colors = CardDefaults.cardColors(containerColor = XCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("📜 موتور ۵: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
+                Text("📜 موتور ۲: تاریخچه تراکنش‌های کیف (همه شبکه‌ها خودکار)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = XBlue)
                 Text("فقط تراکنش‌های بالای ۱۰ دلار + تراکنش‌های با قیمت نامشخص • طرف مقابل کامل با دکمه کپی • دو سرور RPC یکی‌درمیان", fontSize = 9.sp, color = XGray)
                 TextField(value = addrIn, onValueChange = { addrIn = it },
                     placeholder = { Text("آدرس کیف... (Solana / 0x / TON / SUI)", fontSize = 11.sp) },
