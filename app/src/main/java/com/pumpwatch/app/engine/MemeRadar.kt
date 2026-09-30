@@ -37,6 +37,26 @@ data class MemeSignal(
     val poolAddress: String? = null
 )
 
+// 🚀 Commit 97: آمار قیف اسکن برای نمایش شفافیت در UI
+data class SniperStats(
+    val totalScanned: Int,
+    val rejectedLiquidity: Int,
+    val rejectedVolume: Int,
+    val rejectedAge: Int,
+    val rejectedNoTx: Int,
+    val rejectedSecurity: Int,
+    val rejectedScore: Int,
+    val accepted: Int
+) {
+    fun toSummary(): String {
+        val pass1 = totalScanned - rejectedLiquidity
+        val pass2 = pass1 - rejectedVolume
+        val pass3 = pass2 - rejectedAge - rejectedNoTx
+        val pass4 = pass3 - rejectedSecurity - rejectedScore
+        return "بررسی $totalScanned استخر: $pass1 با نقدینگی • $pass2 با حجم • $pass3 تازه و فعال • $pass4 امن/قوی • ✅ $accepted قبول"
+    }
+}
+
 object MemeRadar {
 
     private const val TAG = "MemeRadar"
@@ -50,6 +70,19 @@ object MemeRadar {
 
     var lastScanFailed = false
 
+    // 🚀 Commit 97: آخرین آمار قیف (قابل خواندن از UI)
+    var lastSniperStats: SniperStats? = null
+        private set
+
+    private data class ScanThresholds(
+        val minLiq: Double,
+        val minVol24: Double,
+        val minAgeH: Double,
+        val maxAgeH: Double,
+        val minRugScore: Int,
+        val allowUnknownSecurity: Boolean
+    )
+
     private fun ageHours(createdAt: String?): Double {
         if (createdAt == null) return 9999.0
         return try {
@@ -62,16 +95,58 @@ object MemeRadar {
         }
     }
 
+    // 🚀 Commit 97: پارامتر sniperMode با default false (backward compatible)
     suspend fun scan(
+        sniperMode: Boolean = false,
         onProgress: (Int, String) -> Unit = { _, _ -> }
     ): List<MemeSignal> {
         lastScanFailed = false
-        onProgress(5, "دریافت استخرهای داغ و تازه...")
+        lastSniperStats = null
+
+        // 🚀 Commit 97: آستانه‌های متفاوت برای حالت اسنایپر
+        val thresholds = if (sniperMode) {
+            ScanThresholds(
+                minLiq = 5_000.0,            // آسان‌تر (قبلاً ۲۰K)
+                minVol24 = 10_000.0,         // آسان‌تر (قبلاً ۵۰K)
+                minAgeH = 0.5,               // از ۳۰ دقیقه
+                maxAgeH = 168.0,             // تا ۷ روز
+                minRugScore = 35,            // کمی آسان‌تر
+                allowUnknownSecurity = true  // UNKNOWN قبول با سقف امتیاز ۵۰
+            )
+        } else {
+            ScanThresholds(
+                minLiq = 20_000.0,
+                minVol24 = 50_000.0,
+                minAgeH = 1.0,
+                maxAgeH = 9999.0,
+                minRugScore = 40,
+                allowUnknownSecurity = false
+            )
+        }
+
+        onProgress(
+            5,
+            if (sniperMode) "🎯 شکار توکن‌های تازه (آستانه آسان)..."
+            else "دریافت استخرهای داغ و تازه..."
+        )
 
         var anyOk = false
         val pools = mutableListOf<GeckoPool>()
         for (chain in CHAINS) {
             onProgress(10 + CHAINS.indexOf(chain) * 8, "اسکن زنجیره $chain...")
+
+            // 🚀 Commit 97: در حالت اسنایپر، newPools اول و با weight بیشتر
+            if (sniperMode) {
+                try {
+                    val n = GeckoTerminal.api.newPools(chain).data
+                    if (n != null) {
+                        anyOk = true
+                        pools.addAll(n)
+                        pools.addAll(n) // دوبار اضافه می‌کنیم تا اولویت داشته باشد
+                    }
+                } catch (_: Exception) { }
+            }
+
             try {
                 val r = GeckoTerminal.api.trendingPools(chain).data
                 if (r != null) {
@@ -79,13 +154,16 @@ object MemeRadar {
                     pools.addAll(r)
                 }
             } catch (_: Exception) { }
-            try {
-                val n = GeckoTerminal.api.newPools(chain).data
-                if (n != null) {
-                    anyOk = true
-                    pools.addAll(n)
-                }
-            } catch (_: Exception) { }
+
+            if (!sniperMode) {
+                try {
+                    val n = GeckoTerminal.api.newPools(chain).data
+                    if (n != null) {
+                        anyOk = true
+                        pools.addAll(n)
+                    }
+                } catch (_: Exception) { }
+            }
         }
 
         if (!anyOk) {
@@ -93,18 +171,65 @@ object MemeRadar {
             return emptyList()
         }
 
-        onProgress(75, "تحلیل معیارهای اعتماد + Rug Safety Check...")
+        onProgress(
+            75,
+            if (sniperMode) "🔍 ارزیابی امنیت استخرهای تازه..."
+            else "تحلیل معیارهای اعتماد + Rug Safety Check..."
+        )
+
         val seen = mutableSetOf<String>()
         val unique = pools.filter { p -> seen.add(p.id ?: "") }
-        val results = unique.mapNotNull { analyze(it) }
+
+        // 🚀 Commit 97: شمارش دقیق قیف
+        var rejectedLiq = 0
+        var rejectedVol = 0
+        var rejectedAge = 0
+        var rejectedNoTx = 0
+        var rejectedSec = 0
+        var rejectedScore = 0
+
+        val results = mutableListOf<MemeSignal>()
+        for (p in unique) {
+            when (val res = analyzeWithReason(p, thresholds)) {
+                is AnalyzeResult.Success -> results.add(res.signal)
+                is AnalyzeResult.Rejected -> when (res.reason) {
+                    "liquidity" -> rejectedLiq++
+                    "volume" -> rejectedVol++
+                    "age" -> rejectedAge++
+                    "noTx" -> rejectedNoTx++
+                    "security" -> rejectedSec++
+                    "score" -> rejectedScore++
+                }
+            }
+        }
+
+        lastSniperStats = SniperStats(
+            totalScanned = unique.size,
+            rejectedLiquidity = rejectedLiq,
+            rejectedVolume = rejectedVol,
+            rejectedAge = rejectedAge,
+            rejectedNoTx = rejectedNoTx,
+            rejectedSecurity = rejectedSec,
+            rejectedScore = rejectedScore,
+            accepted = results.size
+        )
+
+        Log.i(TAG, "📊 SniperStats: ${lastSniperStats?.toSummary()}")
+
         onProgress(95, "رتبه‌بندی نهایی...")
         return results.sortedByDescending { it.score }.take(20)
     }
 
-    private suspend fun analyze(p: GeckoPool): MemeSignal? {
-        val a = p.attributes ?: return null
-        val price = a.priceUsd?.toDoubleOrNull() ?: return null
-        if (price <= 0) return null
+    // 🚀 Commit 97: نتیجهٔ تحلیل با دلیل رد
+    private sealed class AnalyzeResult {
+        data class Success(val signal: MemeSignal) : AnalyzeResult()
+        data class Rejected(val reason: String) : AnalyzeResult()
+    }
+
+    private suspend fun analyzeWithReason(p: GeckoPool, t: ScanThresholds): AnalyzeResult {
+        val a = p.attributes ?: return AnalyzeResult.Rejected("score")
+        val price = a.priceUsd?.toDoubleOrNull() ?: return AnalyzeResult.Rejected("score")
+        if (price <= 0) return AnalyzeResult.Rejected("score")
 
         val liq = a.reserveUsd?.toDoubleOrNull() ?: 0.0
         val vol1 = a.volume?.h1 ?: 0.0
@@ -117,13 +242,13 @@ object MemeRadar {
         val age = ageHours(a.createdAt)
         val fdv = a.fdvUsd ?: 0.0
 
-        if (liq < 20_000) return null
-        if (vol24 < 50_000) return null
-        if (s1 <= 0) return null
-        if (age < 1) return null
+        if (liq < t.minLiq) return AnalyzeResult.Rejected("liquidity")
+        if (vol24 < t.minVol24) return AnalyzeResult.Rejected("volume")
+        if (b1 + s1 <= 0) return AnalyzeResult.Rejected("noTx")
+        if (age < t.minAgeH || age > t.maxAgeH) return AnalyzeResult.Rejected("age")
 
-        val t = b1 + s1
-        val buyRatio = if (t > 0) b1 / t else 0.5
+        val total = b1 + s1
+        val buyRatio = if (total > 0) b1 / total else 0.5
 
         var score = 10
         val reasons = mutableListOf("استخر داغ امروز 🔥")
@@ -140,13 +265,14 @@ object MemeRadar {
         if (h1 in 2.0..20.0) { score += 15; reasons.add("شروع حرکت صعودی 🚀") }
         else if (h1 in 0.0..2.0) score += 5
 
-        if (h24 in -20.0..80.0) { score += 10; reasons.add("هنوز پارابولیک نشده ") }
+        if (h24 in -20.0..80.0) { score += 10; reasons.add("هنوز پارابولیک نشده") }
         if (h24 > 200) score -= 15
 
         if (age in 24.0..720.0) { score += 10; reasons.add("توکن جاافتاده (۱-۳۰ روز)") }
+        else if (age < 24.0) { score += 8; reasons.add("توکن تازه 🆕") }
         else score += 5
 
-        if (score < 30) return null
+        if (score < 30) return AnalyzeResult.Rejected("score")
 
         val fullName = a.name ?: "?"
         val sym = fullName.split("/").firstOrNull()?.trim() ?: "?"
@@ -157,37 +283,49 @@ object MemeRadar {
 
         val (rugScore, rugWarnings, securityStatus) = checkRugSafety(chain, contractAddress)
 
-        if (rugScore != null && rugScore < 40) {
+        // 🚀 Commit 97: منطق Rug Safety دوگانه
+        if (rugScore != null && rugScore < t.minRugScore) {
             Log.w(TAG, "🚨 $sym rug score too low: $rugScore — $rugWarnings")
-            return null
+            return AnalyzeResult.Rejected("security")
         }
 
-        return MemeSignal(
-            symbol = sym,
-            name = fullName,
-            chain = chain,
-            dex = p.relationships?.dex?.data?.id ?: "?",
-            price = price,
-            score = if (rugScore == null) {
-                reasons.add("️ امنیت نامشخص — حداکثر امتیاز ۵۰")
-                score.coerceAtMost(50)
-            } else {
-                score
-            }.coerceAtMost(100),
-            liquidity = liq,
-            volumeH1 = vol1,
-            buyRatio = buyRatio,
-            ageHours = age,
-            changeH1 = h1,
-            changeH6 = h6,
-            changeH24 = h24,
-            fdv = fdv,
-            reasons = reasons,
-            rugScore = rugScore,
-            rugWarnings = rugWarnings,
-            securityStatus = securityStatus,
-            contract = contractAddress,
-            poolAddress = poolAddress
+        // اگر UNKNOWN باشد و allowUnknownSecurity = false → رد
+        if (rugScore == null && !t.allowUnknownSecurity) {
+            Log.w(TAG, "🚫 $sym: security UNKNOWN in normal mode — rejected")
+            return AnalyzeResult.Rejected("security")
+        }
+
+        // در حالت اسنایپر، UNKNOWN قبول است ولی با سقف امتیاز ۵۰
+        val finalScore = if (rugScore == null) {
+            reasons.add("⚠️ امنیت نامشخص — حداکثر امتیاز ۵۰")
+            score.coerceAtMost(50)
+        } else {
+            score
+        }.coerceAtMost(100)
+
+        return AnalyzeResult.Success(
+            MemeSignal(
+                symbol = sym,
+                name = fullName,
+                chain = chain,
+                dex = p.relationships?.dex?.data?.id ?: "?",
+                price = price,
+                score = finalScore,
+                liquidity = liq,
+                volumeH1 = vol1,
+                buyRatio = buyRatio,
+                ageHours = age,
+                changeH1 = h1,
+                changeH6 = h6,
+                changeH24 = h24,
+                fdv = fdv,
+                reasons = reasons,
+                rugScore = rugScore,
+                rugWarnings = rugWarnings,
+                securityStatus = securityStatus,
+                contract = contractAddress,
+                poolAddress = poolAddress
+            )
         )
     }
 
@@ -275,9 +413,9 @@ object MemeRadar {
         var score = 100
 
         if (anyToBool(security.mintable) == true) { score -= 25; warnings.add("🚨 Mintable") }
-        if (anyToBool(security.freezable) == true) { score -= 20; warnings.add(" Freezable") }
+        if (anyToBool(security.freezable) == true) { score -= 20; warnings.add("🥶 Freezable") }
         if (anyToBool(security.closable) == true) { score -= 15; warnings.add("⚠️ Closable") }
-        if (anyToBool(security.balance_mutable_authority) == true) { score -= 40; warnings.add(" Balance Mutable") }
+        if (anyToBool(security.balance_mutable_authority) == true) { score -= 40; warnings.add("⚠️ Balance Mutable") }
         if (anyToBool(security.non_transferable) == true) { score -= 50; warnings.add("🚨 Non-transferable") }
 
         val transferFee = security.transfer_fee
