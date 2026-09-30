@@ -82,6 +82,13 @@ object SignalLogger {
             .putString(KEY, GSON.toJson(logs)).apply()
     }
 
+    // 🚀 Commit 96: پاک‌سازی کامل لاگ سیگنال‌ها (برای دکمه ریست در SmartAlertsScreen)
+    fun clear(ctx: Context) {
+        ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
+            .remove(KEY)
+            .apply()
+    }
+
     fun add(ctx: Context, s: LoggedSignal) {
         val list = load(ctx).toMutableList()
         list.add(0, s)
