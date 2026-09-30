@@ -3,6 +3,7 @@ package com.pumpwatch.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -54,6 +58,7 @@ private val ARed = Color(0xFFFF5252)
 private val AGold = Color(0xFFFFC107)
 private val ABlue = Color(0xFF40C4FF)
 private val AGray = Color(0xFF8B949E)
+private val ACard = Color(0xFF1A2230)
 
 private data class AlertEval(
     val coin: CoinMarket,
@@ -106,34 +111,45 @@ private fun levelOf(score: Int): String = when {
     else -> "👀 زودهنگام"
 }
 
-// 🚀 Sprint 10 (V3c): ردیف کانترکت برای کارت‌های هشدار
 @Composable
-private fun ContractRow(ctx: Context, contract: String?) {
-    if (contract.isNullOrEmpty()) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = AGray)
-        }
-        return
-    }
+private fun ContractRow(ctx: Context, contract: String?, coinId: String) {
+    val displayAddr = contract ?: coinId
+    val label = if (contract != null) "📋 کانترکت" else "📋 ID"
     val copied = remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        Text("📋 ", fontSize = 9.sp, color = AGray)
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+    ) {
+        Text(label, fontSize = 9.sp, color = AGray)
+        Spacer(Modifier.width(4.dp))
         Text(
-            if (contract.length > 24) "${contract.take(12)}...${contract.takeLast(8)}" else contract,
-            fontSize = 9.sp, color = ABlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+            if (displayAddr.length > 22) "${displayAddr.take(10)}...${displayAddr.takeLast(6)}" else displayAddr,
+            fontSize = 9.sp,
+            color = ABlue,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f)
         )
         Button(
             onClick = {
                 try {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                        .setPrimaryClip(ClipData.newPlainText("contract", contract))
+                        .setPrimaryClip(ClipData.newPlainText("contract", displayAddr))
                     copied.value = true
                 } catch (_: Exception) { }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) AGreen else AGold),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (copied.value) AGreen else AGold
+            ),
             shape = RoundedCornerShape(6.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 1.dp)
+        ) {
+            Text(
+                if (copied.value) "✅" else "کپی",
+                fontSize = 9.sp,
+                color = Color.Black
+            )
+        }
     }
 }
 
@@ -147,6 +163,10 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf("ALL") }
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
+
+    // 🚀 Commit 96: state برای جمع/باز بودن کارنامه + ریست
+    var accuracyExpanded by remember { mutableStateOf(false) }
+    var accuracyResetKey by remember { mutableStateOf(0) }
 
     fun load() {
         scope.launch {
@@ -217,35 +237,80 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
         )
 
-        // 🚀 Sprint 15 (فاز ۴ / Commit 21): کارت کارنامهٔ دقت سیگنال‌ها
-        SignalAccuracyCard(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            accent = AGreen
-        )
+        // 🚀 Commit 96: کارنامهٔ جمع‌شونده + دکمه ریست
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = ACard),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { accuracyExpanded = !accuracyExpanded }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (accuracyExpanded) "▼" else "▶",
+                        fontSize = 12.sp,
+                        color = AGreen
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "📊 کارنامهٔ دقت سیگنال‌ها",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        onClick = { accuracyResetKey++ },
+                        colors = ButtonDefaults.buttonColors(containerColor = AGray.copy(alpha = 0.3f)),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("🔄 ریست", fontSize = 10.sp, color = Color.White)
+                    }
+                }
+
+                AnimatedVisibility(visible = accuracyExpanded) {
+                    SignalAccuracyCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        accent = AGreen,
+                        key = accuracyResetKey
+                    )
+                }
+            }
+        }
 
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             FilterChip(
                 selected = filter == "ALL",
                 onClick = { filter = "ALL" },
-                label = { Text("همه ${alerts.size}") }
+                label = { Text("همه ${alerts.size}", fontSize = 11.sp) }
             )
             FilterChip(
                 selected = filter == "HOT",
                 onClick = { filter = "HOT" },
-                label = { Text("🔥 شدید") }
+                label = { Text("🔥 شدید", fontSize = 11.sp) }
             )
             FilterChip(
                 selected = filter == "MID",
                 onClick = { filter = "MID" },
-                label = { Text("⚠️ متوسط") }
+                label = { Text("⚠️ متوسط", fontSize = 11.sp) }
             )
             FilterChip(
                 selected = filter == "EARLY",
                 onClick = { filter = "EARLY" },
-                label = { Text("👀 زودهنگام") }
+                label = { Text("👀 زودهنگام", fontSize = 11.sp) }
             )
         }
 
@@ -281,11 +346,16 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(alerts) { a ->
-                    AlertSmartCard(a, platformMap = platformMap, ctx = ctx, onClick = { onCoinClick(a.coin) })
+                items(alerts, key = { it.coin.id }) { a ->
+                    AlertSmartCard(
+                        a = a,
+                        platformMap = platformMap,
+                        ctx = ctx,
+                        onClick = { onCoinClick(a.coin) }
+                    )
                 }
             }
         }
@@ -305,102 +375,111 @@ private fun AlertSmartCard(
     val contract = platformContractOf(platformMap, c.id)
 
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp),
+        color = ACard,
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
+            // خط ۱: emoji + symbol + level + early + score
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (isPump) "🚀" else "🩸", fontSize = 22.sp)
-                Spacer(Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            c.symbol.uppercase(Locale.US),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = Color.White
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(levelOf(a.score), fontSize = 10.sp, color = AGold)
-                        if (a.early) {
-                            Spacer(Modifier.width(4.dp))
-                            Text("⏰ زودهنگام", fontSize = 10.sp, color = ABlue)
-                        }
-                    }
-                    Text(
-                        c.name,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
+                Text(
+                    if (isPump) "🚀" else "🩸",
+                    fontSize = 16.sp
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    c.symbol.uppercase(Locale.US),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp,
+                    color = Color.White
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(levelOf(a.score), fontSize = 9.sp, color = AGold)
+                if (a.early) {
+                    Spacer(Modifier.width(4.dp))
+                    Text("⏰", fontSize = 9.sp, color = ABlue)
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        "${a.score}/100",
-                        color = sideColor,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 16.sp
-                    )
-                    Text(
-                        String.format(Locale.US, "$%,.4f", c.current_price),
-                        fontSize = 12.sp
-                    )
-                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${a.score}/100",
+                    color = sideColor,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp
+                )
             }
 
-            ContractRow(ctx, contract)
+            // خط ۲: name + price
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    c.name,
+                    fontSize = 10.sp,
+                    color = AGray,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    String.format(Locale.US, "$%,.4f", c.current_price),
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
+            // خط ۳: کانترکت (همیشه نمایش داده می‌شود)
+            ContractRow(ctx, contract, c.id)
+
+            // خط ۴: آمار درصدی در یک خط
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "۱س: ${String.format(Locale.US, "%+.2f%%", c.change1h ?: 0.0)}",
-                    fontSize = 12.sp,
+                    "۱س: ${String.format(Locale.US, "%+.1f%%", c.change1h ?: 0.0)}",
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = if ((c.change1h ?: 0.0) >= 0) AGreen else ARed
                 )
                 Text(
-                    "۲۴س: ${String.format(Locale.US, "%+.2f%%", c.price_change_percentage_24h ?: 0.0)}",
-                    fontSize = 12.sp,
+                    "۲۴س: ${String.format(Locale.US, "%+.1f%%", c.price_change_percentage_24h ?: 0.0)}",
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = if ((c.price_change_percentage_24h ?: 0.0) >= 0) AGreen else ARed
                 )
                 Text(
                     "۷روز: ${String.format(Locale.US, "%+.1f%%", c.change7d ?: 0.0)}",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    fontSize = 10.sp,
+                    color = AGray
                 )
             }
 
+            // خط ۵: progress bar جمع‌وجور
             val high = c.high24h ?: 0.0
             val low = c.low24h ?: 0.0
             if (high > low) {
                 val pos = ((c.current_price - low) / (high - low)).toFloat().coerceIn(0f, 1f)
                 LinearProgressIndicator(
                     progress = { pos },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp),
                     color = sideColor
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("کف: ${String.format(Locale.US, "$%.4f", low)}", fontSize = 10.sp, color = AGreen)
-                    Text("سقف: ${String.format(Locale.US, "$%.4f", high)}", fontSize = 10.sp, color = ARed)
-                }
             }
 
-            a.reasons.take(3).forEach { r ->
+            // خط ۶: فقط اولین دلیل (صرفه‌جویی در فضا)
+            if (a.reasons.isNotEmpty()) {
                 Text(
-                    "• $r",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    "• ${a.reasons.first()}",
+                    fontSize = 10.sp,
+                    color = AGold
                 )
             }
         }
