@@ -48,22 +48,20 @@ private val VPurple = Color(0xFFCE93D8)
 private val VOrange = Color(0xFFFFA726)
 private val VCard = Color(0xFF1A2230)
 
+// 🚀 Commit 100: holder تک‌نمونه — state کیف پول حتی بعد از خروج از تب زنده می‌ماند.
+// عمداً از viewModel() استفاده نکردیم تا dependency جدید لازم نشود (ریسک صفر).
+internal object WalletVMHolder {
+    val vm: WalletViewModel = WalletViewModel()
+}
+
 @Composable
 fun WalletScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val viewModel = WalletVMHolder.vm
 
     var subTab by remember { mutableStateOf(0) }
     var infoText by remember { mutableStateOf("") }
-
-    var chain by remember { mutableStateOf(CHAINS[0]) }
-    var address by remember { mutableStateOf("") }
-    var holdings by remember { mutableStateOf<List<WalletHolding>>(emptyList()) }
-    var txs by remember { mutableStateOf<List<WalletTx>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var total by remember { mutableStateOf(0.0) }
-    var info by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         FavStore.load(context)
@@ -74,9 +72,9 @@ fun WalletScreen() {
         try {
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText(label, value))
-            info = successMessage
+            viewModel.info = successMessage
         } catch (_: Exception) {
-            info = "⚠️ کپی ناموفق بود"
+            viewModel.info = "⚠️ کپی ناموفق بود"
         }
     }
 
@@ -91,23 +89,32 @@ fun WalletScreen() {
             role = note, huntedAtMs = System.currentTimeMillis(), multiplier = multiplier,
             boughtUsd = boughtUsd, maxSingleUsd = maxSingleUsd, soldUsd = soldUsd, txCount = txCount
         )
-        info = "❤️ نهنگ «$symbol • $note» با ضریب " +
+        viewModel.info = "❤️ نهنگ «$symbol • $note» با ضریب " +
             String.format(Locale.US, "%.1f", multiplier) + "x و خرید " +
             String.format(Locale.US, "$%,.0f", boughtUsd) + " به پرونده اضافه شد"
     }
 
     fun check() {
-        val addr = address.trim().replace(Regex("[^A-Za-z0-9]"), "")
-        if (addr.isEmpty()) { error = "❌ آدرس کیف پول رو وارد کن"; return }
-        val cfg = chain
+        val addr = viewModel.address.trim().replace(Regex("[^A-Za-z0-9]"), "")
+        if (addr.isEmpty()) { viewModel.error = "❌ آدرس کیف پول رو وارد کن"; return }
+        val cfg = viewModel.chain
         scope.launch {
-            loading = true; error = null; holdings = emptyList(); txs = emptyList(); total = 0.0
-            info = "🔍 در حال اسکن کیف پول..."
+            viewModel.loading = true
+            viewModel.error = null
+            viewModel.holdings = emptyList()
+            viewModel.txs = emptyList()
+            viewModel.total = 0.0
+            viewModel.info = "🔍 در حال اسکن کیف پول..."
             try {
                 val result = runWalletScan(addr, cfg)
-                holdings = result.holdings; txs = result.txs; total = result.total; info = result.info
-            } catch (t: Throwable) { error = "⚠️ خطا: ${t.message}" }
-            loading = false
+                viewModel.holdings = result.holdings
+                viewModel.txs = result.txs
+                viewModel.total = result.total
+                viewModel.info = result.info
+            } catch (t: Throwable) {
+                viewModel.error = "⚠️ خطا: ${t.message}"
+            }
+            viewModel.loading = false
         }
     }
 
@@ -140,8 +147,7 @@ fun WalletScreen() {
         }
 
         // 🚀 Commit 99: تب موتورها همیشه در composition می‌ماند تا state و اسکن‌های
-        // در حال اجرا (موتور ۳ و ۵) هنگام جابه‌جایی زیرتب‌ها نمیرند.
-        // وقتی تب دیگری فعال است، اندازه‌اش صفر می‌شود (compose هست، دیده نمی‌شود).
+        // در حال اجرا هنگام جابه‌جایی زیرتب‌ها نمیرند.
         Box(modifier = Modifier.weight(1f)) {
             Column(
                 modifier = Modifier
@@ -155,7 +161,7 @@ fun WalletScreen() {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     CHAINS.forEach { c ->
-                        FilterChip(selected = chain.key == c.key, onClick = { chain = c }, label = { Text(c.label, fontSize = 10.sp) })
+                        FilterChip(selected = viewModel.chain.key == c.key, onClick = { viewModel.chain = c }, label = { Text(c.label, fontSize = 10.sp) })
                     }
                 }
 
@@ -167,34 +173,34 @@ fun WalletScreen() {
                             Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده + سود/زیان واقعی." },
                                 colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                         }
-                        TextField(value = address, onValueChange = { address = it },
+                        TextField(value = viewModel.address, onValueChange = { viewModel.address = it },
                             placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
                             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
-                        Button(onClick = { check() }, enabled = !loading,
+                        Button(onClick = { check() }, enabled = !viewModel.loading,
                             colors = ButtonDefaults.buttonColors(containerColor = VBlue),
                             shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            Text(if (loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول", fontSize = 12.sp)
+                            Text(if (viewModel.loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول", fontSize = 12.sp)
                         }
-                        if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = VGreen)
+                        if (viewModel.info.isNotEmpty()) Text(viewModel.info, fontSize = 10.sp, color = VGreen)
                     }
                 }
 
-                if (error != null) Text(error ?: "", fontSize = 10.sp, color = VRed)
+                if (viewModel.error != null) Text(viewModel.error ?: "", fontSize = 10.sp, color = VRed)
 
                 HoldingsSection(
-                    holdings = holdings,
-                    total = total,
+                    holdings = viewModel.holdings,
+                    total = viewModel.total,
                     onCopyContract = { c -> copyToClipboard("contract", c, "📋 کانترکت کپی شد") },
-                    onInfo = { m -> info = m }
+                    onInfo = { m -> viewModel.info = m }
                 )
 
-                TxHistorySection(txs = txs)
+                TxHistorySection(txs = viewModel.txs)
 
                 WalletHistorySection()
 
                 ChainForensicsSection(
                     onCopy = { a -> copyToClipboard("addr", a, "📋 آدرس کپی شد") },
-                    onInspect = { a -> address = a; check() },
+                    onInspect = { a -> viewModel.address = a; check() },
                     onStar = { a, s, sc, n, b, ms, sd, tc -> saveStar(a, s, sc, n, b, ms, sd, tc) }
                 )
 
@@ -208,7 +214,7 @@ fun WalletScreen() {
                         2 -> AlertsPage()
                         3 -> TrashPage()
                         4 -> PrivacyCenterScreen()
-                        5 -> ApprovalsTab(address = address, chain = chain, onInfo = { m -> infoText = m })
+                        5 -> ApprovalsTab(address = viewModel.address, chain = viewModel.chain, onInfo = { m -> infoText = m })
                     }
                 }
             }
