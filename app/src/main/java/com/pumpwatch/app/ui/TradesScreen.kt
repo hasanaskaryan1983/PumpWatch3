@@ -175,20 +175,11 @@ private fun saveAlloc(ctx: Context, a: Map<String, Int>) {
 
 private fun usd(v: Double): String = String.format(Locale.US, "$%,.2f", v)
 
-/**
- * 🚀 Commit 87-fix: فرمت فشردهٔ دلار برای برچسب آستانهٔ نهنگ.
- *
- * قبلاً برچسب «بالای ۱۰۰K» hardcode بود. حالا آستانه از
- * `WhaleFlowResult.adaptiveThresholdUsed` خوانده می‌شود و با این
- * helper نمایش داده می‌شود تا برچسب همیشه صادق باشد.
- */
 private fun compactUsd(v: Double): String = when {
     v >= 1_000_000 -> String.format(Locale.US, "$%.1fM", v / 1_000_000)
     v >= 1_000 -> String.format(Locale.US, "$%.0fK", v / 1_000)
     else -> String.format(Locale.US, "$%.0f", v)
 }
-
-// ---------- 🚀 Sprint 13 (F6d): محاسبات ژورنال ----------
 
 private fun rMultiple(t: PaperTrade): Double {
     if (t.entry <= 0.0 || t.stopPct <= 0.0) return 0.0
@@ -262,7 +253,6 @@ fun TradesScreen() {
     var consensus by remember { mutableStateOf<List<ConsensusPick>>(emptyList()) }
     var realWhale by remember { mutableStateOf<Map<String, WhaleFlowResult>>(emptyMap()) }
 
-    // 🚀 Sprint 13 (F6d): sub-tab switcher بین Paper و Journal
     var journalTab by remember { mutableStateOf(false) }
 
     var mSymbol by remember { mutableStateOf("") }
@@ -318,6 +308,7 @@ fun TradesScreen() {
         return if (px <= t.stop) { closeTrade(t, px); true } else false
     }
 
+    // 🚀 Commit 98: استخراج symbol واقعی از DEX pool
     fun findPrice() {
         val q = mSymbol.trim()
         if (q.isEmpty()) return
@@ -327,6 +318,7 @@ fun TradesScreen() {
             mPrice = null
             try {
                 val res = withContext(Dispatchers.IO) {
+                    // ابتدا CEX (CoinGecko + Binance)
                     val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
                     coins.firstOrNull { it.symbol.equals(q, true) }?.let {
                         return@withContext Triple(it.current_price, "CEX #${it.market_cap_rank ?: "-"}", it.symbol.uppercase(Locale.US))
@@ -335,13 +327,23 @@ fun TradesScreen() {
                         val kl = BinanceClient.api.klines("${q.uppercase(Locale.US)}USDT", "1h", 5)
                         if (kl.isNotEmpty()) return@withContext Triple(kl.last()[4].asDouble, "Binance", q.uppercase(Locale.US))
                     } catch (_: Exception) { }
+                    
+                    // سپس DEX (GeckoTerminal)
                     val pool = try { GeckoTerminal.api.searchPools(q).data?.firstOrNull { it.attributes != null } } catch (_: Exception) { null }
-                    pool?.attributes?.priceUsd?.toDoubleOrNull()?.let { return@withContext Triple(it, "DEX", q.uppercase(Locale.US)) }
+                    pool?.let { p ->
+                        val price = p.attributes?.priceUsd?.toDoubleOrNull()
+                        if (price != null) {
+                            // 🚀 Commit 98: استخراج symbol واقعی از pool name
+                            val fullName = p.attributes?.name ?: "?"
+                            val sym = fullName.split("/").firstOrNull()?.trim() ?: q.uppercase(Locale.US)
+                            return@withContext Triple(price, "DEX", sym)
+                        }
+                    }
                     null
                 }
                 if (res != null) {
                     mPrice = res.first; mSymbol = res.third
-                    mStatus = "✅ قیمت: ${usd(res.first)} (${res.second})"
+                    mStatus = "✅ قیمت: ${usd(res.first)} (${res.second}) • نماد: ${res.third}"
                 } else mStatus = "❌ ارز پیدا نشد"
             } catch (t: Throwable) { mStatus = "⚠️ خطا: ${t.message}" }
             mLoading = false
@@ -432,10 +434,6 @@ fun TradesScreen() {
                     consensus.take(6).map { pk ->
                         async(Dispatchers.IO) {
                             try {
-                                // 🚀 Commit 87-fix: named arguments — signature جدید analyze()
-                                // پارامتر volume24h وسط signature اضافه شده، پس positional
-                                // call قدیمی (sym, 100_000.0, 1000) به‌اشتباه 1000 را به
-                                // whaleThresholdUsd: Double? می‌داد (خطای compile CI).
                                 val r = WhaleFlowEngine.analyze(
                                     symbol = pk.symbol + "USDT",
                                     whaleThresholdUsd = 100_000.0,
@@ -557,7 +555,6 @@ fun TradesScreen() {
             })
         }
 
-        // 🚀 Sprint 13 (F6d): sub-tab switcher
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -653,8 +650,6 @@ fun TradesScreen() {
                             Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
                             Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
                         }
-                        // 🚀 Sprint 14 (مرحله ۲ / Commit 6A): منبع واقعی کندل‌های امتیازدهی
-                        // فقط برای پیک‌های CEX — پیک‌های DEX کندل صرافی ندارند و برچسب دروغ نمی‌گیرند
                         if (!pk.isDex) {
                             Text(
                                 "🕯️ کندل‌ها: ${klineSourceLabel(BinanceClient.api.lastSource(pk.symbol))} • موتور امتیاز: ScoringEngine v1",
@@ -663,8 +658,6 @@ fun TradesScreen() {
                         }
                         realWhale[pk.symbol]?.let { rw ->
                             Text(
-                                // 🚀 Sprint 14 (Commit 5): منبع واقعی جریان نهنگ‌ها — نه برچسب سخت‌کدشده
-                                // 🚀 Commit 87-fix: آستانه از adaptiveThresholdUsed خوانده می‌شود، نه hardcode «۱۰۰K»
                                 "🐳 جریان نهنگ‌ها (${rw.sourceLabel()}): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ${compactUsd(rw.adaptiveThresholdUsed)}",
                                 fontSize = 9.sp, fontWeight = FontWeight.Bold,
                                 color = if (rw.buyRatio >= 0.6) TGreen else if (rw.buyRatio <= 0.4) TRed else TGray
@@ -751,7 +744,7 @@ fun TradesScreen() {
             }
 
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("⚙️ تقسیم‌بندی دارایی ربات (مجموع: $allocSum٪)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TBlue)
                     TIERS.forEach { (name, _) ->
                         val v = alloc[name] ?: 0
@@ -778,6 +771,7 @@ fun TradesScreen() {
             }
             openTrades().forEach { t ->
                 val pnl = if (t.entry > 0) (t.price - t.entry) / t.entry * 100 else 0.0
+                val pnlUsd = t.sizeUsd * pnl / 100.0
                 Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -789,6 +783,51 @@ fun TradesScreen() {
                             Text(String.format(Locale.US, "%+.2f%%", pnl), fontWeight = FontWeight.Black, fontSize = 14.sp,
                                 color = if (pnl >= 0) TGreen else TRed)
                         }
+                        
+                        // 🚀 Commit 98: خط برجسته PnL زنده
+                        if (t.entry > 0 && t.price > 0) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    if (pnl >= 0) "📈" else "📉",
+                                    fontSize = 16.sp
+                                )
+                                Text(
+                                    if (pnl >= 0) "سود زنده:" else "ضرر زنده:",
+                                    fontSize = 11.sp,
+                                    color = TGray
+                                )
+                                Text(
+                                    String.format(Locale.US, "%+.2f%%", pnl),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (pnl >= 0) TGreen else TRed
+                                )
+                                Text(
+                                    "(${String.format(Locale.US, "%+.2f$", pnlUsd)})",
+                                    fontSize = 11.sp,
+                                    color = if (pnl >= 0) TGreen else TRed
+                                )
+                                Spacer(Modifier.weight(1f))
+                                // Badge PROFIT / LOSS
+                                Surface(
+                                    color = if (pnl >= 0) TGreen.copy(alpha = 0.2f) else TRed.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        if (pnl >= 0) "PROFIT" else "LOSS",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = if (pnl >= 0) TGreen else TRed,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                        
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = TGray)
                             Text("الان: ${usd(t.price)}", fontSize = 9.sp, color = TGray)
@@ -819,10 +858,6 @@ fun TradesScreen() {
         }
     }
 }
-
-// ====================================================================
-// =====================  📓 ژورنال پیشرفته  =========================
-// ====================================================================
 
 @Composable
 private fun JournalContent(allTrades: List<PaperTrade>) {
@@ -983,126 +1018,3 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                         Text("🏷️ عملکرد بر اساس دستهٔ ارز", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
                         Text("کدام دسته برای تو سودآورتر بوده؟", fontSize = 9.sp, color = TGray)
                         tierStats.entries
-                            .sortedByDescending { it.value.pnlUsd }
-                            .forEach { (tier, s) ->
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(tier, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                    Text("${s.count} معامله", fontSize = 10.sp, color = TGray)
-                                    Text(
-                                        String.format(Locale.US, "%.0f%% برد", s.winRate),
-                                        fontSize = 10.sp, color = if (s.winRate >= 50) TGreen else TRed
-                                    )
-                                    Text(
-                                        String.format(Locale.US, "%+.1f$", s.pnlUsd),
-                                        fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                                        color = if (s.pnlUsd >= 0) TGreen else TRed
-                                    )
-                                }
-                            }
-                    }
-                }
-            }
-
-            Text("📋 ۳۰ معاملهٔ اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TPurple)
-            closed.sortedByDescending { it.closeTime }.take(30).forEach { t ->
-                Card(colors = CardDefaults.cardColors(containerColor = TCardB), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "${if (t.pnl > 0) "✅" else "❌"} ${t.symbol}",
-                                fontWeight = FontWeight.Black, fontSize = 13.sp, color = Color.White
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text("• ${t.tier}", fontSize = 10.sp, color = TGray)
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                String.format(Locale.US, "%+.2f%%", t.pnl),
-                                fontWeight = FontWeight.Black, fontSize = 13.sp,
-                                color = if (t.pnl > 0) TGreen else TRed
-                            )
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = TGray)
-                            Text("خروج: ${usd(t.price)}", fontSize = 9.sp, color = TGray)
-                            Text("امتیاز: ${t.score}", fontSize = 9.sp, color = TGold)
-                        }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("سایز: ${usd(t.sizeUsd)}", fontSize = 9.sp, color = TGray)
-                            Text(
-                                "PnL $: ${String.format(Locale.US, "%+.2f", t.pnl * t.sizeUsd / 100)}",
-                                fontSize = 9.sp, color = if (t.pnl >= 0) TGreen else TRed
-                            )
-                            Text(
-                                "R: ${String.format(Locale.US, "%+.2f", rMultiple(t))}",
-                                fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                                color = if (rMultiple(t) >= 1) TGreen else if (rMultiple(t) >= 0) TGold else TRed
-                            )
-                        }
-                        if (t.trailing == false) Text("📌 استاپ ثابت", fontSize = 8.sp, color = TGold)
-                        else if (t.target < 0) Text("🏃 حالت دونده", fontSize = 8.sp, color = TGold)
-                        else Text("🔄 تریلینگ فعال", fontSize = 8.sp, color = TBlue)
-                    }
-                }
-            }
-
-            Text(
-                "💡 تفسیر ژورنال: وین‌ریت ≥ ۵۰٪ + Profit Factor ≥ ۱.۵ + R میانگین ≥ ۰.۵ = استراتژی سودآور. " +
-                "Max DD < ۲۰٪ = ریسک کنترل‌شده. اگر هر کدام پایین‌تر است، تنظیمات ربات را بازبینی کن.",
-                fontSize = 9.sp, color = TGold, lineHeight = 15.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun RowScope.Stat(label: String, value: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-        Text(label, fontSize = 9.sp, color = TGray)
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Black, color = color)
-    }
-}
-
-@Composable
-private fun EquityChart(curve: List<Double>) {
-    if (curve.size < 2) {
-        Box(modifier = Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.Center) {
-            Text("داده کافی نیست", fontSize = 10.sp, color = TGray)
-        }
-        return
-    }
-    Canvas(modifier = Modifier.fillMaxWidth().height(180.dp)) {
-        val minV = curve.min().coerceAtMost(100.0)
-        val maxV = curve.max().coerceAtLeast(100.0)
-        val range = if (maxV > minV) maxV - minV else 1.0
-        val w = size.width
-        val h = size.height
-        val pad = 20f
-
-        fun y(v: Double) = pad + ((maxV - v) / range * (h - 2 * pad)).toFloat()
-
-        drawLine(
-            TGray.copy(alpha = 0.3f),
-            Offset(0f, y(100.0)),
-            Offset(w, y(100.0)),
-            strokeWidth = 1f
-        )
-
-        for (i in 1 until curve.size) {
-            val x1 = (i - 1).toFloat() / (curve.size - 1) * w
-            val x2 = i.toFloat() / (curve.size - 1) * w
-            val col = if (curve[i] >= curve[i - 1]) TGreen else TRed
-            drawLine(col, Offset(x1, y(curve[i - 1])), Offset(x2, y(curve[i])), strokeWidth = 3f)
-        }
-
-        val paint = android.graphics.Paint().apply {
-            textSize = 22f
-            color = android.graphics.Color.GRAY
-        }
-        drawContext.canvas.nativeCanvas.drawText(
-            String.format(Locale.US, "$%.0f", maxV), 4f, y(maxV) + 14f, paint
-        )
-        drawContext.canvas.nativeCanvas.drawText(
-            String.format(Locale.US, "$%.0f", minV), 4f, y(minV) - 4f, paint
-        )
-    }
-}
