@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -66,9 +67,7 @@ fun WalletScreen() {
 
     LaunchedEffect(Unit) {
         FavStore.load(context)
-        scope.launch {
-            scanStarred(context)
-        }
+        scope.launch { scanStarred(context) }
     }
 
     fun copyToClipboard(label: String, value: String, successMessage: String) {
@@ -82,269 +81,111 @@ fun WalletScreen() {
     }
 
     fun saveStar(
-        addr: String,
-        symbol: String,
-        score: Int,
-        note: String,
-        boughtUsd: Double,
-        maxSingleUsd: Double,
-        soldUsd: Double,
-        txCount: Int
+        addr: String, symbol: String, score: Int, note: String,
+        boughtUsd: Double, maxSingleUsd: Double, soldUsd: Double, txCount: Int
     ) {
         FavStore.load(context)
         val multiplier = score / 10.0
         FavStore.addFav(
-            ctx = context,
-            addr = addr,
-            note = note,
-            starred = true,
-            symbol = symbol,
-            role = note,
-            huntedAtMs = System.currentTimeMillis(),
-            multiplier = multiplier,
-            boughtUsd = boughtUsd,
-            maxSingleUsd = maxSingleUsd,
-            soldUsd = soldUsd,
-            txCount = txCount
+            ctx = context, addr = addr, note = note, starred = true, symbol = symbol,
+            role = note, huntedAtMs = System.currentTimeMillis(), multiplier = multiplier,
+            boughtUsd = boughtUsd, maxSingleUsd = maxSingleUsd, soldUsd = soldUsd, txCount = txCount
         )
         info = "❤️ نهنگ «$symbol • $note» با ضریب " +
-            String.format(Locale.US, "%.1f", multiplier) +
-            "x و خرید " +
-            String.format(Locale.US, "$%,.0f", boughtUsd) +
-            " به پرونده اضافه شد"
+            String.format(Locale.US, "%.1f", multiplier) + "x و خرید " +
+            String.format(Locale.US, "$%,.0f", boughtUsd) + " به پرونده اضافه شد"
     }
 
     fun check() {
         val addr = address.trim().replace(Regex("[^A-Za-z0-9]"), "")
-        if (addr.isEmpty()) {
-            error = "❌ آدرس کیف پول رو وارد کن"
-            return
-        }
-
+        if (addr.isEmpty()) { error = "❌ آدرس کیف پول رو وارد کن"; return }
         val cfg = chain
         scope.launch {
-            loading = true
-            error = null
-            holdings = emptyList()
-            txs = emptyList()
-            total = 0.0
+            loading = true; error = null; holdings = emptyList(); txs = emptyList(); total = 0.0
             info = "🔍 در حال اسکن کیف پول..."
-
             try {
                 val result = runWalletScan(addr, cfg)
-                holdings = result.holdings
-                txs = result.txs
-                total = result.total
-                info = result.info
-            } catch (t: Throwable) {
-                error = "⚠️ خطا: ${t.message}"
-            }
-
+                holdings = result.holdings; txs = result.txs; total = result.total; info = result.info
+            } catch (t: Throwable) { error = "⚠️ خطا: ${t.message}" }
             loading = false
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                "👛 کارآگاه کیف پول",
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = VGreen
-            )
-
+            Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                FilterChip(
-                    selected = subTab == 0,
-                    onClick = { subTab = 0 },
-                    label = { Text("⚙️ موتورها", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = subTab == 1,
-                    onClick = { subTab = 1 },
-                    label = { Text("❤️ مورد پسند", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = subTab == 2,
-                    onClick = { subTab = 2 },
-                    label = {
-                        Text(
-                            if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار",
-                            fontSize = 11.sp
-                        )
-                    }
-                )
-                FilterChip(
-                    selected = subTab == 3,
-                    onClick = { subTab = 3 },
-                    label = { Text("♻️ سطل", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = subTab == 4,
-                    onClick = { subTab = 4 },
-                    label = { Text("🔒 حریم", fontSize = 11.sp) }
-                )
-                FilterChip(
-                    selected = subTab == 5,
-                    onClick = { subTab = 5 },
-                    label = { Text("🔐 Approvals", fontSize = 11.sp) }
-                )
+                FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("⚙️ موتورها", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 2, onClick = { subTab = 2 },
+                    label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 4, onClick = { subTab = 4 }, label = { Text("🔒 حریم", fontSize = 11.sp) })
+                FilterChip(selected = subTab == 5, onClick = { subTab = 5 }, label = { Text("🔐 Approvals", fontSize = 11.sp) })
             }
-
             if (infoText.isNotEmpty()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = VCard),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            infoText,
-                            fontSize = 10.sp,
-                            color = VGreen,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Button(
-                            onClick = { infoText = "" },
-                            colors = ButtonDefaults.buttonColors(containerColor = VCard),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text("✖", fontSize = 10.sp)
-                        }
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(infoText, fontSize = 10.sp, color = VGreen, modifier = Modifier.weight(1f))
+                        Button(onClick = { infoText = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("✖", fontSize = 10.sp) }
                     }
                 }
             }
         }
 
-        when (subTab) {
-            1 -> Box(modifier = Modifier.weight(1f)) {
-                FavoritesPage()
-            }
-
-            2 -> Box(modifier = Modifier.weight(1f)) {
-                AlertsPage()
-            }
-
-            3 -> Box(modifier = Modifier.weight(1f)) {
-                TrashPage()
-            }
-
-            4 -> Box(modifier = Modifier.weight(1f)) {
-                PrivacyCenterScreen()
-            }
-
-            5 -> Box(modifier = Modifier.weight(1f)) {
-                ApprovalsTab(
-                    address = address,
-                    chain = chain,
-                    onInfo = { msg -> infoText = msg }
-                )
-            }
-
-            else -> Column(
+        // 🚀 Commit 99: تب موتورها همیشه در composition می‌ماند تا state و اسکن‌های
+        // در حال اجرا (موتور ۳ و ۵) هنگام جابه‌جایی زیرتب‌ها نمیرند.
+        // وقتی تب دیگری فعال است، اندازه‌اش صفر می‌شود (compose هست، دیده نمی‌شود).
+        Box(modifier = Modifier.weight(1f)) {
+            Column(
                 modifier = Modifier
-                    .weight(1f)
+                    .then(if (subTab == 0) Modifier.fillMaxSize() else Modifier.size(0.dp))
                     .verticalScroll(rememberScrollState())
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     CHAINS.forEach { c ->
-                        FilterChip(
-                            selected = chain.key == c.key,
-                            onClick = { chain = c },
-                            label = { Text(c.label, fontSize = 10.sp) }
-                        )
+                        FilterChip(selected = chain.key == c.key, onClick = { chain = c }, label = { Text(c.label, fontSize = 10.sp) })
                     }
                 }
 
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = VCard),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                "🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = VBlue,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Button(
-                                onClick = {
-                                    infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده + سود/زیان واقعی."
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = VCard),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text("ℹ️", fontSize = 10.sp)
-                            }
+                            Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)",
+                                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                            Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده + سود/زیان واقعی." },
+                                colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
                         }
-
-                        TextField(
-                            value = address,
-                            onValueChange = { address = it },
+                        TextField(value = address, onValueChange = { address = it },
                             placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            singleLine = true
-                        )
-
-                        Button(
-                            onClick = { check() },
-                            enabled = !loading,
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                        Button(onClick = { check() }, enabled = !loading,
                             colors = ButtonDefaults.buttonColors(containerColor = VBlue),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                if (loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول",
-                                fontSize = 12.sp
-                            )
+                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Text(if (loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول", fontSize = 12.sp)
                         }
-
-                        if (info.isNotEmpty()) {
-                            Text(info, fontSize = 10.sp, color = VGreen)
-                        }
+                        if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = VGreen)
                     }
                 }
 
-                if (error != null) {
-                    Text(error ?: "", fontSize = 10.sp, color = VRed)
-                }
+                if (error != null) Text(error ?: "", fontSize = 10.sp, color = VRed)
 
                 HoldingsSection(
                     holdings = holdings,
                     total = total,
-                    onCopyContract = { contract ->
-                        copyToClipboard("contract", contract, "📋 کانترکت کپی شد")
-                    },
-                    onInfo = { msg ->
-                        info = msg
-                    }
+                    onCopyContract = { c -> copyToClipboard("contract", c, "📋 کانترکت کپی شد") },
+                    onInfo = { m -> info = m }
                 )
 
                 TxHistorySection(txs = txs)
@@ -352,23 +193,24 @@ fun WalletScreen() {
                 WalletHistorySection()
 
                 ChainForensicsSection(
-                    onCopy = { addr ->
-                        copyToClipboard("addr", addr, "📋 آدرس کپی شد")
-                    },
-                    onInspect = { addr ->
-                        address = addr
-                        check()
-                    },
-                    onStar = { addr, symbol, score, note, bought, maxSingle, sold, txCount ->
-                        saveStar(addr, symbol, score, note, bought, maxSingle, sold, txCount)
-                    }
+                    onCopy = { a -> copyToClipboard("addr", a, "📋 آدرس کپی شد") },
+                    onInspect = { a -> address = a; check() },
+                    onStar = { a, s, sc, n, b, ms, sd, tc -> saveStar(a, s, sc, n, b, ms, sd, tc) }
                 )
 
-                Text(
-                    "⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.",
-                    fontSize = 9.sp,
-                    color = VGold
-                )
+                Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = VGold)
+            }
+
+            if (subTab != 0) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when (subTab) {
+                        1 -> FavoritesPage()
+                        2 -> AlertsPage()
+                        3 -> TrashPage()
+                        4 -> PrivacyCenterScreen()
+                        5 -> ApprovalsTab(address = address, chain = chain, onInfo = { m -> infoText = m })
+                    }
+                }
             }
         }
     }
