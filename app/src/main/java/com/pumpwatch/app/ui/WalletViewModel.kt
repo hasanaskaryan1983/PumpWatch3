@@ -5,7 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-class WalletViewModel : ViewModel() {
+internal class WalletViewModel : ViewModel() {
     
     // 🚀 Commit 100: Stateهای اصلی که باید بین tab switchها حفظ شوند
     var address by mutableStateOf("")
