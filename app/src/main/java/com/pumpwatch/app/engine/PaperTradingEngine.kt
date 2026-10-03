@@ -8,6 +8,18 @@ import com.pumpwatch.app.store.PicksStore
 import com.pumpwatch.app.store.TradeStore
 import java.util.UUID
 
+// 🚀 Commit 105: ساختار ساده برای سیگنال FUT که از Dashboard می‌آید
+data class FutSignalForPaper(
+    val coinId: String,
+    val symbol: String,
+    val base: String,
+    val direction: String,     // "LONG" | "SHORT"
+    val entry: Double,
+    val stopLoss: Double,
+    val target: Double,
+    val score: Int
+)
+
 object PaperTradingEngine {
 
     suspend fun openFromSignal(ctx: Context, sig: SignalResult) {
@@ -50,6 +62,50 @@ object PaperTradingEngine {
         TradeStore.upsert(ctx, trade)
     }
 
+    // 🚀 Commit 105: ورودی مستقیم از سیگنال فیوچرز Dashboard
+    suspend fun openFromFutSignal(ctx: Context, sig: FutSignalForPaper): Boolean {
+        if (!TradeStore.isEnabled(ctx)) return false
+
+        val openIds = TradeStore.load(ctx)
+            .filter { it.status == "OPEN" }
+            .map { it.coinId }
+            .toSet()
+        if (sig.coinId in openIds) return false
+
+        val venue = try { BinanceClient.api.lastSource(sig.symbol) } catch (_: Exception) { "binance" }
+        val fillTime = System.currentTimeMillis()
+        val side = if (sig.direction == "LONG") "PUMP" else "DUMP"
+
+        val trade = Trade(
+            id = UUID.randomUUID().toString(),
+            coinId = sig.coinId,
+            symbol = sig.symbol,
+            name = sig.base,
+            side = side,
+            mode = "FUT",
+            entryPrice = sig.entry,
+            currentPrice = sig.entry,
+            entryTime = fillTime,
+            exitTime = null,
+            exitPrice = null,
+            initialStop = sig.stopLoss,
+            currentStop = sig.stopLoss,
+            target1 = sig.target,
+            target2 = sig.target,
+            exitReason = null,
+            status = "OPEN",
+            source = "dashboard",
+            venue = venue,
+            fillTime = fillTime,
+            slippagePct = 0.1,
+            feePct = 0.1,
+            ledgerVersion = 3,
+            sizeUsd = 100.0
+        )
+        TradeStore.upsert(ctx, trade)
+        return true
+    }
+
     suspend fun checkAndClose(ctx: Context): List<Trade> {
         val trades = TradeStore.load(ctx).filter { it.status == "OPEN" }
         if (trades.isEmpty()) return emptyList()
@@ -84,11 +140,10 @@ object PaperTradingEngine {
                 target = t.target2,
                 closes = closes,
                 livePrice = price,
-                partialClose = t.partialClose   // 🚀 Commit 11
+                partialClose = t.partialClose
             )
         )
 
-        // 🚀 Commit 11: PARTIAL action
         if (dec.action == "PARTIAL") {
             return t.copy(
                 currentPrice = price,
