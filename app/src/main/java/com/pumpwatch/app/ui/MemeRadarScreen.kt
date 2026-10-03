@@ -148,7 +148,8 @@ fun MemeRadarScreen() {
             loading = true
             error = null
             try {
-                val signals = MemeRadar.scan { _, _ -> }
+                // 🚀 Commit 104: sniperMode به موتور پاس داده می‌شود
+                val signals = MemeRadar.scan(sniperMode = sniperMode) { _, _ -> }
                 items = signals
                 if (signals.isEmpty()) {
                     error = if (MemeRadar.lastScanFailed) {
@@ -167,15 +168,8 @@ fun MemeRadarScreen() {
 
     LaunchedEffect(Unit) { scan() }
 
-    val displayItems = if (sniperMode) {
-        items.filter { 
-            it.ageHours < 24.0 && 
-            it.rugScore != null && it.rugScore >= 70 && 
-            it.liquidity >= 10_000.0 
-        }
-    } else {
-        items
-    }
+    // 🚀 Commit 104: حذف فیلتر کلاینت‌ساید — موتور خودش policy را اعمال می‌کند
+    val displayItems = items
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -205,10 +199,14 @@ fun MemeRadarScreen() {
         ) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // 🚀 Commit 104: متن UI از policy واقعی موتور خوانده می‌شود
                     if (sniperMode) {
+                        val policy = MemeRadar.lastPolicy
                         Surface(color = MGreen.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            Text("🎯 فقط توکن‌های زیر ۲۴ ساعت با Rug Score ≥ ۷۰ و نقدینگی ≥ ۱۰K$ نمایش داده می‌شوند.", 
-                                fontSize = 10.sp, color = MGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
+                            Text(
+                                "🎯 فقط توکن‌های زیر ${policy.maxAgeHours.toInt()} ساعت با Rug Score ≥ ${policy.minRugScore} و نقدینگی ≥ ${compact(policy.minLiquidityUsd)} نمایش داده می‌شوند.",
+                                fontSize = 10.sp, color = MGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp)
+                            )
                         }
                     } else {
                         Text("شناسایی قبل از پامپ • خروج قبل از دامپ", fontSize = 11.sp, color = MGray)
@@ -225,9 +223,9 @@ fun MemeRadarScreen() {
             } else if (error != null && displayItems.isEmpty()) {
                 item { Text(error ?: "", fontSize = 12.sp, color = MGold, textAlign = TextAlign.Center) }
             } else if (sniperMode && displayItems.isEmpty() && items.isNotEmpty()) {
-                item { 
-                    Text("😴 در حالت اسنایپر، توکن امن و تازه‌ای یافت نشد. فیلترها را غیرفعال کنید یا بعداً سر بزنید.", 
-                        fontSize = 12.sp, color = MGold, textAlign = TextAlign.Center) 
+                item {
+                    Text("😴 در حالت اسنایپر، توکن امن و تازه‌ای یافت نشد. فیلترها را غیرفعال کنید یا بعداً سر بزنید.",
+                        fontSize = 12.sp, color = MGold, textAlign = TextAlign.Center)
                 }
             } else {
                 itemsIndexed(displayItems) { i, m ->
@@ -292,7 +290,7 @@ fun MemeRadarScreen() {
                                 rug >= 60 -> "⚠️"
                                 else -> "🚨"
                             }
-                            
+
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 val rugLabel = if (rug == null) "$rugEmoji Rug Safety: UNKNOWN" else "$rugEmoji Rug Safety: $rug/100"
                                 Text(rugLabel, fontSize = 11.sp, color = rugColor, fontWeight = FontWeight.Bold)
@@ -335,8 +333,9 @@ fun MemeRadarScreen() {
                             val (exitText, exitColor) = exitFeasibility(m.liquidity)
                             Text(exitText, fontSize = 9.sp, color = exitColor, fontWeight = FontWeight.Bold)
 
+                            // 🚀 Commit 104: حجم ۲۴س واقعی (نه volumeH1 * 24)
                             val change24 = String.format(Locale.US, "%+.1f%%", m.changeH24)
-                            val vol24 = compact(m.volumeH1 * 24)
+                            val vol24 = compact(m.volumeH24)
                             Text("تغییر ۲۴س: $change24 • حجم ۲۴س: $vol24", fontSize = 9.sp, color = MGray)
 
                             ContractRow(context, m.contract)
