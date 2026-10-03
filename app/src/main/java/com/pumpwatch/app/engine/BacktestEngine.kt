@@ -5,21 +5,20 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * 🚀 Sprint 13 (F6b) + Sprint 14 (مرحله ۱ / Commit 4 — H6 + M7):
+ * 🚀 Sprint 13 (F6b) + Sprint 14 (H6 + M7) + Commit 106 (FUT Risk Model):
  * موتور بک‌تست استراتژی — دو حالت Spot و Futures
  *
  * interface مورد انتظار BacktestScreen (بدون تغییر):
  * - Trade(symbol, side, result, pnl, score)
  * - BacktestMetrics(...)
  * - runSpot(symbol, klines, holdDays)
- * - runFutures(symbol, klines, evalLast, hold, feeRate)
- * ورودی klines: List<List<Double>> = [open, high, low, close, volume]
+ * - runFutures(symbol, klines, evalLast, hold, feeRate, leverage, fundingRate)
  *
- * 🚀 Sprint 14 (H6): برخورد استاپ/تارگت با high/low کندل (نه فقط close)
- *    و اگر هر دو در یک کندل خورد شوند → استاپ اول (محافظه‌کارانه).
- * 🚀 Sprint 14 (M7): ورود در open کندلِ بعد از سیگنال (next-bar fill، بدون look-ahead)
- *    و خروج به قیمت سطحِ خورده‌شده؛ گپ‌ها در open پر می‌شوند.
- *    کارمزد شفاف: roundTrip = 2 × (fee% + slippage%) هر دو طرف.
+ * 🚀 Commit 106: مدل ریسک فیوچرز اضافه شد:
+ * - leverage: ضریب اهرم (۱ تا ۱۲۵)
+ * - fundingRate: نرخ فاندینگ هر ۸ ساعت (مثلاً 0.01% = 0.0001)
+ * - liquidation: اگر قیمت به liquidation price برسد → نتیجه "LIQUIDATED"
+ * - margin: مارجین = notional / leverage
  */
 object BacktestEngine {
 
@@ -27,7 +26,7 @@ object BacktestEngine {
     data class Trade(
         val symbol: String,
         val side: String,         // "BUY" | "SELL"
-        val result: String,       // "WIN" | "LOSS" | "EXP"
+        val result: String,       // "WIN" | "LOSS" | "EXP" | "LIQUIDATED"
         val pnl: Double,          // درصد PnL (بعد از کسر هزینه)
         val score: Int            // امتیاز سیگنال در لحظهٔ ورود
     )
@@ -38,6 +37,7 @@ object BacktestEngine {
         val wins: Int,
         val losses: Int,
         val expired: Int,
+        val liquidated: Int,
         val winRate: Double,
         val profitFactor: Double,
         val avgPnl: Double,
@@ -229,14 +229,16 @@ object BacktestEngine {
     private data class ExitEval(
         val exited: Boolean,
         val exitPrice: Double,
-        val reason: String        // "STOP" | "TARGET" | "TIMEOUT" | ""
+        val reason: String,        // "STOP" | "TARGET" | "TIMEOUT" | "LIQUIDATED" | ""
+        val liquidated: Boolean = false
     )
 
     /**
-     * 🚀 Sprint 14 (H6 + M7): قانون برخورد intrabar.
+     * 🚀 Sprint 14 (H6 + M7) + Commit 106: قانون برخورد intrabar + لیکوئیدیشن.
      * - استاپ با low (برای BUY) یا high (برای SELL) چک می‌شود
      * - تارگت با high (برای BUY) یا low (برای SELL) چک می‌شود
      * - اگر هر دو در یک کندل → استاپ اول (محافظه‌کارانه)
+     * - 🚀 Commit 106: لیکوئیدیشن چک می‌شود (اگر low <= liq برای BUY یا high >= liq برای SELL)
      * - گپ: اگر کندل پشت سطح باز شود، پر شدن در open (بدتر/واقعی‌تر)
      */
     private fun evalExit(
@@ -244,9 +246,21 @@ object BacktestEngine {
         cur: List<Double>,
         stop: Double,
         target: Double,
-        timedOut: Boolean
+        timedOut: Boolean,
+        liqPrice: Double? = null
     ): ExitEval {
         val open = cur[0]; val high = cur[1]; val low = cur[2]; val close = cur[3]
+        
+        // 🚀 Commit 106: چک لیکوئیدیشن اول (بدترین سناریو)
+        if (liqPrice != null) {
+            val liqHit = if (side == "BUY") low <= liqPrice else high >= liqPrice
+            if (liqHit) {
+                // لیکوئیدیشن = از دست دادن کل مارجین (PnL = -100%)
+                val liqFill = if (side == "BUY") min(open, liqPrice) else max(open, liqPrice)
+                return ExitEval(true, liqFill, "LIQUIDATED", liquidated = true)
+            }
+        }
+        
         val stopHit = if (side == "BUY") low <= stop else high >= stop
         val targetHit = if (side == "BUY") high >= target else low <= target
 
@@ -266,6 +280,7 @@ object BacktestEngine {
         val wins = trades.count { it.result == "WIN" }
         val losses = trades.count { it.result == "LOSS" }
         val expired = trades.count { it.result == "EXP" }
+        val liquidated = trades.count { it.result == "LIQUIDATED" }
         val decided = wins + losses
         val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
         val avgPnl = if (trades.isEmpty()) 0.0 else trades.map { it.pnl }.average()
@@ -300,6 +315,7 @@ object BacktestEngine {
 
         return BacktestMetrics(
             totalTrades = trades.size, wins = wins, losses = losses, expired = expired,
+            liquidated = liquidated,
             winRate = winRate, profitFactor = profitFactor,
             avgPnl = avgPnl, avgWin = avgWin, avgLoss = avgLoss,
             expectancy = expectancy, totalPnl = totalPnl, maxDrawdown = maxDrawdown,
@@ -399,24 +415,82 @@ object BacktestEngine {
     // ================================================================
 
     /**
-     * بک‌تست فیوچرز کوتاه‌مدت
+     * 🚀 Commit 106: محاسبهٔ هزینهٔ فاندینگ برای نگهداری پوزیشن.
+     * 
+     * @param notionalUsd ارزش کل پوزیشن (margin × leverage)
+     * @param fundingRate نرخ فاندینگ هر ۸ ساعت (مثلاً 0.01% = 0.0001)
+     * @param holdHours تعداد ساعات نگهداری پوزیشن
+     * @param side "BUY" یا "SELL"
+     * @return هزینهٔ فاندینگ (مثبت = کسر می‌شود، منفی = دریافت می‌شود)
+     */
+    private fun fundingCostForHold(
+        notionalUsd: Double,
+        fundingRate: Double,
+        holdHours: Int,
+        side: String
+    ): Double {
+        // فاندینگ هر ۸ ساعت پرداخت/دریافت می‌شود
+        val fundingPeriods = holdHours / 8
+        if (fundingPeriods == 0) return 0.0
+        
+        // لانگ با فاندینگ مثبت هزینه می‌دهد؛ شورت با فاندینگ مثبت دریافت می‌کند
+        val pays = if (side == "BUY") fundingRate >= 0 else fundingRate < 0
+        val costPerPeriod = notionalUsd * abs(fundingRate)
+        val totalCost = costPerPeriod * fundingPeriods
+        
+        return if (pays) totalCost else -totalCost
+    }
+
+    /**
+     * 🚀 Commit 106: محاسبهٔ قیمت لیکوئیدیشن (isolated margin ساده).
+     * 
+     * @param entry قیمت ورود
+     * @param leverage ضریب اهرم
+     * @param side "BUY" یا "SELL"
+     * @return قیمت لیکوئیدیشن
+     */
+    private fun liquidationPrice(entry: Double, leverage: Int, side: String): Double {
+        // فرمول ساده isolated margin (بدون احتساب maintenance margin)
+        // LONG: entry * (1 - 1/leverage)
+        // SHORT: entry * (1 + 1/leverage)
+        return if (side == "BUY") {
+            entry * (1.0 - 1.0 / leverage)
+        } else {
+            entry * (1.0 + 1.0 / leverage)
+        }
+    }
+
+    /**
+     * بک‌تست فیوچرز کوتاه‌مدت با مدل ریسک واقعی
+     * 
+     * 🚀 Commit 106: پارامترهای جدید:
+     * @param leverage ضریب اهرم (۱ تا ۱۲۵، پیش‌فرض ۱۰)
+     * @param fundingRate نرخ فاندینگ هر ۸ ساعت (پیش‌فرض ۰.۰۱٪ = ۰.۰۰۰۱)
+     * 
      * قوانین:
      * - امتیاز >= 40 → BUY، امتیاز <= -40 → SELL
      * - 🚀 Sprint 14 (M7): ورود در open کندل بعد
      * - استاپ = ۱.۵ × ATR • تارگت = ۲.۵ × ATR
-     * - 🚀 Sprint 14 (M7): کارمزد شفاف = ۲ × (feeRate×۱۰۰ + ۰.۰۵٪ slippage)
-     * - خروج روی TIMEOUT یا برخورد stop/target (قانون intrabar)
+     * - 🚀 Commit 106: کارمزد واقعی = ۲ × (۰.۰۴٪ taker + ۰.۰۵٪ slippage) = ۰.۱۸٪
+     * - 🚀 Commit 106: فاندینگ هر ۸ ساعت کسر/اضافه می‌شود
+     * - 🚀 Commit 106: اگر قیمت به liquidation price برسد → "LIQUIDATED" (PnL = -100%)
+     * - 🚀 Commit 106: TIMEOUT → "EXP" (مثل runSpot)
      */
     fun runFutures(
         symbol: String,
         klines: List<List<Double>>,
         evalLast: Int,
         hold: Int,
-        feeRate: Double
+        feeRate: Double = 0.0004,  // 🚀 Commit 106: taker بایننس
+        leverage: Int = 10,          // 🚀 Commit 106: اهرم پیش‌فرض
+        fundingRate: Double = 0.0001 // 🚀 Commit 106: فاندینگ پیش‌فرض (۰.۰۱٪)
     ): Pair<List<Trade>, BacktestMetrics> {
         if (klines.size < 80) return emptyList<Trade>() to computeMetrics(emptyList())
 
         val trades = mutableListOf<Trade>()
+        
+        // 🚀 Commit 106: کارمزد واقعی taker (0.04%) + slippage (0.05%) = 0.09% هر طرف
+        // round trip = 2 × 0.09% = 0.18%
         val feeRoundTrip = 2.0 * (feeRate * 100.0 + 0.05)
 
         var inTrade = false
@@ -427,6 +501,7 @@ object BacktestEngine {
         var stop = 0.0
         var target = 0.0
         var entryScore = 0
+        var liqPrice = 0.0
 
         val startIdx = max(60, klines.size - evalLast)
 
@@ -439,20 +514,49 @@ object BacktestEngine {
                 entryIdx = i
                 inTrade = true
                 pendingEntry = false
+                
+                // 🚀 Commit 106: محاسبهٔ قیمت لیکوئیدیشن در لحظهٔ ورود
+                liqPrice = liquidationPrice(entryPrice, leverage, side)
             }
 
             if (inTrade) {
                 val held = i - entryIdx
-                val ev = evalExit(side, cur, stop, target, held >= hold)
+                
+                // 🚀 Commit 106: چک لیکوئیدیشن + stop/target + timeout
+                val ev = evalExit(side, cur, stop, target, held >= hold, liqPrice)
+                
                 if (ev.exited) {
-                    val pnlRaw = if (side == "BUY") (ev.exitPrice - entryPrice) / entryPrice * 100
-                                 else (entryPrice - ev.exitPrice) / entryPrice * 100
-                    val pnl = pnlRaw - feeRoundTrip
-                    val result = when (ev.reason) {
-                        "TARGET" -> "WIN"
-                        "STOP" -> "LOSS"
-                        else -> if (pnl > 0) "WIN" else "LOSS"
+                    // محاسبهٔ PnL خام (بدون هزینه)
+                    val pnlRaw = if (side == "BUY") {
+                        (ev.exitPrice - entryPrice) / entryPrice * 100 * leverage
+                    } else {
+                        (entryPrice - ev.exitPrice) / entryPrice * 100 * leverage
                     }
+                    
+                    // 🚀 Commit 106: کسر فاندینگ اگر پوزیشن بیش از ۸ ساعت باز بوده
+                    // فرض: هر کندل = ۱ ساعت (برای simplicity)
+                    val holdHours = held
+                    val notionalUsd = 100.0 * leverage  // فرض margin = 100$
+                    val fundingCost = fundingCostForHold(notionalUsd, fundingRate, holdHours, side)
+                    val fundingCostPct = (fundingCost / notionalUsd) * 100.0 * leverage
+                    
+                    // 🚀 Commit 106: PnL نهایی = خام - کارمزد - فاندینگ
+                    val pnl = if (ev.liquidated) {
+                        // لیکوئیدیشن = از دست دادن کل مارجین
+                        -100.0
+                    } else {
+                        pnlRaw - feeRoundTrip - fundingCostPct
+                    }
+                    
+                    // 🚀 Commit 106: تعیین نتیجه
+                    val result = when {
+                        ev.liquidated -> "LIQUIDATED"
+                        ev.reason == "TARGET" -> "WIN"
+                        ev.reason == "STOP" -> "LOSS"
+                        ev.reason == "TIMEOUT" -> "EXP"  // 🚀 Commit 106: اصلاح از WIN/LOSS به EXP
+                        else -> "EXP"
+                    }
+                    
                     trades.add(Trade(symbol, side, result, pnl, entryScore))
                     inTrade = false
                 }
