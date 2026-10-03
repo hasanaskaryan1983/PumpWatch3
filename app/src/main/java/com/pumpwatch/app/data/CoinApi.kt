@@ -209,7 +209,6 @@ object ApiClient {
 
     fun marketMeta(): MarketMeta = marketMetaRef.get()
 
-    // 🚀 Commit 102: setMeta now safely handles elapsedMs to prevent cache age spoofing
     private fun setMeta(observedAtMs: Long, from: ServedFrom, count: Int, elapsedMs: Long? = null) {
         marketMetaRef.set(MarketMeta(observedAtMs, from, count, elapsedMs))
     }
@@ -223,7 +222,6 @@ object ApiClient {
             .create(CoinGeckoApi::class.java)
     }
 
-    // 🚀 Commit 102: Complete rewrite for TTL and accurate Provenance
     suspend fun getQuickCoins(): List<CoinMarket> {
         // 1. Memory cache with TTL check
         val memCache = cache1000Ref.get()
