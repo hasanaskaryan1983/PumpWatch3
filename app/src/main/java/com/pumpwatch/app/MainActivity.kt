@@ -60,12 +60,13 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.ContractRef
 import com.pumpwatch.app.data.MarketMeta
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.ServedFrom
 import com.pumpwatch.app.data.cmcUrl
-import com.pumpwatch.app.data.platformContractOf
+import com.pumpwatch.app.data.platformContractRef
 import com.pumpwatch.app.store.WatchlistScheduler
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
@@ -321,30 +322,51 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
+// 🚀 Commit 103 (M4): ContractRow با نمایش نام شبکه + آدرس
 @Composable
-private fun ContractRow(ctx: Context, contract: String?) {
-    if (contract.isNullOrEmpty()) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+private fun ContractRow(ctx: Context, contractRef: ContractRef?) {
+    if (contractRef == null) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+        ) {
             Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TextSecondary)
         }
         return
     }
     val copied = remember { mutableStateOf(false) }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
-        Text("📋 ", fontSize = 9.sp, color = TextSecondary)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+    ) {
         Text(
-            if (contract.length > 24) "${contract.take(12)}...${contract.takeLast(8)}" else contract,
-            fontSize = 9.sp, color = ContractBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+            "${contractRef.chain}: ",
+            fontSize = 9.sp,
+            color = ContractGold,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            if (contractRef.address.length > 24) {
+                "${contractRef.address.take(12)}...${contractRef.address.takeLast(8)}"
+            } else {
+                contractRef.address
+            },
+            fontSize = 9.sp,
+            color = ContractBlue,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f)
         )
         Button(
             onClick = {
                 try {
                     (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                        .setPrimaryClip(ClipData.newPlainText("contract", contract))
+                        .setPrimaryClip(ClipData.newPlainText("contract", contractRef.address))
                     copied.value = true
                 } catch (_: Exception) { }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) SpotAccent else ContractGold),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (copied.value) SpotAccent else ContractGold
+            ),
             shape = RoundedCornerShape(6.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
         ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
@@ -468,20 +490,32 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(shown) { coin ->
-                    val contract = platformContractOf(platformMap, coin.id)
-                    CoinCard(coin = coin, contract = contract, onClick = { onCoinClick(coin) })
+                    // 🚀 Commit 103 (M4): هویت کامل دارایی با نام شبکه
+                    val contractRef = platformContractRef(platformMap, coin.id)
+                    CoinCard(coin = coin, contractRef = contractRef, onClick = { onCoinClick(coin) })
                 }
             }
         }
     }
 }
 
+// 🚀 Commit 103 (M3 + M4): نمایش صادقانهٔ null ها + هویت شبکه
 @Composable
-fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
+fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
     val context = LocalContext.current
-    val change = coin.price_change_percentage_24h ?: 0.0
-    val isUp = change >= 0
-    val rank = coin.market_cap_rank ?: 0
+
+    // 🚀 Commit 103 (M3): دیگر null را به‌صورت 0.0 سبز جا نمی‌زنیم
+    val change = coin.price_change_percentage_24h
+    val changeText = if (change == null) "—" else String.format(Locale.US, "%+.2f%%", change)
+    val changeColor = when {
+        change == null -> TextSecondary
+        change >= 0 -> SpotAccent
+        else -> FuturesAccent
+    }
+
+    // 🚀 Commit 103 (M3): رتبهٔ نامشخص = "#—" به‌جای "#0"
+    val rankText = coin.market_cap_rank?.let { "#$it" } ?: "#—"
+
     Surface(
         color = DarkCard,
         shape = RoundedCornerShape(16.dp),
@@ -494,7 +528,7 @@ fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "#$rank  ${coin.symbol.uppercase(Locale.US)}",
+                        "$rankText  ${coin.symbol.uppercase(Locale.US)}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = Color.White
@@ -518,14 +552,14 @@ fun CoinCard(coin: CoinMarket, contract: String?, onClick: () -> Unit) {
                 Column(horizontalAlignment = Alignment.End) {
                     Text(fmtPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     Text(
-                        String.format(Locale.US, "%+.2f%%", change),
-                        color = if (isUp) SpotAccent else FuturesAccent,
+                        changeText,
+                        color = changeColor,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
-            ContractRow(context, contract)
+            ContractRow(context, contractRef)
         }
     }
 }
