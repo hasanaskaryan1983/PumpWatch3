@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,6 +54,8 @@ fun FuturesPaperScreen() {
     val scope = rememberCoroutineScope()
     var trades by remember { mutableStateOf<List<Trade>>(emptyList()) }
     var msg by remember { mutableStateOf("") }
+    // 🚀 Commit 105: سوییچ opt-in واقعی
+    var isEnabled by remember { mutableStateOf(TradeStore.isEnabled(context)) }
 
     fun reload() {
         val all = TradeStore.load(context).filter { it.mode == "FUT" }
@@ -80,6 +83,25 @@ fun FuturesPaperScreen() {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("📝 Paper فیوچرز", fontWeight = FontWeight.Black, fontSize = 18.sp)
             Spacer(Modifier.weight(1f))
+            // 🚀 Commit 105: سوییچ opt-in واقعی
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (isEnabled) "✅ فعال" else "⚫ غیرفعال",
+                    fontSize = 10.sp,
+                    color = if (isEnabled) FGreen else FGray,
+                    fontWeight = FontWeight.Bold
+                )
+                Switch(
+                    checked = isEnabled,
+                    onCheckedChange = { enabled ->
+                        isEnabled = enabled
+                        TradeStore.setEnabled(context, enabled)
+                        msg = if (enabled) "✅ Paper فیوچرز فعال شد — از Dashboard تمرین کن"
+                              else "⚫ Paper فیوچرز غیرفعال شد"
+                    },
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
             TextButton(onClick = {
                 scope.launch {
                     try {
@@ -92,16 +114,38 @@ fun FuturesPaperScreen() {
             }) { Text("🔄 بررسی", fontSize = 11.sp) }
         }
 
+        // 🚀 Commit 105: متن صادقانه (حذف ادعای "خودکار")
         Text(
-            "معاملات کاغذی خودکار از سیگنال‌های طلایی فیوچرز • استاپ شناور (ExitEngine) • رمزنگاری‌شده",
+            "معاملات کاغذی از سیگنال‌های تاییدشده • استاپ شناور (ExitEngine) • رمزنگاری‌شده\n" +
+            "💡 برای بازکردن ترید، از تب «تابلوی سیگنال» دکمهٔ «📝 تمرین» را بزن",
             fontSize = 9.sp, color = FGray, lineHeight = 15.sp
         )
+
+        if (!isEnabled) {
+            Surface(
+                color = FGold.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "⚠️ Paper غیرفعال است — سوییچ بالا را روشن کن تا بتوانی از سیگنال‌ها تمرین کنی",
+                    fontSize = 10.sp,
+                    color = FGold,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
 
         if (msg.isNotEmpty()) Text(msg, fontSize = 10.sp, color = FGold, fontWeight = FontWeight.Bold)
 
         Text("🟢 باز (${open.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGreen)
         if (open.isEmpty()) {
-            Text("فعلاً ترید باز FUT نداری — سیگنال‌های طلایی اسکنر اینجا باز می‌شوند", fontSize = 10.sp, color = FGray)
+            Text(
+                if (isEnabled) "فعلاً ترید باز FUT نداری — از Dashboard سیگنال‌ها را تمرین کن"
+                else "Paper غیرفعال است — سوییچ بالا را روشن کن",
+                fontSize = 10.sp, color = FGray
+            )
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
