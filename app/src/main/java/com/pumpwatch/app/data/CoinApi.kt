@@ -1,6 +1,7 @@
 package com.pumpwatch.app.data
 
 import android.content.Context
+import android.os.SystemClock
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
@@ -125,7 +126,7 @@ val GlobalHostLimiter = HostLimiter(
         "api.dexscreener.com" to 500L,
         "tonapi.io" to 600L,
         "fullnode.mainnet.sui.io" to 500L,
-        "rpc.mainnet.arc.io" to 500L  // 🚀 Commit 92: Arc Network RPC
+        "rpc.mainnet.arc.io" to 500L
     ),
     defaultIntervalMs = 1000L
 )
@@ -195,8 +196,12 @@ object ApiClient {
 
     private val cache1000Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache1000TimeRef = AtomicLong(0L)
+    private val cache1000ElapsedRef = AtomicLong(0L) // 🚀 Commit 102: Monotonic time tracking
+
     private val cache100Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache100TimeRef = AtomicLong(0L)
+    private val cache100ElapsedRef = AtomicLong(0L) // 🚀 Commit 102: Monotonic time tracking
+
     private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
     private val platformsTimeRef = AtomicLong(0L)
 
@@ -204,8 +209,9 @@ object ApiClient {
 
     fun marketMeta(): MarketMeta = marketMetaRef.get()
 
-    private fun setMeta(observedAt: Long, from: ServedFrom, count: Int) {
-        marketMetaRef.set(MarketMeta(observedAt, from, count))
+    // 🚀 Commit 102: setMeta now safely handles elapsedMs to prevent cache age spoofing
+    private fun setMeta(observedAtMs: Long, from: ServedFrom, count: Int, elapsedMs: Long? = null) {
+        marketMetaRef.set(MarketMeta(observedAtMs, from, count, elapsedMs))
     }
 
     val api: CoinGeckoApi by lazy {
@@ -217,11 +223,40 @@ object ApiClient {
             .create(CoinGeckoApi::class.java)
     }
 
+    // 🚀 Commit 102: Complete rewrite for TTL and accurate Provenance
     suspend fun getQuickCoins(): List<CoinMarket> {
-        cache1000Ref.get().takeIf { it.isNotEmpty() }?.let { return it }
-        loadList("m250")?.let { return it }
+        // 1. Memory cache with TTL check
+        val memCache = cache1000Ref.get()
+        val memTime = cache1000TimeRef.get()
+        if (memCache.isNotEmpty() && System.currentTimeMillis() - memTime < MEM_CACHE_TTL) {
+            val elapsed = cache1000ElapsedRef.get().takeIf { it > 0 }
+            setMeta(memTime, ServedFrom.MEM_CACHE, memCache.size, elapsed)
+            return memCache
+        }
+
+        // 2. Disk cache with TTL check
+        val diskTime = OfflineCache.time(app, "m250")
+        if (diskTime > 0 && System.currentTimeMillis() - diskTime < DISK_FRESH_MS) {
+            loadList("m250")?.let { disk ->
+                cache1000Ref.set(disk)
+                cache1000TimeRef.set(diskTime)
+                cache1000ElapsedRef.set(0L) // Elapsed time is lost across reboots
+                setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
+                return disk
+            }
+        }
+
+        // 3. Network fetch
         GlobalHostLimiter.acquire("api.coingecko.com")
         val p1 = api.getMarkets(perPage = 250, page = 1)
+        val nowMs = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
+
+        cache1000Ref.set(p1)
+        cache1000TimeRef.set(nowMs)
+        cache1000ElapsedRef.set(nowElapsed)
+        setMeta(nowMs, ServedFrom.NETWORK, p1.size, nowElapsed)
+
         OfflineCache.save(app, "m250", gson.toJson(p1))
         return p1
     }
@@ -229,22 +264,25 @@ object ApiClient {
     suspend fun getTop1000Coins(forceRefresh: Boolean = false): List<CoinMarket> {
         val cached = cache1000Ref.get()
         val cachedTime = cache1000TimeRef.get()
+        val cachedElapsed = cache1000ElapsedRef.get().takeIf { it > 0 }
 
         if (!forceRefresh && cached.isNotEmpty() &&
             System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
         ) {
-            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size)
+            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size, cachedElapsed)
             return cached
         }
 
         if (!forceRefresh && cached.isEmpty()) {
             val disk = loadList("m1000")
+            val diskTime = OfflineCache.time(app, "m1000")
             if (disk != null &&
-                System.currentTimeMillis() - OfflineCache.time(app, "m1000") < DISK_FRESH_MS
+                System.currentTimeMillis() - diskTime < DISK_FRESH_MS
             ) {
                 cache1000Ref.set(disk)
-                cache1000TimeRef.set(System.currentTimeMillis())
-                setMeta(OfflineCache.time(app, "m1000"), ServedFrom.DISK_CACHE, disk.size)
+                cache1000TimeRef.set(diskTime)
+                cache1000ElapsedRef.set(0L)
+                setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 return disk
             }
         }
@@ -258,9 +296,13 @@ object ApiClient {
             }
             val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
             val nowMs = System.currentTimeMillis()
+            val nowElapsed = SystemClock.elapsedRealtime()
+
             cache1000Ref.set(sorted)
             cache1000TimeRef.set(nowMs)
-            setMeta(nowMs, ServedFrom.NETWORK, sorted.size)
+            cache1000ElapsedRef.set(nowElapsed)
+            setMeta(nowMs, ServedFrom.NETWORK, sorted.size, nowElapsed)
+
             OfflineCache.save(app, "m1000", gson.toJson(sorted))
             sorted
         } catch (e: Exception) {
@@ -271,9 +313,11 @@ object ApiClient {
                 disk = loadList(diskKey)
             }
             if (disk != null) {
+                val diskTime = OfflineCache.time(app, diskKey)
                 cache1000Ref.set(disk)
-                cache1000TimeRef.set(System.currentTimeMillis())
-                setMeta(OfflineCache.time(app, diskKey), ServedFrom.DISK_CACHE, disk.size)
+                cache1000TimeRef.set(diskTime)
+                cache1000ElapsedRef.set(0L)
+                setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 disk
             } else throw e
         }
@@ -282,22 +326,25 @@ object ApiClient {
     suspend fun getTop100Coins(forceRefresh: Boolean = false): List<CoinMarket> {
         val cached = cache100Ref.get()
         val cachedTime = cache100TimeRef.get()
+        val cachedElapsed = cache100ElapsedRef.get().takeIf { it > 0 }
 
         if (!forceRefresh && cached.isNotEmpty() &&
             System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
         ) {
-            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size)
+            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size, cachedElapsed)
             return cached
         }
 
         if (!forceRefresh && cached.isEmpty()) {
             val disk = loadList("m100")
+            val diskTime = OfflineCache.time(app, "m100")
             if (disk != null &&
-                System.currentTimeMillis() - OfflineCache.time(app, "m100") < DISK_FRESH_MS
+                System.currentTimeMillis() - diskTime < DISK_FRESH_MS
             ) {
                 cache100Ref.set(disk)
-                cache100TimeRef.set(System.currentTimeMillis())
-                setMeta(OfflineCache.time(app, "m100"), ServedFrom.DISK_CACHE, disk.size)
+                cache100TimeRef.set(diskTime)
+                cache100ElapsedRef.set(0L)
+                setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 return disk
             }
         }
@@ -306,17 +353,23 @@ object ApiClient {
             GlobalHostLimiter.acquire("api.coingecko.com")
             val fresh = api.getMarkets(perPage = 100, page = 1)
             val nowMs = System.currentTimeMillis()
+            val nowElapsed = SystemClock.elapsedRealtime()
+
             cache100Ref.set(fresh)
             cache100TimeRef.set(nowMs)
-            setMeta(nowMs, ServedFrom.NETWORK, fresh.size)
+            cache100ElapsedRef.set(nowElapsed)
+            setMeta(nowMs, ServedFrom.NETWORK, fresh.size, nowElapsed)
+
             OfflineCache.save(app, "m100", gson.toJson(fresh))
             fresh
         } catch (e: Exception) {
             val disk = loadList("m100")
+            val diskTime = OfflineCache.time(app, "m100")
             if (disk != null) {
                 cache100Ref.set(disk)
-                cache100TimeRef.set(System.currentTimeMillis())
-                setMeta(OfflineCache.time(app, "m100"), ServedFrom.DISK_CACHE, disk.size)
+                cache100TimeRef.set(diskTime)
+                cache100ElapsedRef.set(0L)
+                setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 disk
             } else throw e
         }
@@ -405,8 +458,12 @@ object ApiClient {
     fun clearMemoryCache() {
         cache1000Ref.set(emptyList())
         cache1000TimeRef.set(0L)
+        cache1000ElapsedRef.set(0L)
+
         cache100Ref.set(emptyList())
         cache100TimeRef.set(0L)
+        cache100ElapsedRef.set(0L)
+
         platformsRef.set(null)
         platformsTimeRef.set(0L)
     }
