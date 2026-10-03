@@ -522,3 +522,69 @@ fun platformContractOf(
     }
     return platforms.values.firstOrNull { !it.isNullOrBlank() }
 }
+
+// ============================================================
+// 🚀 Commit 103 (M4): هویت کامل دارایی — chain + address
+// ============================================================
+
+/**
+ * هویت نمایشی یک کانترکت: نام خوانای شبکه + آدرس.
+ * درس P0: دو توکن هم‌تیکر روی دو شبکه، دو دارایی متفاوت‌اند.
+ */
+data class ContractRef(val chain: String, val address: String)
+
+/**
+ * 🚀 Commit 103: نسخهٔ دارای chain از platformContractOf.
+ * UI با این تابع نام شبکه را کنار آدرس نشان می‌دهد (مثلاً «BSC: 0x1234…»).
+ */
+fun platformContractRef(
+    map: Map<String, Map<String, String>>,
+    coinId: String,
+    chainHint: String? = null
+): ContractRef? {
+    if (coinId in NATIVE_COIN_IDS) return null
+    val platforms = map[coinId] ?: return null
+
+    fun display(chainKey: String): String = when (chainKey) {
+        "ethereum" -> "Ethereum"
+        "binance-smart-chain", "bsc" -> "BSC"
+        "base" -> "Base"
+        "arbitrum-one", "arbitrum" -> "Arbitrum"
+        "optimistic-ethereum", "optimism" -> "Optimism"
+        "polygon-pos", "polygon" -> "Polygon"
+        "avalanche", "avax" -> "Avalanche"
+        "solana" -> "Solana"
+        "the-open-network", "ton" -> "TON"
+        "sui" -> "SUI"
+        else -> chainKey
+    }
+
+    if (chainHint != null) {
+        val aliases = when (chainHint) {
+            "ethereum" -> listOf("ethereum")
+            "bsc" -> listOf("binance-smart-chain", "bsc")
+            "base" -> listOf("base")
+            "arbitrum" -> listOf("arbitrum-one", "arbitrum")
+            "optimism" -> listOf("optimistic-ethereum", "optimism")
+            "polygon" -> listOf("polygon-pos", "polygon")
+            "avalanche" -> listOf("avalanche", "avax")
+            "solana" -> listOf("solana")
+            "ton" -> listOf("the-open-network", "ton")
+            "sui" -> listOf("sui")
+            else -> listOf(chainHint)
+        }
+        for (key in aliases) {
+            val addr = platforms[key]
+            if (!addr.isNullOrBlank()) return ContractRef(display(key), addr)
+        }
+        return null
+    }
+
+    val preferred = listOf("ethereum", "binance-smart-chain", "base", "arbitrum-one", "polygon-pos")
+    for (key in preferred) {
+        val addr = platforms[key]
+        if (!addr.isNullOrBlank()) return ContractRef(display(key), addr)
+    }
+    val first = platforms.entries.firstOrNull { !it.value.isNullOrBlank() } ?: return null
+    return ContractRef(display(first.key), first.value!!)
+}
