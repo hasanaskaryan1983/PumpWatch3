@@ -1,5 +1,6 @@
 package com.pumpwatch.app.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,6 +14,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,11 +31,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceFutures
+import com.pumpwatch.app.engine.FutSignalForPaper
+import com.pumpwatch.app.engine.PaperTradingEngine
+import com.pumpwatch.app.store.TradeStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,13 +53,14 @@ private val FuturesBlue = Color(0xFF40C4FF)
 private val FuturesGold = Color(0xFFFFC107)
 private val FuturesCard = Color(0xFF1A0E0E)
 
-// 🚀 Sprint 15 (فاز ۳ / Commit 18): مدل سیگنال فیوچرز
+// 🚀 Commit 105: FutSignal با coinId برای اتصال به Paper
 private data class FutSignal(
+    val coinId: String,        // 🚀 Commit 105: اضافه شد
     val rank: Int,
     val symbol: String,
     val base: String,
-    val direction: String,     // "LONG" | "SHORT"
-    val score: Int,            // 0..100
+    val direction: String,
+    val score: Int,
     val entry: Double,
     val stopLoss: Double,
     val target: Double,
@@ -76,13 +84,8 @@ private fun fmtVol(v: Double): String = when {
     else -> String.format(Locale.US, "$%.0f", v)
 }
 
-/**
- * 🚀 Commit 18: منطق سیگنال ساده (بدون FuturesScannerEngine)
- * - شتاب ۲۴ ساعته > 5% → LONG
- * - شتاب ۲۴ ساعته < -5% → SHORT
- * - امتیاز = |شتاب ۲۴س| × 3 + فاندینگ extreme (۲۰) + نقدشوندگی (۱۵)
- */
 private fun buildSignal(
+    coinId: String,  // 🚀 Commit 105: اضافه شد
     rank: Int,
     symbol: String,
     base: String,
@@ -92,34 +95,31 @@ private fun buildSignal(
     volumeUsd: Double
 ): FutSignal? {
     val absChange = abs(change24h)
-    if (absChange < 5.0) return null // آستانه: حداقل ۵٪ حرکت
+    if (absChange < 5.0) return null
 
     val direction = if (change24h > 0) "LONG" else "SHORT"
     val reasons = mutableListOf<String>()
 
-    // امتیاز شتاب (حداکثر ۶۰)
     var score = (absChange * 3.0).toInt().coerceAtMost(60)
     reasons.add("شتاب ۲۴س: ${String.format(Locale.US, "%+.1f%%", change24h)}")
 
-    // امتیاز فاندینگ (حداکثر ۲۰)
     if (fundingPct != null && abs(fundingPct) >= 0.03) {
         score += 20
         reasons.add("فاندینگ شدید: ${String.format(Locale.US, "%+.4f%%", fundingPct)}")
     }
 
-    // امتیاز نقدشوندگی (حداکثر ۱۵)
     if (volumeUsd >= 50_000_000) {
         score += 15
         reasons.add("نقدشوندگی بالا: ${fmtVol(volumeUsd)}")
     }
 
-    // محاسبه SL و TP (ریسک/پاداش ۲:۱)
-    val slDistance = price * 0.02  // ۲٪
-    val tpDistance = price * 0.04 // ۴٪
+    val slDistance = price * 0.02
+    val tpDistance = price * 0.04
     val stopLoss = if (direction == "LONG") price - slDistance else price + slDistance
     val target = if (direction == "LONG") price + tpDistance else price - tpDistance
 
     return FutSignal(
+        coinId = coinId,  // 🚀 Commit 105
         rank = rank,
         symbol = symbol,
         base = base,
@@ -137,6 +137,7 @@ private fun buildSignal(
 
 @Composable
 fun FuturesDashboardScreen() {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var signals by remember { mutableStateOf<List<FutSignal>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -168,7 +169,7 @@ fun FuturesDashboardScreen() {
                 for ((idx, c) in coins.withIndex()) {
                     val fsym = c.symbol.uppercase(Locale.US) + "USDT"
                     val t = tickerMap[fsym]
-                    if (t == null) continue // جفت perpetual ندارد
+                    if (t == null) continue
                     perpCount++
 
                     val prem = premMap[fsym]
@@ -179,6 +180,7 @@ fun FuturesDashboardScreen() {
                     val volumeUsd = t.quoteVolume?.toDoubleOrNull() ?: c.total_volume
 
                     val sig = buildSignal(
+                        coinId = c.id,  // 🚀 Commit 105: coinId پاس داده می‌شود
                         rank = c.market_cap_rank ?: (idx + 1),
                         symbol = fsym,
                         base = c.symbol.uppercase(Locale.US),
@@ -225,7 +227,7 @@ fun FuturesDashboardScreen() {
 
         Text(
             "🎯 سیگنال = شتاب ۲۴س ≥ ۵٪ + فاندینگ + نقدشوندگی • ورود/SL/TP با ریسک/پاداش ۲:۱\n" +
-            "⚠️ این سیگنال‌های ساده هستند — سیگنال‌های پیشرفته با موتور اسکنر در تب بعدی",
+            "💡 برای تمرین هر سیگنال، دکمهٔ «📝 تمرین» را بزن (نیاز به فعال‌سازی Paper)",
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             fontSize = 9.sp, color = FuturesGray, lineHeight = 15.sp
         )
@@ -267,12 +269,13 @@ fun FuturesDashboardScreen() {
 
 @Composable
 private fun SignalCard(sig: FutSignal) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val dirColor = if (sig.direction == "LONG") FuturesGreen else FuturesAccent
     val dirEmoji = if (sig.direction == "LONG") "🚀" else "🩸"
 
     Surface(color = FuturesCard, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            // Row 1: نماد + جهت + امتیاز
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(dirEmoji, fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
@@ -286,14 +289,13 @@ private fun SignalCard(sig: FutSignal) {
                 )
             }
 
-            // Row 2: جهت + شتاب
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     color = dirColor.copy(alpha = 0.15f),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
-                        "${sig.direction} ${sig.direction}",
+                        sig.direction,  // 🚀 Commit 105: حذف تکرار "LONG LONG"
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         fontSize = 11.sp, fontWeight = FontWeight.Bold, color = dirColor
                     )
@@ -312,7 +314,6 @@ private fun SignalCard(sig: FutSignal) {
                 }
             }
 
-            // Row 3: ورود / SL / TP
             Surface(color = FuturesBlue.copy(alpha = 0.1f), shape = RoundedCornerShape(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -333,11 +334,47 @@ private fun SignalCard(sig: FutSignal) {
                 }
             }
 
-            // Row 4: دلایل
             Text(sig.reasons.joinToString(" • "), fontSize = 9.sp, color = FuturesGray, lineHeight = 14.sp)
 
-            // Row 5: حجم
             Text("💧 حجم ۲۴س: ${fmtVol(sig.volumeUsd)}", fontSize = 9.sp, color = FuturesGray)
+
+            // 🚀 Commit 105: دکمه تمرین
+            Button(
+                onClick = {
+                    scope.launch {
+                        if (!TradeStore.isEnabled(context)) {
+                            Toast.makeText(
+                                context,
+                                "⚠️ اول از تب «Paper فیوچرز» قابلیت را فعال کن",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@launch
+                        }
+                        val futSig = FutSignalForPaper(
+                            coinId = sig.coinId,
+                            symbol = sig.symbol,
+                            base = sig.base,
+                            direction = sig.direction,
+                            entry = sig.entry,
+                            stopLoss = sig.stopLoss,
+                            target = sig.target,
+                            score = sig.score
+                        )
+                        val success = PaperTradingEngine.openFromFutSignal(context, futSig)
+                        Toast.makeText(
+                            context,
+                            if (success) "✅ ترید FUT برای ${sig.base} باز شد — در تب Paper ببین"
+                            else "⚠️ این ترید قبلاً باز است",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = FuturesGreen.copy(alpha = 0.2f)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("📝 تمرین با این ستاپ", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
