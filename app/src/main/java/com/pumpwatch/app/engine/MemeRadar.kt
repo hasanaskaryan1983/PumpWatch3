@@ -23,6 +23,7 @@ data class MemeSignal(
     val score: Int,
     val liquidity: Double,
     val volumeH1: Double,
+    val volumeH24: Double, // 🚀 Commit 104: حجم ۲۴س واقعی
     val buyRatio: Double,
     val ageHours: Double,
     val changeH1: Double,
@@ -36,6 +37,36 @@ data class MemeSignal(
     val contract: String? = null,
     val poolAddress: String? = null
 )
+
+// 🚀 Commit 104: سیاست اسکن عمومی برای sync بین موتور و UI
+data class ScanPolicy(
+    val minLiquidityUsd: Double,
+    val minVolume24hUsd: Double,
+    val minAgeHours: Double,
+    val maxAgeHours: Double,
+    val minRugScore: Int,
+    val allowUnknownSecurity: Boolean
+) {
+    companion object {
+        val NORMAL = ScanPolicy(
+            minLiquidityUsd = 20_000.0,
+            minVolume24hUsd = 50_000.0,
+            minAgeHours = 1.0,
+            maxAgeHours = 9999.0,
+            minRugScore = 40,
+            allowUnknownSecurity = false
+        )
+        val SNIPER = ScanPolicy(
+            minLiquidityUsd = 5_000.0,
+            minVolume24hUsd = 10_000.0,
+            minAgeHours = 0.5,
+            maxAgeHours = 168.0,
+            minRugScore = 35,
+            allowUnknownSecurity = true
+        )
+        fun of(sniperMode: Boolean): ScanPolicy = if (sniperMode) SNIPER else NORMAL
+    }
+}
 
 // 🚀 Commit 97: آمار قیف اسکن برای نمایش شفافیت در UI
 data class SniperStats(
@@ -74,14 +105,9 @@ object MemeRadar {
     var lastSniperStats: SniperStats? = null
         private set
 
-    private data class ScanThresholds(
-        val minLiq: Double,
-        val minVol24: Double,
-        val minAgeH: Double,
-        val maxAgeH: Double,
-        val minRugScore: Int,
-        val allowUnknownSecurity: Boolean
-    )
+    // 🚀 Commit 104: آخرین سیاست اعمال‌شده (قابل خواندن از UI)
+    var lastPolicy: ScanPolicy = ScanPolicy.NORMAL
+        private set
 
     private fun ageHours(createdAt: String?): Double {
         if (createdAt == null) return 9999.0
@@ -95,34 +121,17 @@ object MemeRadar {
         }
     }
 
-    // 🚀 Commit 97: پارامتر sniperMode با default false (backward compatible)
+    // 🚀 Commit 104: پارامتر sniperMode با default false (backward compatible)
     suspend fun scan(
         sniperMode: Boolean = false,
         onProgress: (Int, String) -> Unit = { _, _ -> }
     ): List<MemeSignal> {
         lastScanFailed = false
         lastSniperStats = null
-
-        // 🚀 Commit 97: آستانه‌های متفاوت برای حالت اسنایپر
-        val thresholds = if (sniperMode) {
-            ScanThresholds(
-                minLiq = 5_000.0,            // آسان‌تر (قبلاً ۲۰K)
-                minVol24 = 10_000.0,         // آسان‌تر (قبلاً ۵۰K)
-                minAgeH = 0.5,               // از ۳۰ دقیقه
-                maxAgeH = 168.0,             // تا ۷ روز
-                minRugScore = 35,            // کمی آسان‌تر
-                allowUnknownSecurity = true  // UNKNOWN قبول با سقف امتیاز ۵۰
-            )
-        } else {
-            ScanThresholds(
-                minLiq = 20_000.0,
-                minVol24 = 50_000.0,
-                minAgeH = 1.0,
-                maxAgeH = 9999.0,
-                minRugScore = 40,
-                allowUnknownSecurity = false
-            )
-        }
+        
+        // 🚀 Commit 104: استفاده از ScanPolicy عمومی
+        val policy = ScanPolicy.of(sniperMode)
+        lastPolicy = policy
 
         onProgress(
             5,
@@ -135,14 +144,13 @@ object MemeRadar {
         for (chain in CHAINS) {
             onProgress(10 + CHAINS.indexOf(chain) * 8, "اسکن زنجیره $chain...")
 
-            // 🚀 Commit 97: در حالت اسنایپر، newPools اول و با weight بیشتر
+            // 🚀 Commit 104: در حالت اسنایپر، newPools اول (بدون تکرار)
             if (sniperMode) {
                 try {
                     val n = GeckoTerminal.api.newPools(chain).data
                     if (n != null) {
                         anyOk = true
                         pools.addAll(n)
-                        pools.addAll(n) // دوبار اضافه می‌کنیم تا اولویت داشته باشد
                     }
                 } catch (_: Exception) { }
             }
@@ -190,7 +198,7 @@ object MemeRadar {
 
         val results = mutableListOf<MemeSignal>()
         for (p in unique) {
-            when (val res = analyzeWithReason(p, thresholds)) {
+            when (val res = analyzeWithReason(p, policy)) {
                 is AnalyzeResult.Success -> results.add(res.signal)
                 is AnalyzeResult.Rejected -> when (res.reason) {
                     "liquidity" -> rejectedLiq++
@@ -226,7 +234,7 @@ object MemeRadar {
         data class Rejected(val reason: String) : AnalyzeResult()
     }
 
-    private suspend fun analyzeWithReason(p: GeckoPool, t: ScanThresholds): AnalyzeResult {
+    private suspend fun analyzeWithReason(p: GeckoPool, policy: ScanPolicy): AnalyzeResult {
         val a = p.attributes ?: return AnalyzeResult.Rejected("score")
         val price = a.priceUsd?.toDoubleOrNull() ?: return AnalyzeResult.Rejected("score")
         if (price <= 0) return AnalyzeResult.Rejected("score")
@@ -242,10 +250,10 @@ object MemeRadar {
         val age = ageHours(a.createdAt)
         val fdv = a.fdvUsd ?: 0.0
 
-        if (liq < t.minLiq) return AnalyzeResult.Rejected("liquidity")
-        if (vol24 < t.minVol24) return AnalyzeResult.Rejected("volume")
+        if (liq < policy.minLiquidityUsd) return AnalyzeResult.Rejected("liquidity")
+        if (vol24 < policy.minVolume24hUsd) return AnalyzeResult.Rejected("volume")
         if (b1 + s1 <= 0) return AnalyzeResult.Rejected("noTx")
-        if (age < t.minAgeH || age > t.maxAgeH) return AnalyzeResult.Rejected("age")
+        if (age < policy.minAgeHours || age > policy.maxAgeHours) return AnalyzeResult.Rejected("age")
 
         val total = b1 + s1
         val buyRatio = if (total > 0) b1 / total else 0.5
@@ -283,14 +291,14 @@ object MemeRadar {
 
         val (rugScore, rugWarnings, securityStatus) = checkRugSafety(chain, contractAddress)
 
-        // 🚀 Commit 97: منطق Rug Safety دوگانه
-        if (rugScore != null && rugScore < t.minRugScore) {
+        // 🚀 Commit 104: منطق Rug Safety با policy
+        if (rugScore != null && rugScore < policy.minRugScore) {
             Log.w(TAG, "🚨 $sym rug score too low: $rugScore — $rugWarnings")
             return AnalyzeResult.Rejected("security")
         }
 
         // اگر UNKNOWN باشد و allowUnknownSecurity = false → رد
-        if (rugScore == null && !t.allowUnknownSecurity) {
+        if (rugScore == null && !policy.allowUnknownSecurity) {
             Log.w(TAG, "🚫 $sym: security UNKNOWN in normal mode — rejected")
             return AnalyzeResult.Rejected("security")
         }
@@ -313,6 +321,7 @@ object MemeRadar {
                 score = finalScore,
                 liquidity = liq,
                 volumeH1 = vol1,
+                volumeH24 = vol24, // 🚀 Commit 104: حجم ۲۴س واقعی
                 buyRatio = buyRatio,
                 ageHours = age,
                 changeH1 = h1,
