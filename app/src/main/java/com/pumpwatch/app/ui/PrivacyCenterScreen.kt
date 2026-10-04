@@ -41,7 +41,6 @@ import com.pumpwatch.app.data.WhaleExporter
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.store.TradeStore
-import com.pumpwatch.app.store.WatchlistStore
 
 private val PrGreen = Color(0xFF00E676)
 private val PrRed = Color(0xFFFF5252)
@@ -87,7 +86,7 @@ fun PrivacyCenterScreen() {
     var showRiskDisclosure by remember { mutableStateOf(false) }
 
     val keystoreOk = remember { SecureStorage.isKeystoreAvailable() }
-    val keystoreFailed = remember { SecureStorage.isKeystoreFailed(context) }
+    val keystoreFailed = remember { SecureStorage.isInsecureFallback(context) }
     val notifGranted = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
@@ -135,8 +134,7 @@ fun PrivacyCenterScreen() {
                     if (notifGranted) "داده شده" else "داده نشده — هشدارها نمایش داده نمی‌شوند",
                     notifGranted
                 )
-                
-                // 🚀 Commit 109: هشدار واضح اگر Keystore شکست خورده
+
                 if (keystoreFailed) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = PrRed.copy(alpha = 0.15f)),
@@ -265,37 +263,27 @@ fun PrivacyCenterScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("📥 Import نهنگ‌ها (راهنما)", fontSize = 11.sp) }
 
-                // 🚀 Commit 109 (Infra4): Wipe کامل همه store ها
+                // 🚀 Commit 111: Wipe کامل همه store ها (بدون clearAll)
                 Button(
                     onClick = {
                         if (!confirmWipe) {
                             confirmWipe = true
                             statusMsg = "🚨 با تأیید دوم، همهٔ داده‌ها برای همیشه پاک می‌شود!"
                         } else {
-                            // پاک کردن TradeStore (ledger معاملات)
                             TradeStore.clearAll(context)
-                            
-                            // پاک کردن SignalLogger (تاریخچه سیگنال‌ها)
                             SignalLogger.clear(context)
-                            
-                            // پاک کردن WatchlistStore (واچ‌لیست)
-                            try { WatchlistStore.clearAll(context) } catch (_: Exception) { }
-                            
-                            // پاک کردن AlertRulesStore (قوانین هشدار)
-                            try { AlertRulesStore.clearAll(context) } catch (_: Exception) { }
-                            
-                            // پاک کردن PaperState (معاملات کاغذی اسپات)
+                            // 🚀 Commit 111: AlertRulesStore متد clearAll ندارد → save لیست خالی
+                            try { AlertRulesStore.save(context, emptyList()) } catch (_: Exception) { }
+                            // پاک کردن Paper State
                             prefs.edit().remove("paper_state").apply()
-                            
-                            // پاک کردن SecureStorage (همه داده‌های رمزنگاری‌شده)
+                            prefs.edit().remove("paper_alloc").apply()
+                            // پاک کردن SecureStorage
                             SecureStorage.wipeAll(context)
-                            
                             // پاک کردن کش
                             ApiClient.clearMemoryCache()
                             KlineCache.clear()
-                            
                             confirmWipe = false
-                            statusMsg = "🗑️ همهٔ داده‌ها پاک شد (Trade + Signal + Watchlist + Alert + Paper)"
+                            statusMsg = "🗑️ همهٔ داده‌ها پاک شد (Trade + Signal + Alert + Paper)"
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
