@@ -26,20 +26,10 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * MonitorWorker — نسخهٔ یکپارچه (کامیت ۱۱۰)
+ * MonitorWorker — نسخهٔ یکپارچه (کامیت ۱۱۰ + ۱۱۱)
  *
- * 🚀 Commit 110 (A1/A3/A5/F10/F14):
- * - A5: SignalLogger.updateOpenSignals در ابتدای هر اجرا (ارزیابی background)
- * - A3: ارزیابی قوانین روی کل TOP_SYMBOLS (نه فقط ۲۵ کاندید)
- * - F14: markTriggered فقط پس از موفقیت notify
- * - F10: اجرای جداگانه برای SPOT و FUT + قوانین فاندینگ
- *
- * سایر fix های قبلی حفظ شده:
- * - P1-4: KlineCache.prune() در ابتدای هر اجرا
- * - Sprint 3: time = candleCloseTs
- * - Sprint 4: پارامترهای سیگنال از ParamsStore
- * - Sprint 14 (C3): گارد POST_NOTIFICATIONS
- * - Commit 71: تفکیک transient vs terminal errors
+ * 🚀 Commit 111: buildCandidates از Pair به‌جای copy استفاده می‌کند
+ * (SignalResult ممکن است data class نباشد).
  */
 class MonitorWorker(
     context: Context,
@@ -92,7 +82,6 @@ class MonitorWorker(
         return try {
             KlineCache.prune()
 
-            // 🚀 Commit 110 (A5): ارزیابی background سیگنال‌های باز
             try {
                 val currentLogs = SignalLogger.load(applicationContext)
                 val hasOpen = currentLogs.any { it.status == "OPEN" || it.status == "EXP" }
@@ -140,7 +129,6 @@ class MonitorWorker(
                 }
             }
 
-            // 🚀 Commit 110 (A3 + F10): ارزیابی قوانین روی کل بازار
             try {
                 evaluateRulesOnFullMarket(mode)
             } catch (e: Exception) {
@@ -165,10 +153,7 @@ class MonitorWorker(
     }
 
     /**
-     * 🚀 Commit 110 (A3 + F10): ارزیابی قوانین روی کل TOP_SYMBOLS
-     *
-     * - از BatchScanner با limit=200 برای SPOT
-     * - از دادهٔ فاندینگ BinanceFutures برای FUT
+     * 🚀 Commit 111: استفاده از Pair به‌جای copy (SignalResult ممکن است data class نباشد)
      */
     private suspend fun evaluateRulesOnFullMarket(mode: String) {
         val rules = AlertRulesStore.load(applicationContext)
@@ -179,17 +164,16 @@ class MonitorWorker(
         val now = System.currentTimeMillis()
         var ruleAlerts = 0
 
-        for (r in symbolCandidates) {
+        for ((r, funding) in symbolCandidates) {
             if (ruleAlerts >= MAX_RULE_ALERTS_PER_RUN) break
             for (rule in rules) {
                 if (ruleAlerts >= MAX_RULE_ALERTS_PER_RUN) break
                 if (!rule.enabled) continue
                 if (!AlertRulesStore.symbolMatches(rule, r.symbol)) continue
                 if (AlertRulesStore.inCooldown(rule, now)) continue
-                if (!AlertRulesStore.matches(rule, r.price, r.score, r.funding, r.rsi, r.volumeRatio)) continue
+                if (!AlertRulesStore.matches(rule, r.price, r.score, funding, r.rsi, r.volumeRatio)) continue
 
-                // 🚀 Commit 110 (F14): markTriggered فقط پس از موفقیت notify
-                val ok = showRuleNotification(rule, r)
+                val ok = showRuleNotification(rule, r, funding)
                 if (ok) {
                     AlertRulesStore.markTriggered(applicationContext, rule.id, now)
                     ruleAlerts++
@@ -198,11 +182,10 @@ class MonitorWorker(
         }
     }
 
-    private suspend fun buildCandidates(mode: String): List<SignalResult> {
+    private suspend fun buildCandidates(mode: String): List<Pair<SignalResult, Double?>> {
         val params = ParamsStore.load(applicationContext)
         val baseResults = BatchScanner.scan(mode, params, limit = 200)
-
-        if (mode != "FUT") return baseResults
+        if (mode != "FUT") return baseResults.map { it to it.funding }
 
         return withContext(Dispatchers.IO) {
             val fundingMap = try {
@@ -216,21 +199,21 @@ class MonitorWorker(
                 Log.w(TAG, "Failed to load funding data", e)
                 emptyMap()
             }
-            baseResults.map { r ->
-                if (fundingMap.containsKey(r.symbol)) {
-                    r.copy(funding = fundingMap[r.symbol])
-                } else r
-            }
+            baseResults.map { r -> r to (fundingMap[r.symbol] ?: r.funding) }
         }
     }
 
-    private fun currentValueText(rule: AlertRule, r: SignalResult): String = when (rule.condition) {
+    private fun currentValueText(
+        rule: AlertRule,
+        r: SignalResult,
+        funding: Double? = r.funding
+    ): String = when (rule.condition) {
         RuleCondition.PRICE_ABOVE, RuleCondition.PRICE_BELOW ->
             String.format(Locale.US, "قیمت فعلی: %.6f", r.price)
         RuleCondition.SCORE_ABOVE ->
             "امتیاز فعلی: ${r.score}/100"
         RuleCondition.FUNDING_ABOVE, RuleCondition.FUNDING_BELOW ->
-            String.format(Locale.US, "فاندینگ فعلی: %.4f%%", (r.funding ?: 0.0) * 100)
+            String.format(Locale.US, "فاندینگ فعلی: %.4f%%", (funding ?: 0.0) * 100)
         RuleCondition.RSI_ABOVE, RuleCondition.RSI_BELOW ->
             String.format(Locale.US, "RSI فعلی: %.1f", r.rsi)
         RuleCondition.VOLUME_ABOVE ->
@@ -243,10 +226,11 @@ class MonitorWorker(
         else -> String.format(Locale.US, "%.6f", v)
     }
 
-    /**
-     * 🚀 Commit 110 (F14): مقدار برگشتی true = موفقیت ارسال، false = شکست
-     */
-    private fun showRuleNotification(rule: AlertRule, r: SignalResult): Boolean {
+    private fun showRuleNotification(
+        rule: AlertRule,
+        r: SignalResult,
+        funding: Double? = r.funding
+    ): Boolean {
         if (!canPostNotifications()) {
             markNotificationsBlocked(true)
             return false
@@ -268,8 +252,8 @@ class MonitorWorker(
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_RULES)
             .setSmallIcon(android.R.drawable.ic_notification_overlay)
             .setContentTitle("🔔 ${r.symbol}: ${rule.condition.label} ${fmtThreshold(rule.threshold)}")
-            .setContentText(currentValueText(rule, r))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(currentValueText(rule, r)))
+            .setContentText(currentValueText(rule, r, funding))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(currentValueText(rule, r, funding)))
             .setAutoCancel(true)
             .build()
 
