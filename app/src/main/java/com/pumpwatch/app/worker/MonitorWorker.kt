@@ -26,10 +26,12 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * MonitorWorker — نسخهٔ یکپارچه (کامیت ۱۱۰ + ۱۱۱)
+ * MonitorWorker — نسخهٔ یکپارچه (کامیت ۱۱۰ + ۱۱۱ + ۱۱۴)
  *
- * 🚀 Commit 111: buildCandidates از Pair به‌جای copy استفاده می‌کند
- * (SignalResult ممکن است data class نباشد).
+ * 🚀 Commit 114: هشدارهای واچ‌لیست هم اینجا ارزیابی می‌شوند (evaluator یگانه).
+ * 🚀 Commit 111: buildCandidates از Pair به‌جای copy استفاده می‌کند.
+ * 🚀 Commit 110: A5 (ارزیابی background سیگنال‌ها) + A3 (کل بازار) +
+ *    F14 (markTriggered فقط بعد از notify) + F10 (فاندینگ واقعی).
  */
 class MonitorWorker(
     context: Context,
@@ -82,6 +84,7 @@ class MonitorWorker(
         return try {
             KlineCache.prune()
 
+            // 🚀 Commit 110 (A5): ارزیابی background سیگنال‌های باز
             try {
                 val currentLogs = SignalLogger.load(applicationContext)
                 val hasOpen = currentLogs.any { it.status == "OPEN" || it.status == "EXP" }
@@ -129,10 +132,19 @@ class MonitorWorker(
                 }
             }
 
+            // 🚀 Commit 110 (A3 + F10): ارزیابی قوانین روی کل بازار
             try {
                 evaluateRulesOnFullMarket(mode)
             } catch (e: Exception) {
                 Log.w(TAG, "evaluateRulesOnFullMarket failed (non-critical)", e)
+            }
+
+            // 🚀 Commit 114: evaluator یگانه — هشدارهای واچ‌لیست هم اینجا ارزیابی می‌شوند
+            try {
+                val fired = com.pumpwatch.app.store.WatchlistStore.checkAndFire(applicationContext)
+                if (fired > 0) Log.i(TAG, "Watchlist alerts fired: $fired")
+            } catch (e: Exception) {
+                Log.w(TAG, "Watchlist checkAndFire failed (non-critical)", e)
             }
 
             Result.success()
@@ -173,6 +185,7 @@ class MonitorWorker(
                 if (AlertRulesStore.inCooldown(rule, now)) continue
                 if (!AlertRulesStore.matches(rule, r.price, r.score, funding, r.rsi, r.volumeRatio)) continue
 
+                // 🚀 Commit 110 (F14): markTriggered فقط پس از موفقیت notify
                 val ok = showRuleNotification(rule, r, funding)
                 if (ok) {
                     AlertRulesStore.markTriggered(applicationContext, rule.id, now)
