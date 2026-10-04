@@ -29,6 +29,7 @@ private val VGray = Color(0xFF8B949E)
 
 /**
  * 🚀 Commit 55 (فاز ۰ برنامهٔ اجرایی، §2.2): صفحهٔ صداقت و محدودیت‌ها.
+ * 🚀 Commit 118: به‌روزرسانی مرزهای فنی (حذف شماره‌گذاری موتور قدیمی + تصحیح فاصله هشدارها)
  */
 @Composable
 fun RiskDisclosureScreen(onBack: () -> Unit) {
@@ -42,7 +43,6 @@ fun RiskDisclosureScreen(onBack: () -> Unit) {
             fontSize = 11.sp, color = VGray
         )
 
-        // کارت ۱: توصیهٔ مالی نیست
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("🚫 این اپ توصیهٔ مالی نیست", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VRed)
@@ -54,7 +54,6 @@ fun RiskDisclosureScreen(onBack: () -> Unit) {
             }
         }
 
-        // کارت ۲: دادهٔ آن‌چین محدود است
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("🔍 دادهٔ آن‌چین عمومی، نه کامل", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VBlue)
@@ -68,7 +67,6 @@ fun RiskDisclosureScreen(onBack: () -> Unit) {
             }
         }
 
-        // کارت ۳: تحلیل‌ها همبستگی‌اند
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("🔗 همبستگی ≠ علیت", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VGreen)
@@ -82,21 +80,20 @@ fun RiskDisclosureScreen(onBack: () -> Unit) {
             }
         }
 
-        // کارت ۴: مرزهای فنی
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 🚀 Commit 118: حذف شماره‌گذاری موتور قدیمی + تصحیح فاصله هشدارها
                 Text("⏱️ مرزهای منابع رایگان", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VGold)
                 Text(
-                    "• موتور ۶ (جنایت‌شناسی): با منابع رایگان موبایل، معمولاً ۲۴–۴۸ ساعت اخیر قابل تحلیل است. بازه‌های قدیمی‌تر نیاز به ایندکسر سرور دارند\n" +
-                    "• موتور ۵ (تاریخچه کیف): تا عمقی که RPC عمومی اجازه می‌دهد (معمولاً ۱۰۰۰ تراکنش اخیر)\n" +
-                    "• هشدارهای خودکار: best-effort، نه لحظه‌ای (هر ۶ ساعت اسکن می‌شوند)\n" +
+                    "• تحلیل تاریخچهٔ زنجیره‌ای: با منابع رایگان موبایل، معمولاً ۲۴–۴۸ ساعت اخیر قابل تحلیل است. بازه‌های قدیمی‌تر نیاز به ایندکسر سرور دارند\n" +
+                    "• تاریخچهٔ کیف: تا عمقی که RPC عمومی اجازه می‌دهد (معمولاً ۱۰۰۰ تراکنش اخیر)\n" +
+                    "• هشدارهای خودکار: best-effort، نه لحظه‌ای (هر ۳۰ دقیقه توسط MonitorWorker)\n" +
                     "• در صورت Rate limit یا خطای شبکه، اپ صادقانه می‌گوید چه چیزی ناموفق بوده — نه عدد جعلی",
                     fontSize = 10.sp, color = VGray, lineHeight = 15.sp
                 )
             }
         }
 
-        // کارت ۵: توصیه‌های عملی
         Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("✅ استفادهٔ هوشمندانه", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VGreen)
@@ -111,7 +108,6 @@ fun RiskDisclosureScreen(onBack: () -> Unit) {
             }
         }
 
-        // کارت ۶: مسئولیت
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF3D1F1F)), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("⚠️ مسئولیت", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = VRed)
@@ -126,7 +122,6 @@ fun RiskDisclosureScreen(onBack: () -> Unit) {
             }
         }
 
-        // دکمه بازگشت
         Button(
             onClick = onBack,
             colors = ButtonDefaults.buttonColors(containerColor = VBlue),
