@@ -1,12 +1,17 @@
 package com.pumpwatch.app.data
 
 import android.content.Context
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import android.util.Log
 
 /**
- * 🚀 Commit 91 (A5): ذخیرهٔ توکن‌های دنبال‌شده برای Worker پس‌زمینه.
- * ساختار ساده با SharedPreferences.
+ * 🚀 Commit 113: DEPRECATED — این API قدیمی به store.WatchlistStore هدایت می‌شود.
+ *
+ * در کامیت ۱۱۴، این فایل کاملاً حذف می‌شود و call site ها باید مستقیماً
+ * به com.pumpwatch.app.store.WatchlistStore مراجعه کنند.
+ *
+ * برای سازگاری عقب‌رو، این توابع همچنان کار می‌کنند ولی:
+ * - داده در گروه «واردشده (Legacy)» در store جدید ذخیره می‌شود
+ * - همهٔ عملیات رمزنگاری‌شده و thread-safe است
  */
 data class WatchlistEntry(
     val symbol: String,
@@ -15,43 +20,95 @@ data class WatchlistEntry(
     val addedAt: Long = System.currentTimeMillis()
 )
 
+@Deprecated(
+    message = "Use com.pumpwatch.app.store.WatchlistStore instead",
+    replaceWith = ReplaceWith(
+        "com.pumpwatch.app.store.WatchlistStore",
+        "com.pumpwatch.app.store.WatchlistStore"
+    )
+)
 object WatchlistStore {
 
-    private const val PREFS_NAME = "pumpwatch_prefs"
-    private const val KEY_WATCHLIST = "watchlist_v1"
-    private val gson = Gson()
+    private const val TAG = "WatchlistStore.Legacy"
+    private const val LEGACY_GROUP_NAME = "واردشده (Legacy)"
+
+    private fun unified(): com.pumpwatch.app.store.WatchlistStore =
+        com.pumpwatch.app.store.WatchlistStore
+
+    private fun findLegacyGroup(ctx: Context): com.pumpwatch.app.store.WatchGroup? {
+        val groups = unified().loadGroups(ctx)
+        return groups.firstOrNull { it.name == LEGACY_GROUP_NAME }
+    }
+
+    private fun ensureLegacyGroup(ctx: Context): com.pumpwatch.app.store.WatchGroup? {
+        findLegacyGroup(ctx)?.let { return it }
+        unified().addGroup(ctx, LEGACY_GROUP_NAME)
+        return findLegacyGroup(ctx)
+    }
 
     fun load(context: Context): List<WatchlistEntry> {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val json = prefs.getString(KEY_WATCHLIST, null) ?: return emptyList()
-        return try {
-            val type = object : TypeToken<List<WatchlistEntry>>() {}.type
-            gson.fromJson(json, type) ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
+        val group = findLegacyGroup(context) ?: return emptyList()
+        return group.coins.map { coin ->
+            WatchlistEntry(
+                symbol = coin.symbol,
+                chain = null, // chain در WatchCoin ذخیره نشده
+                contract = coin.contract,
+                addedAt = coin.addedAt
+            )
         }
     }
 
     fun save(context: Context, entries: List<WatchlistEntry>) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val json = gson.toJson(entries)
-        prefs.edit().putString(KEY_WATCHLIST, json).apply()
+        val group = ensureLegacyGroup(context) ?: run {
+            Log.e(TAG, "save: cannot create legacy group, aborting")
+            return
+        }
+        // حذف همهٔ ارزهای فعلی گروه
+        for (coin in group.coins) {
+            unified().removeCoin(context, group.id, coin.id)
+        }
+        // افزودن entries جدید
+        for (entry in entries) {
+            val coin = com.pumpwatch.app.store.WatchCoin(
+                id = entry.contract ?: entry.symbol,
+                symbol = entry.symbol.uppercase(java.util.Locale.US),
+                name = entry.symbol.uppercase(java.util.Locale.US),
+                contract = entry.contract,
+                rank = null,
+                addedAt = entry.addedAt,
+                alerts = emptyList()
+            )
+            unified().addCoin(context, group.id, coin)
+        }
     }
 
     fun add(context: Context, entry: WatchlistEntry) {
-        val current = load(context).toMutableList()
-        current.removeAll { it.symbol.equals(entry.symbol, ignoreCase = true) }
-        current.add(entry)
-        save(context, current)
+        val group = ensureLegacyGroup(context) ?: run {
+            Log.e(TAG, "add: cannot create legacy group, aborting")
+            return
+        }
+        val coin = com.pumpwatch.app.store.WatchCoin(
+            id = entry.contract ?: entry.symbol,
+            symbol = entry.symbol.uppercase(java.util.Locale.US),
+            name = entry.symbol.uppercase(java.util.Locale.US),
+            contract = entry.contract,
+            rank = null,
+            addedAt = entry.addedAt,
+            alerts = emptyList()
+        )
+        unified().addCoin(context, group.id, coin)
     }
 
     fun remove(context: Context, symbol: String) {
-        val current = load(context).toMutableList()
-        current.removeAll { it.symbol.equals(symbol, ignoreCase = true) }
-        save(context, current)
+        val group = findLegacyGroup(context) ?: return
+        val upperSym = symbol.uppercase(java.util.Locale.US)
+        val coin = group.coins.firstOrNull { it.symbol.equals(upperSym, ignoreCase = true) } ?: return
+        unified().removeCoin(context, group.id, coin.id)
     }
 
     fun clear(context: Context) {
-        save(context, emptyList())
+        // فقط prefs قدیمی را پاک می‌کنیم (برای سازگاری عقب‌رو)
+        context.getSharedPreferences("pumpwatch_prefs", Context.MODE_PRIVATE)
+            .edit().remove("watchlist_v1").apply()
     }
 }
