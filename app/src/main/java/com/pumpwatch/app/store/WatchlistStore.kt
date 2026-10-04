@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit
  * 🚀 Sprint 15 (فاز ۲ / Commit 16): واچ‌لیست گروه‌بندی‌شده
  * 🚀 Commit 70 (فاز ۱ — پایداری داده): thread-safety + no-wipe guarantee
  * 🚀 Commit 114: ثبت وضعیت ارزیابی (markEval) برای UI صادقانه
+ * 🚀 Commit 115: rearmAlert برای فعال‌سازی مجدد هشدارهای تریگرشده
  */
 
 data class WatchAlert(
@@ -258,6 +259,33 @@ object WatchlistStore {
                 g.copy(coins = g.coins.map { c ->
                     if (c.id != coinId) return@map c
                     c.copy(alerts = c.alerts.filterNot { it.id == alertId })
+                })
+            }
+            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+        }
+    }
+
+    /**
+     * 🚀 Commit 115: re-arm کردن یک هشدار تریگرشده.
+     * triggeredAt و triggeredPrice را null می‌کند تا هشدار دوباره فعال شود.
+     * این برای کاربرانی است که می‌خواهند هشدار را بدون حذف مجدد، دوباره فعال کنند.
+     */
+    fun rearmAlert(ctx: Context, groupId: String, coinId: String, alertId: String) {
+        synchronized(lock) {
+            val current = loadGroupsOrNull(ctx)
+            if (current == null) {
+                lastLoadFailed = true
+                Log.e("WatchlistStore", "rearmAlert ABORTED: store unreadable")
+                return
+            }
+            lastLoadFailed = false
+            val groups = current.map { g ->
+                if (g.id != groupId) return@map g
+                g.copy(coins = g.coins.map { c ->
+                    if (c.id != coinId) return@map c
+                    c.copy(alerts = c.alerts.map { a ->
+                        if (a.id == alertId) a.copy(triggeredAt = null, triggeredPrice = null) else a
+                    })
                 })
             }
             SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
