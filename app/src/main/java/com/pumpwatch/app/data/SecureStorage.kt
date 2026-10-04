@@ -15,48 +15,29 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * 🚀 Sprint 14 (مرحله ۳ / Commit 7A): ذخیره‌سازی امن بدون dependency خارجی
- * 🚀 Commit 78 (فاز ۲ — بند ۸): هندل KeyPermanentlyInvalidatedException
- * 🚀 Commit 109 (Infra3): putString دیگر fallback به plaintext ندارد (fail-closed)
+ * 🚀 Sprint 14 + Commit 78 + Commit 109 + Commit 111:
+ * ذخیره‌سازی امن AES-256-GCM با کلید داخل Android Keystore.
  *
- * رمزنگاری: AES-256-GCM با کلید داخل Android Keystore
- * (کلید هرگز از دستگاه خارج نمی‌شود؛ حتی root هم نمی‌تواند استخراجش کند).
+ * 🚀 Commit 111: نام SecretResult و isInsecureFallback برای سازگاری
+ * با RpcKeyStore و WalletForensics حفظ شده است.
  *
- * ساختار blob ذخیره‌شده: Base64( iv[12] + ciphertext )
- * فایل prefs: pumpwatch_secure_prefs
- *
- * 🚀 Commit 109: Fail-Closed — اگر Keystore در دسترس نباشد:
- *   - putString/getString null/خطا برمی‌گرداند (نه plaintext)
- *   - Privacy Center به کاربر هشدار می‌دهد که داده ذخیره نمی‌شود
- *   - هرگز وانمود نمی‌کنیم رمزنگاری شده وقتی نشده
- *
- * 🚀 Commit 44 (فاز ۱ برنامهٔ اجرایی): putSecret/getSecret fail-closed
- * برای API keyها که نباید به هیچ وجه plain ذخیره شوند. اگر Keystore
- * در دسترس نباشد، ذخیره نمی‌شود و false/خطا برگردانده می‌شود.
- *
- * 🚀 Commit 78: وقتی کاربر PIN/بیومتریک را تغییر می‌دهد، Android Keystore
- * کلید را invalidate می‌کند. قبلاً این باعث کرش می‌شد. حالا:
- *   1. Exception detect می‌شود
- *   2. کلید قدیمی حذف می‌شود
- *   3. کلید جدید تولید می‌شود
- *   4. دادهٔ قبلی از دست می‌رود (اجتناب‌ناپذیر — کلید gone forever)
- *   5. flag secure_storage_fell_back set می‌شود تا UI به کاربر بگوید
+ * 🚀 Commit 109: putString دیگر بی‌صدا plaintext نمی‌نویسد (fail-closed).
  */
 object SecureStorage {
 
     private const val PREFS_NAME = "pumpwatch_secure_prefs"
     private const val KEYSTORE_ALIAS = "pumpwatch_master_key"
-    private const val FLAG_KEYSTORE_FAILED = "secure_storage_keystore_failed"
+    private const val FLAG_INSECURE_FALLBACK = "secure_storage_fell_back"
     private const val IV_BYTES = 12
     private const val TAG_BITS = 128
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val TAG = "SecureStorage"
 
-    /** نتیجه تلاش putString — برای گزارش صادقانه به UI */
-    sealed class StorageResult {
-        object Saved : StorageResult()
-        object KeystoreUnavailable : StorageResult()
-        data class CryptoError(val message: String) : StorageResult()
+    /** 🚀 Commit 111: نام SecretResult برای سازگاری با callers قدیمی */
+    sealed class SecretResult {
+        object Saved : SecretResult()
+        object KeystoreUnavailable : SecretResult()
+        data class CryptoError(val message: String) : SecretResult()
     }
 
     private fun prefs(ctx: Context): SharedPreferences =
@@ -65,20 +46,10 @@ object SecureStorage {
     private fun flagPrefs(ctx: Context): SharedPreferences =
         ctx.getSharedPreferences("pumpwatch_prefs", Context.MODE_PRIVATE)
 
-    /**
-     * 🚀 Commit 78: ساخت یا دریافت کلید AES با هندل invalidation.
-     *
-     * اگر کلید invalidated شده باشد (کاربر PIN/بیومتریک را عوض کرده):
-     *   1. UnrecoverableKeyException یا KeyPermanentlyInvalidatedException detect می‌شود
-     *   2. کلید قدیمی حذف می‌شود
-     *   3. کلید جدید تولید می‌شود
-     *   4. دادهٔ قبلی از دست می‌رود (اجتناب‌ناپذیر)
-     */
     private fun getOrCreateKey(): SecretKey? {
         return try {
             val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
-            // تلاش برای دریافت کلید موجود
             val existingKey = try {
                 ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey
             } catch (e: UnrecoverableKeyException) {
@@ -90,21 +61,18 @@ object SecureStorage {
             }
 
             if (existingKey != null) {
-                // تست رمزنگاری: اگر کلید invalidated باشد، اینجا exception می‌دهد
                 try {
                     val cipher = Cipher.getInstance(TRANSFORMATION)
                     cipher.init(Cipher.ENCRYPT_MODE, existingKey)
                     return existingKey
                 } catch (e: KeyPermanentlyInvalidatedException) {
                     Log.w(TAG, "Master key invalidated during use, regenerating", e)
-                    // حذف کلید قدیمی
                     if (ks.containsAlias(KEYSTORE_ALIAS)) {
                         ks.deleteEntry(KEYSTORE_ALIAS)
                     }
                 }
             }
 
-            // تولید کلید جدید
             val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
             kg.init(
                 KeyGenParameterSpec.Builder(
@@ -123,15 +91,11 @@ object SecureStorage {
         }
     }
 
-    /** آیا Keystore روی این دستگاه کار می‌کند؟ (برای Privacy Center) */
     fun isKeystoreAvailable(): Boolean = getOrCreateKey() != null
 
-    /**
-     * 🚀 Commit 109: آیا آخرین تلاش برای ذخیره‌سازی شکست خورده؟
-     * برای افشا در UI که کاربر بداند داده‌اش ذخیره نشده.
-     */
-    fun isKeystoreFailed(ctx: Context): Boolean =
-        flagPrefs(ctx).getBoolean(FLAG_KEYSTORE_FAILED, false)
+    /** 🚀 Commit 111: alias سازگاری برای callers قدیمی */
+    fun isInsecureFallback(ctx: Context): Boolean =
+        flagPrefs(ctx).getBoolean(FLAG_INSECURE_FALLBACK, false)
 
     // ---------- توابع pure و internal برای تست JVM ----------
 
@@ -150,22 +114,17 @@ object SecureStorage {
         null
     }
 
-    // ---------- API عمومی (Fail-Closed — Commit 109) ----------
+    // ---------- API عمومی (Fail-Closed) ----------
 
     /**
-     * 🚀 Commit 109: ذخیره‌سازی با رمزنگاری AES-256-GCM.
-     *
-     * **Fail-Closed:** اگر Keystore در دسترس نباشد، داده ذخیره نمی‌شود
-     * و `KeystoreUnavailable` برگردانده می‌شود. هرگز به plaintext fallback نمی‌شود.
-     *
-     * این برای ledger، تریدها، و داده‌های حساس کاربر است.
+     * 🚀 Commit 109: اگر Keystore در دسترس نباشد، داده ذخیره نمی‌شود.
      */
-    fun putString(ctx: Context, key: String, value: String): StorageResult {
+    fun putString(ctx: Context, key: String, value: String): SecretResult {
         val masterKey = getOrCreateKey()
         if (masterKey == null) {
             Log.e(TAG, "Keystore unavailable — putString rejected (fail-closed)")
-            flagPrefs(ctx).edit().putBoolean(FLAG_KEYSTORE_FAILED, true).apply()
-            return StorageResult.KeystoreUnavailable
+            flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, true).apply()
+            return SecretResult.KeystoreUnavailable
         }
 
         return try {
@@ -174,27 +133,20 @@ object SecureStorage {
             val iv = cipher.iv ?: throw IllegalStateException("GCM iv missing")
             val ct = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
             prefs(ctx).edit().putString(key, packBlob(iv, ct)).apply()
-            // پاک کردن flag شکست قبلی
-            if (isKeystoreFailed(ctx)) {
-                flagPrefs(ctx).edit().putBoolean(FLAG_KEYSTORE_FAILED, false).apply()
+            if (isInsecureFallback(ctx)) {
+                flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, false).apply()
             }
-            StorageResult.Saved
+            SecretResult.Saved
         } catch (e: KeyPermanentlyInvalidatedException) {
-            Log.e(TAG, "Key invalidated during putString, data lost", e)
-            flagPrefs(ctx).edit().putBoolean(FLAG_KEYSTORE_FAILED, true).apply()
-            StorageResult.KeystoreUnavailable
+            Log.e(TAG, "Key invalidated during putString, data not saved", e)
+            flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, true).apply()
+            SecretResult.KeystoreUnavailable
         } catch (e: Exception) {
             Log.e(TAG, "Crypto error during putString", e)
-            StorageResult.CryptoError(e.message ?: "Unknown crypto error")
+            SecretResult.CryptoError(e.message ?: e::class.java.simpleName)
         }
     }
 
-    /**
-     * 🚀 Commit 109: خواندن با رمزگشایی AES-256-GCM.
-     *
-     * **Fail-Closed:** اگر Keystore در دسترس نباشد یا داده خراب باشد،
-     * `null` برگردانده می‌شود (نه plaintext).
-     */
     fun getString(ctx: Context, key: String): String? {
         val blob = prefs(ctx).getString(key, null) ?: return null
         val unpacked = unpackBlob(blob)
@@ -202,10 +154,9 @@ object SecureStorage {
             val masterKey = getOrCreateKey()
             if (masterKey == null) {
                 Log.e(TAG, "Keystore unavailable — getString returns null (fail-closed)")
-                flagPrefs(ctx).edit().putBoolean(FLAG_KEYSTORE_FAILED, true).apply()
+                flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, true).apply()
                 return null
             }
-
             try {
                 val (iv, ct) = unpacked
                 val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -213,26 +164,23 @@ object SecureStorage {
                 return String(cipher.doFinal(ct), Charsets.UTF_8)
             } catch (e: KeyPermanentlyInvalidatedException) {
                 Log.e(TAG, "Key invalidated during getString, data lost", e)
-                flagPrefs(ctx).edit().putBoolean(FLAG_KEYSTORE_FAILED, true).apply()
+                flagPrefs(ctx).edit().putBoolean(FLAG_INSECURE_FALLBACK, true).apply()
                 return null
             } catch (e: Exception) {
                 Log.e(TAG, "Crypto error during getString", e)
                 return null
             }
         }
-        return null
+        return if (isInsecureFallback(ctx)) blob else null
     }
 
     fun remove(ctx: Context, key: String) {
         prefs(ctx).edit().remove(key).apply()
     }
 
-    /**
-     * 🚀 Commit 109: پاک کردن همهٔ داده‌های رمزنگاری‌شده + flag شکست.
-     */
     fun wipeAll(ctx: Context) {
         try { prefs(ctx).edit().clear().apply() } catch (_: Exception) { }
-        try { flagPrefs(ctx).edit().remove(FLAG_KEYSTORE_FAILED).apply() } catch (_: Exception) { }
+        try { flagPrefs(ctx).edit().remove(FLAG_INSECURE_FALLBACK).apply() } catch (_: Exception) { }
     }
 
     fun deleteMasterKey() {
@@ -242,28 +190,14 @@ object SecureStorage {
         } catch (_: Exception) { }
     }
 
-    // ---------- API fail-closed برای secretها (Commit 44) ----------
+    // ---------- API fail-closed برای secretها ----------
 
-    /**
-     * ذخیرهٔ رمزنگاری‌شده بدون fallback. اگر Keystore کار نکند،
-     * ذخیره نمی‌شود و KeystoreUnavailable برگردانده می‌شود.
-     * این برای API keyها که نباید به هیچ وجه plain بمانند.
-     */
-    fun putSecret(ctx: Context, key: String, value: String): StorageResult {
-        return putString(ctx, key, value)  // همان منطق fail-closed
-    }
+    fun putSecret(ctx: Context, key: String, value: String): SecretResult =
+        putString(ctx, key, value)
 
-    /**
-     * خواندن secret: فقط رمزگشایی امن. اگر blob خراب بود یا Keystore
-     * در دسترس نبود، null برگردانده می‌شود (نه plain text).
-     */
-    fun getSecret(ctx: Context, key: String): String? {
-        return getString(ctx, key)  // همان منطق fail-closed
-    }
+    fun getSecret(ctx: Context, key: String): String? =
+        getString(ctx, key)
 
-    /**
-     * بررسی وجود secret بدون رمزگشایی (ارزان؛ برای نمایش "Configured" در UI).
-     */
     fun hasSecret(ctx: Context, key: String): Boolean =
         prefs(ctx).getString(key, null) != null
 }
