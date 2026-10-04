@@ -11,6 +11,7 @@ import com.google.gson.Gson
 import com.pumpwatch.app.MainActivity
 import com.pumpwatch.app.data.BinanceFutures
 import com.pumpwatch.app.data.KlineCache
+import com.pumpwatch.app.engine.PaperRules
 import com.pumpwatch.app.ui.PaperState
 import com.pumpwatch.app.ui.PaperTrade
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,13 @@ object QuickScanner {
         return if (mode == "FUTURES") scanFutures(ctx, symbols, params) else scanSpot(ctx, symbols, params)
     }
 
+    /**
+     * 🚀 Commit 107 (T2): قفل مشترک + بازخوانی تازه + cash بازمحاسبه‌شده
+     * 
+     * این تابع دیگر cash را از state ذخیره‌شده نمی‌خواند؛ بلکه از
+     * PaperRules.recomputeCash محاسبه می‌کند تا هم‌زمانی UI و Worker
+     * نتواند overwrite کند.
+     */
     private fun openPaperTrade(
         ctx: Context, symbol: String, entry: Double, stop: Double,
         target: Double, stopPct: Double, score: Int
@@ -65,25 +73,28 @@ object QuickScanner {
             val prefs = ctx.getSharedPreferences("pumpwatch_prefs", 0)
             if (!prefs.getBoolean("paper_bot", false)) return
             val gson = Gson()
-            val state = try {
-                val json = prefs.getString("paper_state", "") ?: ""
-                if (json.isEmpty()) PaperState() else gson.fromJson(json, PaperState::class.java) ?: PaperState()
-            } catch (_: Exception) { PaperState() }
+            // 🚀 Commit 107 (T2): قفل مشترک + بازخوانی تازه + cash بازمحاسبه‌شده
+            synchronized(PaperRules.lock) {
+                val state = try {
+                    val json = prefs.getString("paper_state", "") ?: ""
+                    if (json.isEmpty()) PaperState() else gson.fromJson(json, PaperState::class.java) ?: PaperState()
+                } catch (_: Exception) { PaperState() }
 
-            if (state.trades.any { it.status == "OPEN" && it.symbol == symbol }) return
-            val size = min(50.0, state.cash * 0.1)
-            if (size < 10 || entry <= 0) return
+                if (state.trades.any { it.status == "OPEN" && it.symbol == symbol }) return
+                val size = min(50.0, PaperRules.recomputeCash(state) * 0.1)
+                if (size < 10 || entry <= 0) return
 
-            state.trades.add(
-                PaperTrade(
-                    symbol = symbol, tier = "هشدار 🔔", entry = entry, sizeUsd = size,
-                    qty = size / entry, price = entry, stop = stop, stopPct = stopPct,
-                    target = target, openTime = System.currentTimeMillis(),
-                    score = score, trailing = true
+                state.trades.add(
+                    PaperTrade(
+                        symbol = symbol, tier = "هشدار 🔔", entry = entry, sizeUsd = size,
+                        qty = size / entry, price = entry, stop = stop, stopPct = stopPct,
+                        target = target, openTime = System.currentTimeMillis(),
+                        score = score, trailing = true
+                    )
                 )
-            )
-            state.cash -= size
-            prefs.edit().putString("paper_state", gson.toJson(state)).apply()
+                state.cash = PaperRules.recomputeCash(state)
+                prefs.edit().putString("paper_state", gson.toJson(state)).apply()
+            }
         } catch (_: Exception) { }
     }
 
@@ -261,10 +272,13 @@ object QuickScanner {
                 )
                 if (logged) {
                     signalCount++
-                    openPaperTrade(
-                        ctx, signal.symbol, signal.entry, signal.stopLoss, signal.target1,
-                        (signal.entry - signal.stopLoss) / signal.entry * 100, signal.score
-                    )
+                    // 🚀 Commit 107 (T5): Paper اسپات فقط LONG است → فقط PUMP ترید باز می‌کند
+                    if (signal.side == "PUMP") {
+                        openPaperTrade(
+                            ctx, signal.symbol, signal.entry, signal.stopLoss, signal.target1,
+                            (signal.entry - signal.stopLoss) / signal.entry * 100, signal.score
+                        )
+                    }
                 }
                 if (signal.golden) {
                     sendNotification(ctx, signal.symbol, signal.score, signal.side, signal.price, "SPOT", signal.reasons, signal.candleCloseTs)
