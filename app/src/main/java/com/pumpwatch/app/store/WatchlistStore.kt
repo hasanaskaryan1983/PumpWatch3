@@ -29,21 +29,7 @@ import java.util.concurrent.TimeUnit
 /**
  * 🚀 Sprint 15 (فاز ۲ / Commit 16): واچ‌لیست گروه‌بندی‌شده
  * 🚀 Commit 70 (فاز ۱ — پایداری داده): thread-safety + no-wipe guarantee
- *
- * چهار باگ بسته شد (CONSTITUTION بندهای ۸، ۹، ۱۱):
- *
- * ۱) Race condition (بند ۹): همهٔ عملیات RMW داخل `synchronized(lock)`
- *    → Worker و UI هم‌زمان داده را overwrite نمی‌کنند
- *
- * ۲) load error ≠ save empty (بند ۸): `loadGroupsOrNull` مقدار null
- *    برمی‌گرداند روی شکست decrypt/parse. هر نوشتنی که بخواهد لیست خالی
- *    را روی store خراب بنویسد، REJECT می‌شود.
- *
- * ۳) Worker blind retry (بند ۱۱): تفکیک TransientError (شبکه) از
- *    TerminalError (کد) → فقط موقتی‌ها retry می‌شوند.
- *
- * ۴) Gson default parameter (بند ۱۰): فیلدهای `id` همیشه پر می‌شوند
- *    (UUID.randomUUID در constructor)، پس null نمی‌شوند.
+ * 🚀 Commit 114: ثبت وضعیت ارزیابی (markEval) برای UI صادقانه
  */
 
 data class WatchAlert(
@@ -94,11 +80,6 @@ object WatchlistStore {
 
     // ---------- خواندن/نوشتن ----------
 
-    /**
-     * 🚀 Commit 70 (بند ۸): نسخهٔ صادقِ خواندن.
-     * - اگر داده‌ای وجود ندارد → emptyList (این «شکست» نیست)
-     * - اگر decrypt/parse شکست بخورد → **null** (یعنی داده هست ولی خوانده نمی‌شود)
-     */
     private fun loadGroupsOrNull(ctx: Context): List<WatchGroup>? {
         val json = SecureStorage.getString(ctx, KEY_GROUPS) ?: return emptyList()
         return try {
@@ -119,7 +100,6 @@ object WatchlistStore {
 
     fun saveGroups(ctx: Context, groups: List<WatchGroup>) {
         synchronized(lock) {
-            // 🚀 Commit 70 (بند ۸): اگر آخرین خواندن شکست خورده و لیست خالی است، REJECT
             if (lastLoadFailed && groups.isEmpty()) {
                 Log.e("WatchlistStore", "SAVE REJECTED: refusing to overwrite unreadable store with empty list")
                 return
@@ -323,25 +303,51 @@ object WatchlistStore {
         }
     }
 
-    // ---------- بررسی مشترک (Worker + رفرش UI) ----------
+    // ---------- بررسی مشترک (MonitorWorker — Commit 114) ----------
+
+    /**
+     * 🚀 Commit 114: ثبت وضعیت ارزیابی تا UI بتواند صادقانه بگوید
+     * «ارزیابی نشده» (قطع شبکه) در مقابل «بدون هشدار».
+     */
+    private fun markEval(ctx: Context, ok: Boolean) {
+        ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
+            .putBoolean("watchlist_last_eval_ok", ok)
+            .putLong("watchlist_last_eval_ts", System.currentTimeMillis())
+            .apply()
+    }
+
+    /** وضعیت آخرین ارزیابی: (موفق؟، زمان) — برای نمایش در WatchlistScreen */
+    fun lastEvalStatus(ctx: Context): Pair<Boolean, Long> {
+        val p = ctx.getSharedPreferences("pumpwatch_prefs", 0)
+        return p.getBoolean("watchlist_last_eval_ok", true) to p.getLong("watchlist_last_eval_ts", 0L)
+    }
 
     suspend fun checkAndFire(ctx: Context): Int {
         val groups = loadGroups(ctx)
-        if (groups.isEmpty()) return 0
+        if (groups.isEmpty()) {
+            markEval(ctx, ok = true)
+            return 0
+        }
         val coins = try {
             ApiClient.getTop1000Coins()
         } catch (e: Exception) {
             Log.w("WatchlistStore", "checkAndFire: API failed (transient)", e)
+            // 🚀 Commit 114: «ارزیابی نشده» ثبت می‌شود، نه «بدون هشدار»
+            markEval(ctx, ok = false)
             return 0
         }
         val priceMap = coins.associate { it.id to it.current_price }
         val fired = evaluate(groups) { priceMap[it] }
-        if (fired.isEmpty()) return 0
+        if (fired.isEmpty()) {
+            markEval(ctx, ok = true)
+            return 0
+        }
         saveGroups(ctx, markTriggered(groups, fired, { priceMap[it] }, System.currentTimeMillis()))
         fired.forEach { (groupId, coinId, alert) ->
             val coin = groups.flatMap { it.coins }.find { it.id == coinId }
             if (coin != null) notify(ctx, coin, alert, priceMap[coinId])
         }
+        markEval(ctx, ok = true)
         return fired.size
     }
 
@@ -372,13 +378,13 @@ object WatchlistStore {
 }
 
 /** 🚀 Commit 16: بررسی دوره‌ای هشدارهای واچ‌لیست (هر ۱۵ دقیقه) */
+@Deprecated("ارزیابی به MonitorWorker منتقل شد (Commit 114)")
 class WatchlistWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         return try {
             WatchlistStore.checkAndFire(applicationContext)
             Result.success()
         } catch (e: Exception) {
-            // 🚀 Commit 70 (بند ۱۱): تفکیک خطای موقتی از قطعی
             val msg = e.message ?: ""
             val isTransient = msg.contains("timeout", true) ||
                 msg.contains("429") ||
@@ -397,8 +403,20 @@ class WatchlistWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(
     }
 }
 
+/**
+ * 🚀 Commit 114: DEPRECATED — ارزیابی به MonitorWorker منتقل شد.
+ * stop() را یک‌بار از MainActivity صدا بزن تا کار دوره‌ای قدیمی
+ * روی دستگاه‌هایی که نسخهٔ قبلی را داشته‌اند لغو شود.
+ */
+@Deprecated("ارزیابی واچ‌لیست حالا داخل MonitorWorker اجرا می‌شود (Commit 114)")
 object WatchlistScheduler {
     private const val NAME = "WatchlistAlerts"
+
+    /** لغو کار دوره‌ای قدیمی (ضروری برای دستگاه‌های آپدیت‌شده) */
+    fun stop(ctx: Context) {
+        WorkManager.getInstance(ctx).cancelUniqueWork(NAME)
+    }
+
     fun start(ctx: Context) {
         val req = PeriodicWorkRequestBuilder<WatchlistWorker>(15, TimeUnit.MINUTES)
             .setConstraints(
