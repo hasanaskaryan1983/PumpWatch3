@@ -19,17 +19,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +52,9 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.platformContractOf
+import com.pumpwatch.app.engine.AlertRule
+import com.pumpwatch.app.engine.AlertRulesStore
+import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -112,6 +119,12 @@ private fun levelOf(score: Int): String = when {
     else -> "👀 زودهنگام"
 }
 
+private fun fmtThreshold(v: Double): String = when {
+    v >= 1000 -> String.format(Locale.US, "%.2f", v)
+    v >= 1 -> String.format(Locale.US, "%.4f", v)
+    else -> String.format(Locale.US, "%.6f", v)
+}
+
 @Composable
 private fun ContractRow(ctx: Context, contract: String?, coinId: String) {
     val displayAddr = contract ?: coinId
@@ -169,6 +182,15 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var accuracyResetKey by remember { mutableStateOf(0) }
     var resetMsg by remember { mutableStateOf<String?>(null) }
 
+    // 🚀 Commit 110 (A1): state های قوانین سفارشی
+    var rules by remember { mutableStateOf<List<AlertRule>>(emptyList()) }
+    var rulesExpanded by remember { mutableStateOf(false) }
+    var ruleSymbol by remember { mutableStateOf("") }
+    var ruleCondition by remember { mutableStateOf(RuleCondition.PRICE_ABOVE) }
+    var ruleThreshold by remember { mutableStateOf("") }
+    var ruleMsg by remember { mutableStateOf("") }
+    var conditionDialogOpen by remember { mutableStateOf(false) }
+
     fun load() {
         scope.launch {
             loading = true
@@ -214,7 +236,15 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    LaunchedEffect(Unit) { load() }
+    // 🚀 Commit 110 (A1): تابع بارگذاری قوانین
+    fun reloadRules() {
+        rules = AlertRulesStore.load(ctx)
+    }
+
+    LaunchedEffect(Unit) {
+        load()
+        reloadRules()
+    }
 
     val alerts = coins
         .mapNotNull { eval(it) }
@@ -312,6 +342,152 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             }
         }
 
+        // 🚀 Commit 110 (A1): کارت قوانین سفارشی
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = ACard),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { rulesExpanded = !rulesExpanded }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(if (rulesExpanded) "▼" else "▶", fontSize = 12.sp, color = AGold)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "🔔 قانون‌های من (${rules.size})",
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        color = Color.White, modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "ارزیابی هر ۳۰ دقیقه توسط Worker",
+                        fontSize = 9.sp, color = AGray
+                    )
+                }
+
+                AnimatedVisibility(visible = rulesExpanded) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        if (rules.isEmpty()) {
+                            Text(
+                                "هنوز قانونی نساختی. مثال: BTC قیمت بالای ۷۰۰۰۰، ETH فاندینگ زیر -۰.۰۰۰۳",
+                                fontSize = 10.sp, color = AGray
+                            )
+                        } else {
+                            rules.take(5).forEach { r ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(vertical = 2.dp)
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "${r.symbol} • ${r.condition.label} ${fmtThreshold(r.threshold)}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (r.enabled) AGreen else AGray
+                                        )
+                                        Text(
+                                            when {
+                                                !r.enabled -> "خاموش ⚪"
+                                                AlertRulesStore.inCooldown(r, System.currentTimeMillis()) -> "فعال ولی در سکوت"
+                                                else -> "فعال ✅"
+                                            },
+                                            fontSize = 9.sp, color = AGray
+                                        )
+                                    }
+                                    Switch(
+                                        checked = r.enabled,
+                                        onCheckedChange = {
+                                            AlertRulesStore.toggle(ctx, r.id)
+                                            reloadRules()
+                                        }
+                                    )
+                                    TextButton(onClick = {
+                                        AlertRulesStore.delete(ctx, r.id)
+                                        reloadRules()
+                                    }) { Text("🗑", fontSize = 11.sp) }
+                                }
+                            }
+                            if (rules.size > 5) {
+                                Text(
+                                    "... و ${rules.size - 5} قانون دیگر",
+                                    fontSize = 9.sp, color = AGray,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                            HorizontalDivider(
+                                color = AGray.copy(alpha = 0.3f),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+
+                        // فرم افزودن قانون جدید
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextField(
+                                value = ruleSymbol,
+                                onValueChange = { ruleSymbol = it },
+                                placeholder = { Text("نماد یا *", fontSize = 10.sp) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                singleLine = true
+                            )
+                            Button(
+                                onClick = { conditionDialogOpen = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = ACard),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text(ruleCondition.label, fontSize = 9.sp) }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextField(
+                                value = ruleThreshold,
+                                onValueChange = { ruleThreshold = it },
+                                placeholder = { Text("آستانه (عدد)", fontSize = 10.sp) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                singleLine = true
+                            )
+                            Button(
+                                onClick = {
+                                    val thr = ruleThreshold.trim().toDoubleOrNull()
+                                    if (thr == null) {
+                                        ruleMsg = "❌ آستانه باید عدد باشد"
+                                    } else {
+                                        val sym = ruleSymbol.trim().uppercase(Locale.US).ifEmpty { "*" }
+                                        AlertRulesStore.add(ctx, sym, ruleCondition, thr)
+                                        reloadRules()
+                                        ruleSymbol = ""; ruleThreshold = ""
+                                        ruleMsg = "✅ قانون اضافه شد"
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = AGold),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text("➕", fontSize = 12.sp) }
+                        }
+                        if (ruleMsg.isNotEmpty()) {
+                            Text(
+                                ruleMsg, fontSize = 9.sp,
+                                color = if (ruleMsg.startsWith("✅")) AGreen else ARed,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -383,6 +559,28 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             }
         }
+    }
+
+    // 🚀 Commit 110 (A1): AlertDialog برای انتخاب شرط
+    if (conditionDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { conditionDialogOpen = false },
+            title = { Text("شرط قانون را انتخاب کنید", fontSize = 14.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    RuleCondition.values().forEach { c ->
+                        Button(
+                            onClick = { ruleCondition = c; conditionDialogOpen = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = ACard),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(c.label, fontSize = 11.sp) }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { conditionDialogOpen = false }) { Text("بستن") }
+            }
+        )
     }
 }
 
