@@ -211,7 +211,8 @@ fun MemeRadarScreen() {
                     } else {
                         Text("شناسایی قبل از پامپ • خروج قبل از دامپ", fontSize = 11.sp, color = MGray)
                     }
-                    Text("🛡️ Rug Safety Check فعال — هر توکن ۱۲ چک امنیتی می‌شود", fontSize = 10.sp, color = MGreen)
+                    // 🚀 Commit 116: ادعای دقیق‌تر — تعداد چک‌ها در EVM و Solana متفاوت است
+                    Text("🛡️ Rug Safety Check فعال — بررسی‌های امنیتی GoPlus روی هر توکن (تعداد چک‌ها در EVM و Solana متفاوت است)", fontSize = 10.sp, color = MGreen)
                     Text("❓ اگر دادهٔ امنیتی موجود نباشد: برچسب UNKNOWN — هرگز safe", fontSize = 10.sp, color = MGray)
                     Text("📊 ضربه روی هر کارت = نمودار کامل استخر در GeckoTerminal", fontSize = 10.sp, color = MGray)
                     Text(lastUpdate, fontSize = 9.sp, color = MGray)
