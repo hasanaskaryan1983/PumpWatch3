@@ -27,7 +27,7 @@ private val MeBlue = Color(0xFF40C4FF)
 private val MeCard = Color(0xFF1A2230)
 
 /**
- * 🚀 Sprint 14 (مرحلهٔ ۰ گزارش / Commit 8C): صفحهٔ Methodology & Risk
+ * 🚀 Sprint 15 (Commit 118): صفحهٔ Methodology & Risk
  *
  * الزام گزارش: «یک صفحهٔ Methodology & Risk داخل اپ ایجاد کنید.»
  * همهٔ ادعاهای این صفحه دقیقاً مطابق رفتار واقعی کدِ shipping شده است —
@@ -72,7 +72,8 @@ fun MethodologyScreen(onBack: () -> Unit) {
         }
 
         Section("🛡️ معنای Rug Safety") {
-            Bullet("۱۲ چک: honeypot، mint، owner، proxy، selfdestruct، tax، تمرکز هولدرها، قفل نقدینگی و…")
+            // 🚀 Commit 118: حذف عدد ثابت «۱۲ چک» — تعداد چک‌ها در EVM و Solana متفاوت است
+            Bullet("چک‌های امنیتی: honeypot، mint، owner، proxy، selfdestruct، tax، تمرکز هولدرها، قفل نقدینگی و… (تعداد متفاوت در EVM و Solana)")
             Bullet("UNKNOWN یعنی بررسی انجام نشد یا توکن شناخته نشد — هرگز به معنی safe نیست.")
             Bullet("EMPTY = GoPlus توکن را نمی‌شناسد • FAILED = خطای اتصال در بررسی.")
             Bullet("بررسی روی قرارداد خودِ توکن انجام می‌شود، نه آدرس استخر نقدینگی.")
@@ -92,7 +93,8 @@ fun MethodologyScreen(onBack: () -> Unit) {
         }
 
         Section("🔔 هشدارها: صادقانه، نه لحظه‌ای") {
-            Bullet("هشدارها با WorkManager و بازهٔ دوره‌ای اجرا می‌شوند؛ real-time نیستند و ممکن است تأخیر داشته باشند.")
+            // 🚀 Commit 118: تصحیح فاصله — MonitorWorker هر ۳۰ دقیقه اجرا می‌شود
+            Bullet("هشدارها با WorkManager و بازهٔ دوره‌ای (هر ۳۰ دقیقه) اجرا می‌شوند؛ real-time نیستند و ممکن است تأخیر داشته باشند.")
             Bullet("اگر مجوز نوتیفیکیشن رد شده باشد، اپ بی‌صدا نمی‌ماند: در مرکز حریم خصوصی نمایش داده می‌شود.")
             Bullet("هر هشدار شامل نماد، دلیل و زمان کندل مولد است.")
         }
@@ -104,8 +106,9 @@ fun MethodologyScreen(onBack: () -> Unit) {
             Bullet("دادهٔ عمومی ممکن است تأخیر، خطا یا پوشش ناقص داشته باشد.")
         }
 
+        // 🚀 Commit 118: به‌روزرسانی نسخه
         Text(
-            "نسخهٔ متدولوژی: Sprint 14 / Stage 3 — اگر موتور یا منبعی عوض شود، این صفحه در همان Commit به‌روز می‌شود.",
+            "نسخهٔ متدولوژی: Sprint 15 / Commit 118 — اگر موتور یا منبعی عوض شود، این صفحه در همان Commit به‌روز می‌شود.",
             fontSize = 9.sp, color = MeGray
         )
     }
