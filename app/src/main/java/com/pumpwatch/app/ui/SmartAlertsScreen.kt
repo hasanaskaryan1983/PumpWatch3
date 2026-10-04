@@ -266,8 +266,9 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 🚀 Commit 116: حذف ادعای غیرقابل‌اثبات «هوشمند» — این یک اسکنر قاعده‌محور است
             Text(
-                "🔔 هشدارهای هوشمند",
+                "🔔 هشدارهای بازار",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -276,7 +277,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
 
         Text(
-            "تشخیص زودهنگام با شتاب ۱ ساعته + حجم + شکست سقف/کف",
+            "تشخیص زودهنگام با شتاب ۱ ساعته + حجم + شکست سقف/کف (اسکنر قاعده‌محور، بدون AI)",
             modifier = Modifier.padding(horizontal = 16.dp),
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -426,7 +427,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                             )
                         }
 
-                        // فرم افزودن قانون جدید
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
