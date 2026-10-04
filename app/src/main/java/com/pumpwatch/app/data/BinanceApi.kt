@@ -1,6 +1,8 @@
 package com.pumpwatch.app.data
 
 import com.google.gson.JsonArray
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
@@ -57,12 +59,12 @@ interface GateApi {
     ): List<List<String>>
 }
 
-// ========== کش سراسری — thread-safe با سقف اندازه + dedup lock ==========
+// ========== کش سراسری — thread-safe با سقف اندازه + Mutex per key ==========
 private object GlobalKlineCache {
     private val map = mutableMapOf<String, Pair<Long, List<BinanceCandle>>>()
     private val lock = Any()
-    // 🚀 Commit 117 (M5): lock per key برای جلوگیری از fetch موازی duplicate
-    private val fetchLocks = ConcurrentHashMap<String, Any>()
+    // 🚀 Commit 117 (M5): Mutex per key برای جلوگیری از fetch موازی duplicate (coroutine-safe)
+    private val fetchLocks = ConcurrentHashMap<String, Mutex>()
     private const val MAX_SIZE = 500
     private const val TTL_MS = 5 * 60 * 1000L
 
@@ -88,12 +90,11 @@ private object GlobalKlineCache {
     }
 
     /**
-     * 🚀 Commit 117 (M5): lock per key برای deduplication.
-     * اگر دو coroutine همزمان بخواهند همان key را fetch کنند،
-     * یکی منتظر دیگری می‌ماند و از cache می‌خواند.
+     * 🚀 Commit 117 (M5): Mutex per key برای deduplication (coroutine-safe).
+     * Mutex اجازه می‌دهد suspend function داخل withLock باشد.
      */
-    fun getOrCreateFetchLock(key: String): Any {
-        return fetchLocks.getOrPut(key) { Any() }
+    fun getOrCreateFetchLock(key: String): Mutex {
+        return fetchLocks.getOrPut(key) { Mutex() }
     }
 }
 
@@ -115,7 +116,6 @@ object ExchangeHttp {
 
     private val throttleInterceptor = object : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
-            // صف مشترک: هیچ دو درخواستی کمتر از MIN_INTERVAL_MS فاصله ندارند
             synchronized(lock) {
                 val wait = lastRequestMs.get() + MIN_INTERVAL_MS - System.currentTimeMillis()
                 if (wait > 0) Thread.sleep(wait)
@@ -168,13 +168,11 @@ object ExchangeHttp {
 
 object MultiExchange {
 
-    // 🚀 Sprint 14 (مرحله ۲ / Commit 5): ثبت منبع واقعی کندل‌ها per symbol
     private val klineSourceRef = ConcurrentHashMap<String, String>()
 
     fun lastKlineSource(symbolUpper: String): String =
         klineSourceRef[symbolUpper] ?: "UNKNOWN"
 
-    // همهٔ صرافی‌ها از همان coordinator مشترک استفاده می‌کنند
     private fun client(): OkHttpClient = ExchangeHttp.client()
 
     private fun <T> create(baseUrl: String, cls: Class<T>): T = Retrofit.Builder()
@@ -189,12 +187,14 @@ object MultiExchange {
     val gate: GateApi by lazy { create("https://api.gateio.ws/", GateApi::class.java) }
 
     /**
-     * 🚀 Commit 117 (M5): deduplication + lock per key برای جلوگیری از کندل تکراری.
+     * 🚀 Commit 117 (M5): deduplication + Mutex per key برای جلوگیری از کندل تکراری.
+     * 
+     * 🚀 Fix: استفاده از Mutex.withLock به‌جای synchronized (coroutine-safe)
      * 
      * 1. cache hit → برگشت فوری
-     * 2. cache miss → synchronized(lock per key)
+     * 2. cache miss → mutex.withLock { }
      *    - double-check cache (ممکن است coroutine دیگر پر کرده باشد)
-     *    - fetch از network
+     *    - fetch از network (suspend allowed)
      *    - dedup (حذف duplicate بر اساس time)
      *    - sort by time (صعودی)
      *    - truncate به limit
@@ -204,14 +204,14 @@ object MultiExchange {
         val key = "$symbolUpper|$interval|$limit"
         GlobalKlineCache.get(key)?.let { return it }
 
-        // 🚀 Commit 117 (M5): lock per key برای جلوگیری از fetch موازی
+        // 🚀 Commit 117 (M5): Mutex per key (coroutine-safe، اجازه suspend function)
         val fetchLock = GlobalKlineCache.getOrCreateFetchLock(key)
-        synchronized(fetchLock) {
+        return fetchLock.withLock {
             // double-check: ممکن است coroutine دیگر در این فاصله cache کرده باشد
-            GlobalKlineCache.get(key)?.let { return it }
+            GlobalKlineCache.get(key)?.let { return@withLock it }
 
             val raw = fetchKlinesNetwork(symbolUpper, interval, limit)
-            if (raw.isEmpty()) return emptyList()
+            if (raw.isEmpty()) return@withLock emptyList()
 
             // 🚀 Commit 117 (M5): dedup + sort + truncate
             val deduped = raw
@@ -220,12 +220,12 @@ object MultiExchange {
                 .takeLast(limit)
 
             GlobalKlineCache.put(key, deduped)
-            return deduped
+            deduped
         }
     }
 
     private suspend fun fetchKlinesNetwork(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
-        // 1) Bybit — ساختار: [ts, open, high, low, close, volume, ...]
+        // 1) Bybit
         try {
             val r = bybit.kline("spot", "${symbolUpper}USDT", bybitInterval(interval), limit)
             val list = r.result?.list
@@ -235,7 +235,7 @@ object MultiExchange {
             }
         } catch (_: Exception) { }
 
-        // 2) OKX — ساختار: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+        // 2) OKX
         try {
             val r = okx.candles("${symbolUpper}-USDT", okxBar(interval), limit)
             val list = r.data
@@ -245,7 +245,7 @@ object MultiExchange {
             }
         } catch (_: Exception) { }
 
-        // 3) Gate — ساختار: [timestamp, volume, close, high, low, open, quote_volume]
+        // 3) Gate
         try {
             val list = gate.candlesticks("${symbolUpper}_USDT", gateInterval(interval), limit)
             if (list.isNotEmpty()) {
@@ -257,7 +257,6 @@ object MultiExchange {
         return emptyList()
     }
 
-    // internal تا تست GateParserTest بتونه مستقیم صداش بزنه
     internal fun candle(
         a: List<String>,
         t: Int, o: Int, h: Int, l: Int, c: Int, v: Int,
@@ -316,24 +315,15 @@ object BinanceClient {
     val api: KlineCompat = KlineCompat
 
     object KlineCompat {
-        /**
-         * 🚀 Sprint 14 (مرحله ۱ / Commit 1 — رفع C1):
-         * خروجی حالا ۷ عضو دارد: [openTime, open, high, low, close, volume, closeTime]
-         * عضو هفتم = زمان بسته شدن کندل = openTime + طول تایم‌فریم.
-         * مصرف‌کننده‌های قبلی (ایندکس ۰ تا ۵) دست‌نخورده می‌مانند؛
-         * QuickScanner که k[6] می‌خواند از این پس معتبر است.
-         */
         suspend fun klines(symbol: String, interval: String, limit: Int): List<JsonArray> {
             val sym = symbol.uppercase().removeSuffix("USDT")
             val step = intervalMs(interval)
             return MultiExchange.fetchKlines(sym, interval, limit).map { c -> toJsonArray(c, step) }
         }
 
-        /** 🚀 Sprint 14 (Commit 5): منبع واقعی آخرین کندل‌های این نماد */
         fun lastSource(symbol: String): String =
             MultiExchange.lastKlineSource(symbol.uppercase().removeSuffix("USDT"))
 
-        /** internal و pure — برای تست رگرسیون شکل آرایه */
         internal fun toJsonArray(c: BinanceCandle, stepMs: Long): JsonArray =
             JsonArray().apply {
                 add(c.time)
@@ -345,7 +335,6 @@ object BinanceClient {
                 add(c.time + stepMs)
             }
 
-        /** internal و pure — طول تایم‌فریم به میلی‌ثانیه */
         internal fun intervalMs(interval: String): Long = when (interval) {
             "1m" -> 60_000L
             "5m" -> 300_000L
