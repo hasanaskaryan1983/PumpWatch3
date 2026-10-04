@@ -38,7 +38,10 @@ import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.data.SecureStorage
 import com.pumpwatch.app.data.WhaleExporter
+import com.pumpwatch.app.engine.AlertRulesStore
+import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.store.TradeStore
+import com.pumpwatch.app.store.WatchlistStore
 
 private val PrGreen = Color(0xFF00E676)
 private val PrRed = Color(0xFFFF5252)
@@ -76,6 +79,7 @@ private fun StatusRow(title: String, value: String, ok: Boolean) {
 @Composable
 fun PrivacyCenterScreen() {
     val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
     var confirmWipe by remember { mutableStateOf(false) }
     var confirmExport by remember { mutableStateOf(false) }
     var statusMsg by remember { mutableStateOf("") }
@@ -83,7 +87,7 @@ fun PrivacyCenterScreen() {
     var showRiskDisclosure by remember { mutableStateOf(false) }
 
     val keystoreOk = remember { SecureStorage.isKeystoreAvailable() }
-    val insecure = remember { SecureStorage.isInsecureFallback(context) }
+    val keystoreFailed = remember { SecureStorage.isKeystoreFailed(context) }
     val notifGranted = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
@@ -131,12 +135,31 @@ fun PrivacyCenterScreen() {
                     if (notifGranted) "داده شده" else "داده نشده — هشدارها نمایش داده نمی‌شوند",
                     notifGranted
                 )
-                if (insecure) {
-                    Text(
-                        "⚠️ روی این دستگاه Keystore کار نمی‌کند؛ داده‌ها موقتاً ساده ذخیره شده‌اند. " +
-                            "پس از رفع، با اولین ذخیرهٔ جدید دوباره رمزنگاری می‌شوند.",
-                        fontSize = 9.sp, color = PrRed, lineHeight = 15.sp
-                    )
+                
+                // 🚀 Commit 109: هشدار واضح اگر Keystore شکست خورده
+                if (keystoreFailed) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = PrRed.copy(alpha = 0.15f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                "🚨 خطای امنیتی بحرانی",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = PrRed
+                            )
+                            Text(
+                                "Keystore این دستگاه کار نمی‌کند. داده‌های جدید ذخیره نمی‌شوند. " +
+                                "ممکن است PIN/بیومتریک تغییر کرده باشد. " +
+                                "برای رفع: اپ را کامل حذف و دوباره نصب کنید.",
+                                fontSize = 10.sp,
+                                color = PrRed,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -242,16 +265,37 @@ fun PrivacyCenterScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("📥 Import نهنگ‌ها (راهنما)", fontSize = 11.sp) }
 
+                // 🚀 Commit 109 (Infra4): Wipe کامل همه store ها
                 Button(
                     onClick = {
                         if (!confirmWipe) {
                             confirmWipe = true
-                            statusMsg = "🚨 با تأیید دوم، همهٔ دادهٔ رمزنگاری‌شده برای همیشه پاک می‌شود!"
+                            statusMsg = "🚨 با تأیید دوم، همهٔ داده‌ها برای همیشه پاک می‌شود!"
                         } else {
+                            // پاک کردن TradeStore (ledger معاملات)
                             TradeStore.clearAll(context)
+                            
+                            // پاک کردن SignalLogger (تاریخچه سیگنال‌ها)
+                            SignalLogger.clear(context)
+                            
+                            // پاک کردن WatchlistStore (واچ‌لیست)
+                            try { WatchlistStore.clearAll(context) } catch (_: Exception) { }
+                            
+                            // پاک کردن AlertRulesStore (قوانین هشدار)
+                            try { AlertRulesStore.clearAll(context) } catch (_: Exception) { }
+                            
+                            // پاک کردن PaperState (معاملات کاغذی اسپات)
+                            prefs.edit().remove("paper_state").apply()
+                            
+                            // پاک کردن SecureStorage (همه داده‌های رمزنگاری‌شده)
                             SecureStorage.wipeAll(context)
+                            
+                            // پاک کردن کش
+                            ApiClient.clearMemoryCache()
+                            KlineCache.clear()
+                            
                             confirmWipe = false
-                            statusMsg = "🗑️ همهٔ دادهٔ امن پاک شد"
+                            statusMsg = "🗑️ همهٔ داده‌ها پاک شد (Trade + Signal + Watchlist + Alert + Paper)"
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
@@ -259,7 +303,7 @@ fun PrivacyCenterScreen() {
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text(if (confirmWipe) "تأیید نهایی: پاک کن!" else "🗑️ حذف همهٔ داده‌های امن", fontSize = 11.sp) }
+                ) { Text(if (confirmWipe) "تأیید نهایی: پاک کن!" else "🗑️ حذف همهٔ داده‌ها", fontSize = 11.sp) }
 
                 if (statusMsg.isNotEmpty()) {
                     Text(statusMsg, fontSize = 10.sp, color = PrGold, fontWeight = FontWeight.Bold)
