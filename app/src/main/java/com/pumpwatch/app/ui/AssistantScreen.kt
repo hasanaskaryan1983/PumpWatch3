@@ -66,7 +66,11 @@ private data class CoinAnalysis(
     val score: Int, val recommendation: String, val arrow: String,
     val indicators: Map<String, String>, val whaleActivity: String, val reason: String,
     val dataScore: Int, val isDex: Boolean, val chainName: String?, val poolUrl: String?,
-    val candles: List<DexCandle>
+    val candles: List<DexCandle>,
+    // 🚀 Commit 108: فیلدهای جدید برای صداقت محصول
+    val invalidationScenario: String,
+    val validityHours: Int,
+    val formulaBreakdown: Map<String, String>
 )
 
 @Composable
@@ -84,7 +88,7 @@ fun AssistantScreen() {
         if (q.isEmpty()) return
         scope.launch {
             loading = true; error = null; searchResult = null
-            searchStatus = "🔍 جستجو در ۰۰ ارز برتر CEX..."
+            searchStatus = "🔍 جستجو در ۱۰۰۰ ارز برتر CEX..."
             try {
                 var coins = withContext(Dispatchers.IO) {
                     try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
@@ -123,9 +127,24 @@ fun AssistantScreen() {
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())
     ) {
-        Text("🤖 دستیار هوشمند", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = AGreen)
-        Text("تحلیل کامل CEX (رتبه ۱-۱۰) + DEX با نمودار و اندیکاتور", fontSize = 12.sp, color = AGray,
+        // 🚀 Commit 108: بازنام‌گذاری به "تحلیل‌گر قواعدمحور"
+        Text("📊 تحلیل‌گر قواعدمحور", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = ABlue)
+        Text("تحلیل تکنیکال CEX/DEX با RSI/MACD/EMA + جریان نهنگ‌ها (بدون AI)", fontSize = 12.sp, color = AGray,
             modifier = Modifier.padding(vertical = 8.dp))
+
+        // 🚀 Commit 108: کارت توضیح شفافیت
+        Card(colors = CardDefaults.cardColors(containerColor = ABlue.copy(alpha = 0.1f)), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text("ℹ️ این ابزار چگونه کار می‌کند؟", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ABlue)
+                Text(
+                    "این تحلیل‌گر از مدل زبانی یا AI استفاده نمی‌کند. امتیاز ۰-۱۰۰ فقط از جمع وزن‌دار چند اندیکاتور تکنیکال (RSI، MACD، EMA) و نسبت خرید/فروش نهنگ‌ها محاسبه می‌شود. " +
+                    "این امتیاز احتمال موفقیت کالیبره‌شده نیست و هیچ سابقهٔ backtest عمومی ندارد. مسئولیت تصمیم نهایی با شماست.",
+                    fontSize = 10.sp, color = AGray, lineHeight = 14.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
 
         Card(colors = CardDefaults.cardColors(containerColor = ACard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(12.dp)) {
@@ -138,7 +157,7 @@ fun AssistantScreen() {
                 )
                 Spacer(Modifier.height(8.dp))
                 Button(onClick = { doSearch() }, enabled = !loading,
-                    colors = ButtonDefaults.buttonColors(containerColor = AGreen),
+                    colors = ButtonDefaults.buttonColors(containerColor = ABlue),
                     shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
                     if (loading) CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), color = Color.Black, strokeWidth = 2.dp)
                     Text(" تحلیل کن 🔍", fontSize = 12.sp)
@@ -171,11 +190,52 @@ fun AssistantScreen() {
                             })
                     }
                     Spacer(Modifier.height(8.dp))
+                    
+                    // 🚀 Commit 108: جدا کردن امتیاز از اعتبار داده
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("📊 امتیاز: ${a.score}/100", fontSize = 12.sp, color = AGold, fontWeight = FontWeight.Bold)
-                        Text("🛡️ اعتبار داده: ${a.dataScore}/100", fontSize = 12.sp, color = ABlue, fontWeight = FontWeight.Bold)
+                        Column {
+                            Text("📊 امتیاز فنی:", fontSize = 10.sp, color = AGray)
+                            Text("${a.score}/100", fontSize = 14.sp, color = AGold, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("🛡️ کیفیت داده:", fontSize = 10.sp, color = AGray)
+                            Text("${a.dataScore}/100", fontSize = 14.sp, color = ABlue, fontWeight = FontWeight.Bold)
+                        }
                     }
+                    
+                    // 🚀 Commit 108: توضیح تفاوت این دو
+                    Text(
+                        "امتیاز فنی = جمع وزن‌دار اندیکاتورها • کیفیت داده = پوشش و تازگی منابع (نه احتمال سود)",
+                        fontSize = 9.sp, color = AGray, modifier = Modifier.padding(top = 4.dp)
+                    )
+                    
                     Spacer(Modifier.height(8.dp))
+                    
+                    // 🚀 Commit 108: سناریوی ابطال
+                    Card(colors = CardDefaults.cardColors(containerColor = AOrange.copy(alpha = 0.1f)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text("🎯 سناریوی ابطال:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AOrange)
+                            Text(a.invalidationScenario, fontSize = 10.sp, color = AGray, lineHeight = 13.sp)
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
+                    // 🚀 Commit 108: بازه اعتبار
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("⏱️ بازه اعتبار:", fontSize = 10.sp, color = AGray)
+                        Text(
+                            if (a.validityHours >= 24) "${a.validityHours / 24} روز" else "${a.validityHours} ساعت",
+                            fontSize = 11.sp, color = AOrange, fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        "پس از این زمان، اندیکاتورها تغییر می‌کنند و باید دوباره تحلیل کنید.",
+                        fontSize = 9.sp, color = AGray
+                    )
+                    
+                    Spacer(Modifier.height(8.dp))
+                    
                     Text(" اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AGreen)
                     a.indicators.forEach { (k, v) ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -193,6 +253,27 @@ fun AssistantScreen() {
             }
 
             Spacer(Modifier.height(12.dp))
+
+            // 🚀 Commit 108: نمایش فرمول امتیازدهی
+            if (a.formulaBreakdown.isNotEmpty()) {
+                Card(colors = CardDefaults.cardColors(containerColor = ACard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("📐 فرمول امتیازدهی (وزن‌های شفاف)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ABlue)
+                        Text("این امتیاز چگونه محاسبه شده؟", fontSize = 9.sp, color = AGray, modifier = Modifier.padding(bottom = 6.dp))
+                        a.formulaBreakdown.forEach { (indicator, weight) ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(indicator, fontSize = 10.sp, color = AGray)
+                                Text(weight, fontSize = 10.sp, color = AGold, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            "مجموع امتیازها در بازه ۰-۱۰۰ محدود شده است.",
+                            fontSize = 9.sp, color = AGray, modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
 
             if (a.candles.isNotEmpty()) {
                 Card(colors = CardDefaults.cardColors(containerColor = ACard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -227,7 +308,20 @@ fun AssistantScreen() {
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Text("⚠️ این توصیه مالی نیست — مسئولیت معامله با خودته.", fontSize = 10.sp, color = ARed)
+            
+            // 🚀 Commit 108: هشدار شفاف‌تر
+            Card(colors = CardDefaults.cardColors(containerColor = ARed.copy(alpha = 0.1f)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text("⚠️ محدودیت‌های این تحلیل‌گر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ARed)
+                    Text(
+                        "• این ابزار AI نیست — فقط چند فرمول تکنیکال ساده است\n" +
+                        "• امتیاز ۰-۱۰۰ احتمال موفقیت کالیبره‌شده نیست\n" +
+                        "• هیچ backtest عمومی روی این فرمول‌ها انجام نشده\n" +
+                        "• مسئولیت تصمیم و معامله کاملاً با شماست",
+                        fontSize = 9.sp, color = AGray, lineHeight = 13.sp
+                    )
+                }
+            }
         }
     }
 }
@@ -303,20 +397,33 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
 
             var score = 50
             val ind = mutableMapOf<String, String>()
+            val formula = mutableMapOf<String, String>()
+            
+            // 🚀 Commit 108: وزن‌های شفاف
+            formula["پایه"] = "۵۰ امتیاز"
+            
             if (closes.size >= 35) {
                 val rsi = rsiOf(closes)
-                val mUp = MacdCalc.macdUp(closes)  // ← استفاده از موتور مشترک
+                val mUp = MacdCalc.macdUp(closes)
                 val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last()
                 val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last()
                 val px = closes.last()
-                when { rsi < 30 -> { score += 15; ind["RSI"] = "${rsi.toInt()} اشباع فروش ✅" }
-                       rsi > 70 -> { score -= 15; ind["RSI"] = "${rsi.toInt()} اشباع خرید ❌" }
-                       else -> ind["RSI"] = "${rsi.toInt()} نرمال ⚪" }
-                if (mUp) { score += 15; ind["MACD"] = "صعودی ✅" } else { score -= 10; ind["MACD"] = "نزولی ❌" }
-                when { px > e20 && e20 > e50 -> { score += 20; ind["EMA"] = "صعودی ✅" }
-                       px < e20 && e20 < e50 -> { score -= 20; ind["EMA"] = "نزولی ❌" }
-                       else -> ind["EMA"] = "خنثی " }
-            } else ind["تکنیکال"] = "کندل کافی نیست"
+                when { 
+                    rsi < 30 -> { score += 15; ind["RSI"] = "${rsi.toInt()} اشباع فروش ✅"; formula["RSI < ۳۰"] = "+۱۵" }
+                    rsi > 70 -> { score -= 15; ind["RSI"] = "${rsi.toInt()} اشباع خرید ❌"; formula["RSI > ۷۰"] = "−۱۵" }
+                    else -> ind["RSI"] = "${rsi.toInt()} نرمال ⚪" 
+                }
+                if (mUp) { score += 15; ind["MACD"] = "صعودی ✅"; formula["MACD صعودی"] = "+۱۵" } 
+                else { score -= 10; ind["MACD"] = "نزولی ❌"; formula["MACD نزولی"] = "−۱۰" }
+                when { 
+                    px > e20 && e20 > e50 -> { score += 20; ind["EMA"] = "صعودی ✅"; formula["EMA صعودی"] = "+۲۰" }
+                    px < e20 && e20 < e50 -> { score -= 20; ind["EMA"] = "نزولی ❌"; formula["EMA نزولی"] = "−۲۰" }
+                    else -> ind["EMA"] = "خنثی " 
+                }
+            } else {
+                ind["تکنیکال"] = "کندل کافی نیست"
+                formula["تکنیکال"] = "۰ (داده ناکافی)"
+            }
 
             var whale = "بدون داده"; var poolUrl: String? = null
             try {
@@ -330,7 +437,10 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
                     if (t > 0) {
                         val r = b / t * 100
                         whale = "فشار خرید ۱س: ${r.toInt()}٪" + (if (r > 60) " 🟢" else if (r < 40) " 🔴" else " ")
-                        score += when { r > 60 -> 10; r < 40 -> -10; else -> 0 }
+                        when { 
+                            r > 60 -> { score += 10; formula["فشار خرید > ۶۰٪"] = "+۱۰" } 
+                            r < 40 -> { score -= 10; formula["فشار خرید < ۴۰٪"] = "−۱۰" } 
+                        }
                     }
                 }
             } catch (_: Throwable) { }
@@ -342,11 +452,26 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
                 rank != null && rank <= 100 -> 75; rank != null && rank <= 500 -> 60
                 rank != null -> 50; else -> 30
             }
+            
+            // 🚀 Commit 108: سناریوی ابطال و بازه اعتبار
+            val invalidation = when {
+                score >= 65 -> "اگر RSI > ۷۰ یا MACD نزولی شود، این توصیه باطل است."
+                score <= 35 -> "اگر RSI < ۳۰ یا MACD صعودی شود، این توصیه باطل است."
+                else -> "اگر RSI یا MACD سیگنال قوی بدهند، این توصیه باطل است."
+            }
+            val validityHours = when {
+                closes.size >= 24 -> 24  // ۱ روز
+                closes.size >= 12 -> 12  // ۱۲ ساعت
+                else -> 4  // ۴ ساعت
+            }
+            
             CoinAnalysis(symbol.uppercase(Locale.US), name, coingeckoId, rank, score.coerceIn(0, 100), rec, arrow,
-                ind, whale, "رتبه #$rank • امتیاز $score/100", dataScore, false, null, poolUrl, emptyList())
+                ind, whale, "رتبه #$rank • امتیاز $score/100", dataScore, false, null, poolUrl, emptyList(),
+                invalidation, validityHours, formula)
         } catch (t: Throwable) {
             CoinAnalysis(symbol, name, coingeckoId, rank, 50, "صبر", "➡️", mapOf("خطا" to "داده نیست"),
-                "بدون داده", "تحلیل در دسترس نیست", 50, false, null, null, emptyList())
+                "بدون داده", "تحلیل در دسترس نیست", 50, false, null, null, emptyList(),
+                "داده کافی برای تعیین سناریوی ابطال موجود نیست.", 4, emptyMap())
         }
     }
 
@@ -381,28 +506,50 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
         val closes = candles.map { it.c }
         var score = 50
         val ind = mutableMapOf<String, String>()
+        val formula = mutableMapOf<String, String>()
+
+        // 🚀 Commit 108: وزن‌های شفاف
+        formula["پایه"] = "۵۰ امتیاز"
 
         if (closes.size >= 35) {
             val rsi = rsiOf(closes)
-            val mUp = MacdCalc.macdUp(closes)  // ← استفاده از موتور مشترک
+            val mUp = MacdCalc.macdUp(closes)
             val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last()
             val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last()
             val px = closes.last()
-            when { rsi < 30 -> { score += 10; ind["RSI"] = "${rsi.toInt()} اشباع فروش ✅" }
-                   rsi > 70 -> { score -= 10; ind["RSI"] = "${rsi.toInt()} اشباع خرید ❌" }
-                   else -> ind["RSI"] = "${rsi.toInt()} نرمال ⚪" }
-            if (mUp) { score += 10; ind["MACD"] = "صعودی ✅" } else { score -= 8; ind["MACD"] = "نزولی ❌" }
-            when { px > e20 && e20 > e50 -> { score += 15; ind["EMA"] = "صعودی ✅" }
-                   px < e20 && e20 < e50 -> { score -= 15; ind["EMA"] = "نزولی ❌" }
-                   else -> ind["EMA"] = "خنثی " }
+            when { 
+                rsi < 30 -> { score += 10; ind["RSI"] = "${rsi.toInt()} اشباع فروش ✅"; formula["RSI < ۳۰"] = "+۱۰" }
+                rsi > 70 -> { score -= 10; ind["RSI"] = "${rsi.toInt()} اشباع خرید ❌"; formula["RSI > ۷۰"] = "−۱۰" }
+                else -> ind["RSI"] = "${rsi.toInt()} نرمال ⚪" 
+            }
+            if (mUp) { score += 10; ind["MACD"] = "صعودی ✅"; formula["MACD صعودی"] = "+۱۰" } 
+            else { score -= 8; ind["MACD"] = "نزولی ❌"; formula["MACD نزولی"] = "−۸" }
+            when { 
+                px > e20 && e20 > e50 -> { score += 15; ind["EMA"] = "صعودی ✅"; formula["EMA صعودی"] = "+۱۵" }
+                px < e20 && e20 < e50 -> { score -= 15; ind["EMA"] = "نزولی ❌"; formula["EMA نزولی"] = "−۱۵" }
+                else -> ind["EMA"] = "خنثی " 
+            }
         } else {
             ind["تکنیکال"] = "کندل ساعتی در دسترس نیست"
+            formula["تکنیکال"] = "۰ (داده ناکافی)"
         }
 
         score += when { ch24 > 5 -> 10; ch24 > 0 -> 5; ch24 < -5 -> -10; else -> -3 }
         ind["روند ۲۴س"] = String.format(Locale.US, "%+.1f%%", ch24) + if (ch24 > 0) " 🟢" else " 🔴"
+        when {
+            ch24 > 5 -> formula["روند ۲۴س > ۵٪"] = "+۱۰"
+            ch24 > 0 -> formula["روند ۲۴س > ۰٪"] = "+۵"
+            ch24 < -5 -> formula["روند ۲۴س < −۵٪"] = "−۱۰"
+            else -> formula["روند ۲۴س خنثی"] = "−۳"
+        }
+        
         score += when { ratio >= 0.6 -> 10; ratio >= 0.5 -> 4; ratio <= 0.4 -> -10; else -> 0 }
         ind["فشار خرید نهنگی"] = "${(ratio * 100).toInt()}٪" + if (ratio >= 0.6) " " else if (ratio <= 0.4) " 🔴" else " ⚪"
+        when {
+            ratio >= 0.6 -> formula["فشار خرید ≥ ۶۰٪"] = "+۱۰"
+            ratio >= 0.5 -> formula["فشار خرید ≥ ۵۰٪"] = "+۴"
+            ratio <= 0.4 -> formula["فشار خرید ≤ ۴۰٪"] = "−۱۰"
+        }
 
         val whale = buildString {
             append("فشار خرید ۱س: ${(ratio * 100).toInt()}٪")
@@ -422,8 +569,21 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
         val reason = "شبکه $chainName • امتیاز $score/100 • هم‌گرایی داده $passed/7 • " +
                 when { score >= 65 -> "نهنگ‌ها + مومنتوم مثبت"; score <= 35 -> "فشار فروش/روند نزولی"; else -> "منتظر شکست بمون" }
 
+        // 🚀 Commit 108: سناریوی ابطال و بازه اعتبار
+        val invalidation = when {
+            score >= 65 -> "اگر RSI > ۷۰ یا فشار خرید < ۴۰٪ شود، این توصیه باطل است."
+            score <= 35 -> "اگر RSI < ۳۰ یا فشار خرید > ۶۰٪ شود، این توصیه باطل است."
+            else -> "اگر RSI یا فشار خرید سیگنال قوی بدهند، این توصیه باطل است."
+        }
+        val validityHours = when {
+            candles.size >= 24 -> 24
+            candles.size >= 12 -> 12
+            else -> 4
+        }
+
         CoinAnalysis(symbol.uppercase(Locale.US), name, null, null, score.coerceIn(0, 100), rec, arrow,
-            ind, whale, reason, dataScore, true, chainName, poolUrl, candles)
+            ind, whale, reason, dataScore, true, chainName, poolUrl, candles,
+            invalidation, validityHours, formula)
     } catch (_: Throwable) {
         null
     }
