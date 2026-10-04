@@ -35,6 +35,7 @@ private val LY = Color(0xFFFFC107)
 private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
+private val LPurple = Color(0xFFBA68C8)  // 🚀 Commit 106: برای LIQUIDATED
 
 private suspend fun getKlinesCached(symbol: String, interval: String, limit: Int): List<JsonArray> {
     return try {
@@ -139,7 +140,8 @@ fun BacktestScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                if (isFutures) "⚡ فیوچرز: ورود next-bar + خروج intrabar با اولویت استاپ | هزینهٔ رفت‌وبرگشت: ۲×(کارمزد صرافی + ۰.۰۵٪ اسلیپیج)"
+                // 🚀 Commit 106: به‌روزرسانی متن توضیح برای فیوچرز
+                if (isFutures) "⚡ فیوچرز: ورود next-bar + خروج intrabar با اولویت استاپ | هزینهٔ رفت‌وبرگشت: ۰.۱۸٪ + فاندینگ ۰.۰۱٪/۸س | اهرم ۱۰× + لیکوئیدیشن"
                 else "🏦 اسپات: امتیاز ≥۰ + هفتگی مثبت + OBV مثبت | ورود next-bar + خروج intrabar | هزینهٔ رفت‌وبرگشت: ۰.۳٪",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
@@ -262,8 +264,12 @@ fun BacktestScreen() {
                                     val klinesList = klines.map { k ->
                                         listOf(k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble, k[5].asDouble)
                                     }
+                                    // 🚀 Commit 106: پاس leverage=10 و fundingRate=0.0001 به موتور
                                     val (trades, _) = BacktestEngine.runFutures(
-                                        symbol, klinesList, tf.evalLast, tf.hold, 0.0001
+                                        symbol, klinesList, tf.evalLast, tf.hold,
+                                        feeRate = 0.0004,       // taker بایننس (0.04%)
+                                        leverage = 10,          // اهرم 10x
+                                        fundingRate = 0.0001    // 0.01% هر 8 ساعت
                                     )
                                     allTrades.addAll(trades)
                                 }
@@ -290,13 +296,15 @@ fun BacktestScreen() {
                         results = allTrades
 
                         provInfo = "🕯️ منابع کندل: ${sourcesUsed.sorted().joinToString("، ")} • " +
-                                (if (isFutures) "هزینهٔ رفت‌وبرگشت: ۲×(کارمزد صرافی + ۰.۰۵٪ اسلیپیج)"
+                                (if (isFutures) "هزینهٔ رفت‌وبرگشت: ۰.۱۸٪ + فاندینگ ۰.۰۱٪/۸س | اهرم ۱۰× + لیکوئیدیشن"
                                 else "هزینهٔ رفت‌وبرگشت: ۰.۳٪ (۰.۱٪ کارمزد + ۰.۰۵٪ اسلیپیج هر طرف)") +
                                 " • ورود: next-bar • خروج: intrabar با اولویت استاپ"
 
                         val wins = allTrades.count { it.result == "WIN" }
                         val losses = allTrades.count { it.result == "LOSS" }
                         val expired = allTrades.count { it.result == "EXP" }
+                        // 🚀 Commit 106: شمارش LIQUIDATED
+                        val liquidated = allTrades.count { it.result == "LIQUIDATED" }
                         val decided = wins + losses
                         val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
                         val avgPnl = allTrades.map { it.pnl }.average()
@@ -327,11 +335,13 @@ fun BacktestScreen() {
                             if (dd > maxDrawdown) maxDrawdown = dd
                         }
 
+                        // 🚀 Commit 106: اضافه شدن liquidated
                         metrics = BacktestEngine.BacktestMetrics(
                             totalTrades = allTrades.size,
                             wins = wins,
                             losses = losses,
                             expired = expired,
+                            liquidated = liquidated,
                             winRate = winRate,
                             profitFactor = profitFactor,
                             avgPnl = avgPnl,
@@ -570,11 +580,30 @@ fun BacktestScreen() {
                         Text(provInfo, fontSize = 9.sp, color = LGr, lineHeight = 14.sp)
                     }
 
+                    // 🚀 Commit 106: اضافه شدن LIQUIDATED به آمار
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                         Text("تعداد: ${m.totalTrades}", fontSize = 11.sp, color = LGr)
                         Text("✅ برد: ${m.wins}", fontSize = 11.sp, color = LG)
                         Text("❌ باخت: ${m.losses}", fontSize = 11.sp, color = LR)
                         Text("⌛ منقضی: ${m.expired}", fontSize = 11.sp, color = LY)
+                    }
+                    // 🚀 Commit 106: ردیف مخصوص LIQUIDATED برای فیوچرز
+                    if (isFutures) {
+                        Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
+                            Text(
+                                "💀 لیکوئید: ${m.liquidated}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (m.liquidated > 0) LPurple else LGr
+                            )
+                            if (m.liquidated > 0) {
+                                Text(
+                                    "(${String.format(Locale.US, "%.1f%%", m.liquidated * 100.0 / m.totalTrades)} از کل)",
+                                    fontSize = 10.sp,
+                                    color = LPurple
+                                )
+                            }
+                        }
                     }
 
                     Text("وین‌ریت: ${String.format(Locale.US, "%.1f%%", m.winRate)}", fontWeight = FontWeight.Bold, color = if (m.winRate >= 55) LG else LR)
@@ -586,6 +615,23 @@ fun BacktestScreen() {
                     Text("امید ریاضی: ${String.format(Locale.US, "%+.2f%%", m.expectancy)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.expectancy > 0) LG else LR)
                     Text("Profit Factor: ${String.format(Locale.US, "%.2f", m.profitFactor)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.profitFactor >= 1.5) LG else LR)
                     Text("📉 Max Drawdown: ${String.format(Locale.US, "%.2f%%", m.maxDrawdown)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.maxDrawdown < 20) LG else LR)
+
+                    // 🚀 Commit 106: هشدار اگر تعداد LIQUIDATED بالاست
+                    if (isFutures && m.liquidated > m.totalTrades * 0.1 && m.totalTrades > 0) {
+                        Surface(
+                            color = LPurple.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "⚠️ هشدار: ${m.liquidated} لیکوئیدیشن از ${m.totalTrades} ترید — اهرم یا فاصلهٔ استاپ نیاز به بازنگری دارد",
+                                fontSize = 10.sp,
+                                color = LPurple,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -599,16 +645,30 @@ fun BacktestScreen() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
+                                // 🚀 Commit 106: پشتیبانی از LIQUIDATED در کارت ترید
+                                val resultEmoji = when (r.result) {
+                                    "WIN" -> "✅"
+                                    "LOSS" -> "❌"
+                                    "LIQUIDATED" -> "💀"
+                                    else -> "⌛"
+                                }
+                                val resultColor = when (r.result) {
+                                    "WIN" -> LG
+                                    "LOSS" -> LR
+                                    "LIQUIDATED" -> LPurple
+                                    else -> LY
+                                }
                                 Text(
-                                    "${r.symbol} • ${if (r.side == "BUY") "🟢" else ""} • ${when (r.result) { "WIN" -> "✅"; "LOSS" -> "❌"; else -> "⌛" }}",
-                                    fontWeight = FontWeight.Bold, fontSize = 12.sp
+                                    "${r.symbol} • ${if (r.side == "BUY") "🟢" else "🔴"} • $resultEmoji ${r.result}",
+                                    fontWeight = FontWeight.Bold, fontSize = 12.sp, color = resultColor
                                 )
                                 Text("امتیاز: ${r.score}", fontSize = 10.sp, color = LGr)
                             }
                             Text(
                                 "${String.format(Locale.US, "%+.2f%%", r.pnl)}",
                                 fontWeight = FontWeight.Bold,
-                                color = if (r.pnl >= 0) LG else LR, fontSize = 13.sp
+                                color = if (r.pnl >= 0) LG else (if (r.result == "LIQUIDATED") LPurple else LR),
+                                fontSize = 13.sp
                             )
                         }
                     }
