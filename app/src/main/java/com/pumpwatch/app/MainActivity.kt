@@ -128,11 +128,11 @@ class MainActivity : ComponentActivity() {
         MonitorScheduler.start(this)
         scheduleSignalScanner()
         scheduleWhaleMemeWorker() // 🚀 Commit 91 (A5)
-        WatchlistScheduler.start(this)
+        // 🚀 Commit 114: لغو worker قدیمی واچ‌لیست (ارزیابی حالا داخل MonitorWorker است)
+        WatchlistScheduler.stop(this)
         TraderMonitorScheduler.start(this) // 🏆 Sprint 16: هشدار تاپ تریدرها
 
         // 🚀 Commit 113: مهاجرت یک‌بارهٔ دادهٔ واچ‌لیست قدیمی به store رمزنگاری‌شده
-        // اگر قبلاً اجرا شده باشد، داخل خودش سریع برمی‌گردد (flag).
         WatchlistMigration.migrateIfNeeded(this)
 
         setContent {
@@ -141,7 +141,6 @@ class MainActivity : ComponentActivity() {
                     MonitorScheduler.start(this)
                     scheduleSignalScanner()
                     scheduleWhaleMemeWorker() // 🚀 Commit 91
-                    WatchlistScheduler.start(this)
                     TraderMonitorScheduler.start(this)
                 })
             }
@@ -436,8 +435,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
 
                 // 🚀 Commit 112 (B1): جمع‌آوری غیرفعال تاریخچهٔ universe
-                // فقط لیست‌های بزرگ‌تر از ۱۰۰ ثبت می‌شوند تا snapshot های
-                // ناقص (top100 فیوچرز) جای snapshot کامل را نگیرند.
                 if (coins.size > 100) {
                     HistoricalUniverseRepository.recordSnapshot(context, coins)
                 }
@@ -503,7 +500,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(shown) { coin ->
-                    // 🚀 Commit 103 (M4): هویت کامل دارایی با نام شبکه
                     val contractRef = platformContractRef(platformMap, coin.id)
                     CoinCard(coin = coin, contractRef = contractRef, onClick = { onCoinClick(coin) })
                 }
@@ -517,7 +513,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
     val context = LocalContext.current
 
-    // 🚀 Commit 103 (M3): دیگر null را به‌صورت 0.0 سبز جا نمی‌زنیم
     val change = coin.price_change_percentage_24h
     val changeText = if (change == null) "—" else String.format(Locale.US, "%+.2f%%", change)
     val changeColor = when {
@@ -526,7 +521,6 @@ fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
         else -> FuturesAccent
     }
 
-    // 🚀 Commit 103 (M3): رتبهٔ نامشخص = "#—" به‌جای "#0"
     val rankText = coin.market_cap_rank?.let { "#$it" } ?: "#—"
 
     Surface(
