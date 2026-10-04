@@ -1,35 +1,38 @@
 package com.pumpwatch.app.worker
 
 import android.content.Context
-import android.content.SharedPreferences
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 🚀 Sprint 11 (C2b): ارتباط نوتیفیکیشن ↔ Workspace
+ * 🚀 Commit 117 (Infra5): جایگزینی callbackFlow با StateFlow برای تضمین delivery
  *
- * یک singleton ساده که با SharedPreferences (که از قبل در اپ استفاده می‌شود)
- * یک flag را set/consume می‌کند و یک Flow<Boolean> reactive به workspace ها می‌دهد.
+ * یک singleton ساده که:
+ * - یک flag persistent در SharedPreferences نگه می‌دارد (برای fresh start پس از click روی notification)
+ * - یک StateFlow in-memory به workspace ها می‌دهد (برای reaction سریع)
  *
- * - Worker: markPending() را صدا می‌زند
- * - Workspace: observe() را collect می‌کند؛ وقتی true شد، تب سیگنال را set
- *   و consume() را صدا می‌زند تا flag پاک شود
- *
- * چرا SharedPreferences به‌جای SharedFlow در memory؟
- * چون اگر اپ کاملاً کشته شده باشد و user روی نوتیفیکیشن کلیک کند،
- * app fresh start می‌شود و SharedFlow event را از دست می‌دهد —
- * اما SharedPreferences persistent است و flag بعد از restart هم می‌ماند.
+ * 🚀 Commit 117: چرا StateFlow به‌جای callbackFlow؟
+ * 1. trySend در callbackFlow silently fails می‌کند اگر channel بسته باشد → event از دست می‌رود
+ * 2. StateFlow با replay=1 تضمین می‌کند subscriber جدید همیشه آخرین value را می‌گیرد
+ * 3. Sync اولیه از persisted value در observe() تضمین می‌کند fresh start هم کار می‌کند
  */
 object SignalNavigator {
     private const val PREFS_NAME = "pumpwatch_prefs"
     private const val KEY_OPEN_SIGNALS = "pending_open_signals"
+
+    // 🚀 Commit 117: StateFlow به‌جای callbackFlow
+    private val _pendingSignal = MutableStateFlow(false)
+    val pendingSignal: StateFlow<Boolean> = _pendingSignal.asStateFlow()
 
     fun markPending(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_OPEN_SIGNALS, true)
             .apply()
+        // 🚀 Commit 117: emit به in-memory flow برای workspace های زنده
+        _pendingSignal.value = true
     }
 
     fun consume(context: Context) {
@@ -37,6 +40,8 @@ object SignalNavigator {
             .edit()
             .remove(KEY_OPEN_SIGNALS)
             .apply()
+        // 🚀 Commit 117: reset in-memory flow
+        _pendingSignal.value = false
     }
 
     fun isPending(context: Context): Boolean =
@@ -44,27 +49,20 @@ object SignalNavigator {
             .getBoolean(KEY_OPEN_SIGNALS, false)
 
     /**
-     * Flow reactive روی تغییرات flag — workspace در LaunchedEffect آن را collect می‌کند.
-     * یک‌بار initial value هم می‌فرستد (برای حالتی که flag از قبل set شده).
+     * 🚀 Commit 117: StateFlow با sync اولیه از persisted value.
+     * 
+     * تضمین می‌کند:
+     * 1. اگر flag از قبل set شده (مثلاً app پس از click روی notification تازه شروع شده)،
+     *    workspace حتماً آن را می‌بیند (initial sync).
+     * 2. subscriber جدید همیشه آخرین value را می‌گیرد (StateFlow replay=1).
+     * 3. در حین اجرا، تغییرات به همه subscribers push می‌شوند.
      */
-    fun observe(context: Context): Flow<Boolean> = callbackFlow {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        
-        val listener = SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
-            if (key == KEY_OPEN_SIGNALS) {
-                trySend(p.getBoolean(KEY_OPEN_SIGNALS, false))
-            }
+    fun observe(context: Context): StateFlow<Boolean> {
+        // 🚀 Commit 117: sync اولیه از persisted value برای fresh start
+        val persisted = isPending(context)
+        if (persisted && !_pendingSignal.value) {
+            _pendingSignal.value = true
         }
-        prefs.registerOnSharedPreferenceChangeListener(listener)
-
-        // initial: اگر flag از قبل set شده (مثلاً app از scratch باز شده
-        // و worker قبلاً نوتیفیکیشن فرستاده بود)
-        if (prefs.getBoolean(KEY_OPEN_SIGNALS, false)) {
-            trySend(true)
-        }
-
-        awaitClose {
-            prefs.unregisterOnSharedPreferenceChangeListener(listener)
-        }
+        return pendingSignal
     }
 }
