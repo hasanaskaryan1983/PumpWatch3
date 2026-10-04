@@ -57,10 +57,12 @@ interface GateApi {
     ): List<List<String>>
 }
 
-// ========== کش سراسری — thread-safe با سقف اندازه ==========
+// ========== کش سراسری — thread-safe با سقف اندازه + dedup lock ==========
 private object GlobalKlineCache {
     private val map = mutableMapOf<String, Pair<Long, List<BinanceCandle>>>()
     private val lock = Any()
+    // 🚀 Commit 117 (M5): lock per key برای جلوگیری از fetch موازی duplicate
+    private val fetchLocks = ConcurrentHashMap<String, Any>()
     private const val MAX_SIZE = 500
     private const val TTL_MS = 5 * 60 * 1000L
 
@@ -83,6 +85,15 @@ private object GlobalKlineCache {
             }
             map[key] = System.currentTimeMillis() to v
         }
+    }
+
+    /**
+     * 🚀 Commit 117 (M5): lock per key برای deduplication.
+     * اگر دو coroutine همزمان بخواهند همان key را fetch کنند،
+     * یکی منتظر دیگری می‌ماند و از cache می‌خواند.
+     */
+    fun getOrCreateFetchLock(key: String): Any {
+        return fetchLocks.getOrPut(key) { Any() }
     }
 }
 
@@ -114,11 +125,9 @@ object ExchangeHttp {
             var retries = 0
             while (retries < MAX_RETRIES) {
                 val response = chain.proceed(chain.request())
-                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
                 if (response.code != 429 && response.code != 418) return response
 
                 val retryAfter = response.header("Retry-After")?.toLongOrNull()
-                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
                 val host = chain.request().url.host
                 response.close()
                 retries++
@@ -132,7 +141,6 @@ object ExchangeHttp {
                 synchronized(lock) { lastRequestMs.set(System.currentTimeMillis()) }
             }
             throw RateLimitedException(
-                // ✅ اصلاح: بدون پرانتز (OkHttp 5.x)
                 "Exchange rate limit exceeded after $MAX_RETRIES retries: ${chain.request().url.host}"
             )
         }
@@ -161,7 +169,6 @@ object ExchangeHttp {
 object MultiExchange {
 
     // 🚀 Sprint 14 (مرحله ۲ / Commit 5): ثبت منبع واقعی کندل‌ها per symbol
-    // fallback قبلاً بی‌صدا بود؛ حالا نمودار می‌تواند صادقانه بگوید داده از کجا آمد.
     private val klineSourceRef = ConcurrentHashMap<String, String>()
 
     fun lastKlineSource(symbolUpper: String): String =
@@ -181,12 +188,40 @@ object MultiExchange {
     val okx: OkxApi by lazy { create("https://www.okx.com/", OkxApi::class.java) }
     val gate: GateApi by lazy { create("https://api.gateio.ws/", GateApi::class.java) }
 
+    /**
+     * 🚀 Commit 117 (M5): deduplication + lock per key برای جلوگیری از کندل تکراری.
+     * 
+     * 1. cache hit → برگشت فوری
+     * 2. cache miss → synchronized(lock per key)
+     *    - double-check cache (ممکن است coroutine دیگر پر کرده باشد)
+     *    - fetch از network
+     *    - dedup (حذف duplicate بر اساس time)
+     *    - sort by time (صعودی)
+     *    - truncate به limit
+     *    - cache
+     */
     suspend fun fetchKlines(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
         val key = "$symbolUpper|$interval|$limit"
         GlobalKlineCache.get(key)?.let { return it }
-        val out = fetchKlinesNetwork(symbolUpper, interval, limit)
-        if (out.isNotEmpty()) GlobalKlineCache.put(key, out)
-        return out
+
+        // 🚀 Commit 117 (M5): lock per key برای جلوگیری از fetch موازی
+        val fetchLock = GlobalKlineCache.getOrCreateFetchLock(key)
+        synchronized(fetchLock) {
+            // double-check: ممکن است coroutine دیگر در این فاصله cache کرده باشد
+            GlobalKlineCache.get(key)?.let { return it }
+
+            val raw = fetchKlinesNetwork(symbolUpper, interval, limit)
+            if (raw.isEmpty()) return emptyList()
+
+            // 🚀 Commit 117 (M5): dedup + sort + truncate
+            val deduped = raw
+                .distinctBy { it.time }
+                .sortedBy { it.time }
+                .takeLast(limit)
+
+            GlobalKlineCache.put(key, deduped)
+            return deduped
+        }
     }
 
     private suspend fun fetchKlinesNetwork(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
@@ -196,7 +231,6 @@ object MultiExchange {
             val list = r.result?.list
             if (!list.isNullOrEmpty()) {
                 val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
-                // 🚀 Sprint 14 (Commit 5): ثبت منبع برنده
                 if (out.isNotEmpty()) { klineSourceRef[symbolUpper] = "BYBIT"; return out }
             }
         } catch (_: Exception) { }
@@ -207,7 +241,6 @@ object MultiExchange {
             val list = r.data
             if (!list.isNullOrEmpty()) {
                 val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
-                // 🚀 Sprint 14 (Commit 5): ثبت منبع برنده
                 if (out.isNotEmpty()) { klineSourceRef[symbolUpper] = "OKX"; return out }
             }
         } catch (_: Exception) { }
@@ -217,7 +250,6 @@ object MultiExchange {
             val list = gate.candlesticks("${symbolUpper}_USDT", gateInterval(interval), limit)
             if (list.isNotEmpty()) {
                 val out = list.mapNotNull { a -> candle(a, 0, 5, 3, 4, 2, 1, false) }
-                // 🚀 Sprint 14 (Commit 5): ثبت منبع برنده
                 if (out.isNotEmpty()) { klineSourceRef[symbolUpper] = "GATE"; return out }
             }
         } catch (_: Exception) { }
