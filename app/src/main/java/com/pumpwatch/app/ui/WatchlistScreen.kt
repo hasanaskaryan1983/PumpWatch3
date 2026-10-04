@@ -17,6 +17,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -72,8 +73,15 @@ fun WatchlistScreen() {
     var thresholdText by remember { mutableStateOf("") }
     var editingAlertId by remember { mutableStateOf<String?>(null) }
 
+    // 🚀 Commit 115: وضعیت آخرین ارزیابی
+    var evalOk by remember { mutableStateOf(true) }
+    var evalTs by remember { mutableStateOf(0L) }
+
     fun reload() {
         groups = WatchlistStore.loadGroups(context)
+        val (ok, ts) = WatchlistStore.lastEvalStatus(context)
+        evalOk = ok
+        evalTs = ts
     }
 
     fun refresh() {
@@ -111,9 +119,12 @@ fun WatchlistScreen() {
             ) { Text("🔄", fontSize = 12.sp) }
         }
 
+        // 🚀 Commit 115: کارت وضعیت ارزیابی
+        EvalStatusCard(evalOk = evalOk, evalTs = evalTs)
+
         Text(
             "تا ${WatchlistStore.MAX_GROUPS} ردیف • هر ردیف تا ${WatchlistStore.MAX_COINS_PER_GROUP} ارز • هر ارز تا ${WatchlistStore.MAX_ALERTS_PER_COIN} هشدار\n" +
-                "هشدارها هر ۱۵ دقیقه بررسی می‌شوند؛ هنگام باز بودن این تب، آنی.",
+                "هشدارها هر ۳۰ دقیقه توسط MonitorWorker بررسی می‌شوند؛ هنگام باز بودن این تب، آنی.",
             fontSize = 9.sp, color = WGray, lineHeight = 15.sp
         )
 
@@ -400,14 +411,26 @@ fun WatchlistScreen() {
                                                         fontSize = 7.sp, color = WGray
                                                     )
                                                 }
-                                                Button(
-                                                    onClick = {
-                                                        WatchlistStore.removeAlert(context, group.id, coin.id, a.id)
-                                                        reload()
-                                                    },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = WRed.copy(alpha = 0.2f)),
-                                                    shape = RoundedCornerShape(4.dp)
-                                                ) { Text("🗑️", fontSize = 8.sp) }
+                                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                    // 🚀 Commit 115: دکمه re-arm
+                                                    Button(
+                                                        onClick = {
+                                                            WatchlistStore.rearmAlert(context, group.id, coin.id, a.id)
+                                                            reload()
+                                                            msg = "🔄 هشدار دوباره فعال شد"
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = WGreen.copy(alpha = 0.3f)),
+                                                        shape = RoundedCornerShape(4.dp)
+                                                    ) { Text("🔄", fontSize = 8.sp) }
+                                                    Button(
+                                                        onClick = {
+                                                            WatchlistStore.removeAlert(context, group.id, coin.id, a.id)
+                                                            reload()
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = WRed.copy(alpha = 0.2f)),
+                                                        shape = RoundedCornerShape(4.dp)
+                                                    ) { Text("🗑️", fontSize = 8.sp) }
+                                                }
                                             }
                                         }
                                     }
@@ -416,6 +439,46 @@ fun WatchlistScreen() {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// 🚀 Commit 115: کارت وضعیت ارزیابی
+@Composable
+private fun EvalStatusCard(evalOk: Boolean, evalTs: Long) {
+    val now = System.currentTimeMillis()
+    val ageSec = if (evalTs > 0) (now - evalTs) / 1000 else 0L
+    val ageText = when {
+        evalTs == 0L -> "هنوز ارزیابی نشده"
+        ageSec < 60 -> "${ageSec} ثانیه پیش"
+        ageSec < 3600 -> "${ageSec / 60} دقیقه پیش"
+        else -> "${ageSec / 3600} ساعت پیش"
+    }
+
+    val (emoji, color, text) = when {
+        evalTs == 0L -> Triple("⏳", WGray, "در انتظار اولین ارزیابی")
+        evalOk -> Triple("✅", WGreen, "آخرین بررسی: $ageText")
+        else -> Triple("⚠️", WRed, "ارزیابی نشده: $ageText (احتمالاً قطع شبکه)")
+    }
+
+    Surface(
+        color = color.copy(alpha = 0.1f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(emoji, fontSize = 14.sp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text, fontSize = 10.sp, color = color, fontWeight = FontWeight.Bold)
+                Text(
+                    "ارزیابی توسط MonitorWorker هر ۳۰ دقیقه • هنگام باز بودن این تب، آنی",
+                    fontSize = 8.sp, color = WGray
+                )
             }
         }
     }
