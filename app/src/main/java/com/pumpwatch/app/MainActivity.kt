@@ -66,6 +66,7 @@ import com.pumpwatch.app.data.MarketMeta
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.ServedFrom
+import com.pumpwatch.app.data.WatchlistMigration
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.data.platformContractRef
 import com.pumpwatch.app.store.WatchlistScheduler
@@ -129,6 +130,10 @@ class MainActivity : ComponentActivity() {
         scheduleWhaleMemeWorker() // 🚀 Commit 91 (A5)
         WatchlistScheduler.start(this)
         TraderMonitorScheduler.start(this) // 🏆 Sprint 16: هشدار تاپ تریدرها
+
+        // 🚀 Commit 113: مهاجرت یک‌بارهٔ دادهٔ واچ‌لیست قدیمی به store رمزنگاری‌شده
+        // اگر قبلاً اجرا شده باشد، داخل خودش سریع برمی‌گردد (flag).
+        WatchlistMigration.migrateIfNeeded(this)
 
         setContent {
             PumpWatchTheme {
