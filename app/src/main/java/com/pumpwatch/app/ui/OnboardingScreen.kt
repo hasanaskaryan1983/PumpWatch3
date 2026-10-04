@@ -80,9 +80,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
         listOf(
             OBPage("لحظه درست رو شکار کن!", "هشدارهای زودهنگام پامپ و دامپ، قبل از حرکت بزرگ بازار", R.drawable.onb_p1, OBGold),
             OBPage("شکار نهنگ‌ها", "ردپای خرید و فروش نهنگ‌ها رو قبل از حرکت بزرگ بازار دنبال کن", R.drawable.onb_p2, OBTeal),
-            OBPage("تحلیل مثل حرفه‌ای‌ها", "۵ تایم‌فریم + ۸ اندیکاتور + نقاط دقیق ورود، استاپ و هدف", R.drawable.onb_p3, OBGreen),
+            // 🚀 Commit 118: حذف ادعای غیرقابل اثبات «مثل حرفه‌ای‌ها»
+            OBPage("تحلیل قاعده‌محور", "۵ تایم‌فریم + ۸ اندیکاتور + نقاط دقیق ورود، استاپ و هدف (بدون AI)", R.drawable.onb_p3, OBGreen),
             OBPage("رادار میم‌کوین‌ها", "کشف میم‌کوین‌های ترند قبل از پامپ؛ کارآگاه NEXT دنبال سوژه بعدیه", R.drawable.onb_p4, OBRed),
-            OBPage("جلوتر از بازار باش", "سیگنال‌های طلایی با معیارهای ۵۰ تریدر برتر دنیا", R.drawable.onb_p5, OBPurple)
+            // 🚀 Commit 118: حذف دروغ «۵۰ تریدر برتر دنیا» — کد چنین چیزی ندارد
+            OBPage("سیگنال‌های امتیازدار", "سیگنال‌های تکنیکال با وزن‌های شفاف و فرمول قابل مشاهده در صفحهٔ متدولوژی", R.drawable.onb_p5, OBPurple)
         )
     }
 
@@ -128,7 +130,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
             beyondViewportPageCount = 1
         ) { p ->
             val page = pages[p]
-            // offset این صفحه نسبت به مرکز: بین -1 و 1
             val offset = ((pagerState.currentPage - p) + pagerState.currentPageOffsetFraction)
                 .coerceIn(-1f, 1f)
             val absOff = abs(offset)
@@ -140,20 +141,17 @@ fun OnboardingScreen(onDone: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
-                // 🚀 Sprint 8 (F2): فضای بالای تصویر کمتر شد تا خود تصویر بزرگ‌تر شود
                 Spacer(Modifier.height(28.dp))
 
                 // ============ کارت تصویر ============
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f), // تمام فضای عمودی باقیمانده مال تصویر
+                        .weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
                     val cardShape = RoundedCornerShape(28.dp)
 
-                    // درخشش پشت کارت (هاله accent)
-                    // 🚀 Sprint 8 (F2): fillMaxSize به‌جای aspectRatio افقی — هاله هم‌اندازهٔ کارت جدید
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -163,14 +161,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
                             .background(page.accent, cardShape)
                     )
 
-                    // خود کارت: تیلت سه‌بعدی + پارالاکس داخلی + زوم نفس‌کش
-                    // 🚀 Sprint 8 (F2): کارت کل فضای عمودی را پر می‌کند تا تصویر ۹:۱۶ له نشود
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
                                 translationY = floatY
-                                // تیلت سه‌بعدی نسبت به موقعیت سوایپ
                                 rotationY = offset * 14f
                                 rotationZ = offset * 2f
                                 scaleX = 1f - absOff * 0.10f
@@ -182,7 +177,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                             .background(Color(0xFF0D1117)),
                         contentAlignment = Alignment.Center
                     ) {
-                        // تصویر با پارالاکس داخلی و زوم نرم (Ken Burns)
                         val kb by rememberInfiniteTransition(label = "kb$p").animateFloat(
                             initialValue = 1.0f,
                             targetValue = 1.10f,
@@ -198,12 +192,10 @@ fun OnboardingScreen(onDone: () -> Unit) {
                                 .graphicsLayer {
                                     scaleX = kb
                                     scaleY = kb
-                                    // تصویر داخل کارت برخلاف جهت سوایپ حرکت می‌کند → پارالاکس
                                     translationX = offset * size.width * 0.12f
                                 }
                         )
 
-                        // برق کشویی روی عکس (Shine Sweep)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -223,7 +215,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                                 )
                         )
 
-                        // افکت‌های داستانی هر صفحه روي تصویر
                         when (p) {
                             0 -> RocketStory(story, Modifier.fillMaxSize())
                             1 -> WhaleStory(story, Modifier.fillMaxSize())
@@ -239,7 +230,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                             }
                         }
 
-                        // حاشیه نورانی بالای کارت
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -253,7 +243,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         )
                     }
 
-                    // ذرات معلق دور کارت
                     FloatingParticles(fast, page.accent, Modifier.fillMaxSize())
                 }
 
@@ -267,7 +256,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // خط رنگی کوچک بالای عنوان
                     Box(
                         modifier = Modifier
                             .width(42.dp)
@@ -364,7 +352,6 @@ fun OnboardingScreen(onDone: () -> Unit) {
     }
 }
 
-// ---------- ستاره‌های چشمک‌زن پس‌زمینه ----------
 @Composable
 private fun Starfield(fast: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -377,7 +364,6 @@ private fun Starfield(fast: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// ---------- ذرات معلق دور کارت ----------
 @Composable
 private fun FloatingParticles(fast: Float, accent: Color, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -393,7 +379,6 @@ private fun FloatingParticles(fast: Float, accent: Color, modifier: Modifier = M
     }
 }
 
-// ---------- صفحه ۱: موشک + زنگ ----------
 @Composable
 private fun RocketStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -417,7 +402,6 @@ private fun RocketStory(story: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// ---------- صفحه ۲: پامپ → دامپ → بلع ----------
 @Composable
 private fun WhaleStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -445,7 +429,6 @@ private fun WhaleStory(story: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// ---------- صفحه ۳: کوکپیت تحلیل ----------
 @Composable
 private fun CockpitStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -467,7 +450,6 @@ private fun CockpitStory(story: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// ---------- صفحه ۴: اتاق کارآگاه ----------
 @Composable
 private fun DetectiveStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
@@ -492,7 +474,6 @@ private fun DetectiveStory(story: Float, modifier: Modifier = Modifier) {
     }
 }
 
-// ---------- صفحه ۵: گوی پیشگو ----------
 @Composable
 private fun OrbStory(story: Float, modifier: Modifier = Modifier) {
     Canvas(modifier) {
