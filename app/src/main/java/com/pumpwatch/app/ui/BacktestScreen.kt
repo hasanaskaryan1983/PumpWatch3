@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.sp
 import com.google.gson.JsonArray
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
+import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.HistoricalUniverseRepository
 import com.pumpwatch.app.data.KlineCache as SharedKlineCache
 import com.pumpwatch.app.data.klineSourceLabel
 import com.pumpwatch.app.engine.BacktestEngine
@@ -35,7 +37,6 @@ private val LY = Color(0xFFFFC107)
 private val LGr = Color(0xFF8B949E)
 private val LC = Color(0xFF1A2230)
 private val LBlue = Color(0xFF40C4FF)
-private val LPurple = Color(0xFFBA68C8)  // 🚀 Commit 106: برای LIQUIDATED
 
 private suspend fun getKlinesCached(symbol: String, interval: String, limit: Int): List<JsonArray> {
     return try {
@@ -78,7 +79,6 @@ private val RANGES = listOf(
     "51-100" to (50 until 100)
 )
 
-// 🚀 Sprint 15 (Commit 12b): نتیجهٔ مقایسهٔ A/B
 private data class ABResult(
     val symbol: String,
     val legacyR: Double,
@@ -119,11 +119,13 @@ fun BacktestScreen() {
     var analyzedInfo by remember { mutableStateOf("") }
     var provInfo by remember { mutableStateOf("") }
 
-    // 🚀 Sprint 15 (Commit 12b): state های A/B
     var abResults by remember { mutableStateOf<List<ABResult>>(emptyList()) }
     var abSummary by remember { mutableStateOf<ABSummary?>(null) }
     var abRunning by remember { mutableStateOf(false) }
     var abProgress by remember { mutableStateOf("") }
+
+    // 🚀 Commit 112 (B1): برچسب منبع universe برای افشای صادقانه
+    var universeLabel by remember { mutableStateOf("") }
 
     Column(
         Modifier
@@ -140,13 +142,29 @@ fun BacktestScreen() {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                // 🚀 Commit 106: به‌روزرسانی متن توضیح برای فیوچرز
                 if (isFutures) "⚡ فیوچرز: ورود next-bar + خروج intrabar با اولویت استاپ | هزینهٔ رفت‌وبرگشت: ۰.۱۸٪ + فاندینگ ۰.۰۱٪/۸س | اهرم ۱۰× + لیکوئیدیشن"
                 else "🏦 اسپات: امتیاز ≥۰ + هفتگی مثبت + OBV مثبت | ورود next-bar + خروج intrabar | هزینهٔ رفت‌وبرگشت: ۰.۳٪",
                 fontSize = 11.sp,
                 color = if (isFutures) LR else LG,
                 modifier = Modifier.padding(10.dp)
             )
+        }
+
+        // 🚀 Commit 112 (B1): افشای منبع universe
+        if (universeLabel.isNotEmpty()) {
+            Surface(
+                color = LY.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    universeLabel,
+                    fontSize = 9.sp,
+                    color = LY,
+                    lineHeight = 14.sp,
+                    modifier = Modifier.padding(8.dp)
+                )
+            }
         }
 
         if (isFutures) {
@@ -228,8 +246,6 @@ fun BacktestScreen() {
                         val allCoins = withContext(Dispatchers.IO) {
                             try {
                                 ApiClient.getTop1000Coins()
-                                    .sortedByDescending { it.total_volume ?: 0.0 }
-                                    .take(100)
                             } catch (e: Exception) {
                                 emptyList()
                             }
@@ -241,11 +257,43 @@ fun BacktestScreen() {
                             return@launch
                         }
 
+                        // 🚀 Commit 112 (B1): ثبت snapshot امروز + resolve universe نقطه‌درزمان
+                        HistoricalUniverseRepository.recordSnapshot(ctx, allCoins)
+                        val periodStartMs = System.currentTimeMillis() -
+                                (if (isFutures) 30L else 90L) * 86_400_000L
+                        val universe = HistoricalUniverseRepository.resolve(ctx, periodStartMs, allCoins)
+                        val coinById = allCoins.associateBy { it.id }
+
+                        universeLabel = when (universe.source) {
+                            HistoricalUniverseRepository.UniverseSource.POINT_IN_TIME ->
+                                "🌐 universe: snapshot نقطه‌درزمان روز شروع بازه • پوشش تاریخی: ${universe.coveragePct}٪"
+                            HistoricalUniverseRepository.UniverseSource.NEAREST_SNAPSHOT ->
+                                "🌐 universe: نزدیک‌ترین snapshot قبلی (نه دقیق روز شروع) • پوشش: ${universe.coveragePct}٪"
+                            HistoricalUniverseRepository.UniverseSource.TODAY_BIASED ->
+                                "⚠️ universe: عضویت امروز بازار (سوگیری بقا) — هنوز snapshot تاریخی کافی جمع نشده • پوشش: ${universe.coveragePct}٪"
+                        }
+
                         val allIndices = mutableSetOf<Int>()
                         selectedRanges.forEach { label ->
                             RANGES.find { it.first == label }?.second?.forEach { allIndices.add(it) }
                         }
-                        val coinsToTest = allIndices.mapNotNull { idx -> allCoins.getOrNull(idx)?.let { idx to it } }
+
+                        // 🚀 Commit 112 (B1): انتخاب بر اساس رتبهٔ universe + شمارش delisted
+                        var untestable = 0
+                        val coinsToTest = mutableListOf<Pair<Int, CoinMarket>>()
+                        for (idx in allIndices.sorted()) {
+                            val id = universe.rankedIds.getOrNull(idx)
+                            if (id == null) { untestable++; continue }
+                            val coin = coinById[id]
+                            if (coin == null) { untestable++; continue }
+                            coinsToTest.add(idx to coin)
+                        }
+
+                        if (coinsToTest.isEmpty()) {
+                            errorMsg = "❌ هیچ ارز قابل‌آزمونی در بازهٔ انتخابی نیست (universe: ${universe.source})"
+                            isRunning = false
+                            return@launch
+                        }
 
                         var processed = 0
                         var analyzed = 0
@@ -264,12 +312,11 @@ fun BacktestScreen() {
                                     val klinesList = klines.map { k ->
                                         listOf(k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble, k[5].asDouble)
                                     }
-                                    // 🚀 Commit 106: پاس leverage=10 و fundingRate=0.0001 به موتور
                                     val (trades, _) = BacktestEngine.runFutures(
                                         symbol, klinesList, tf.evalLast, tf.hold,
-                                        feeRate = 0.0004,       // taker بایننس (0.04%)
-                                        leverage = 10,          // اهرم 10x
-                                        fundingRate = 0.0001    // 0.01% هر 8 ساعت
+                                        feeRate = 0.0004,
+                                        leverage = 10,
+                                        fundingRate = 0.0001
                                     )
                                     allTrades.addAll(trades)
                                 }
@@ -292,7 +339,8 @@ fun BacktestScreen() {
                             delay(150)
                         }
 
-                        analyzedInfo = "ارزهای تحلیل‌شده: $analyzed از ${coinsToTest.size}"
+                        analyzedInfo = "ارزهای تحلیل‌شده: $analyzed از ${coinsToTest.size}" +
+                                (if (untestable > 0) " • غیرقابل‌آزمون (حذف‌شده/بدون داده): $untestable" else "")
                         results = allTrades
 
                         provInfo = "🕯️ منابع کندل: ${sourcesUsed.sorted().joinToString("، ")} • " +
@@ -303,11 +351,10 @@ fun BacktestScreen() {
                         val wins = allTrades.count { it.result == "WIN" }
                         val losses = allTrades.count { it.result == "LOSS" }
                         val expired = allTrades.count { it.result == "EXP" }
-                        // 🚀 Commit 106: شمارش LIQUIDATED
                         val liquidated = allTrades.count { it.result == "LIQUIDATED" }
                         val decided = wins + losses
                         val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
-                        val avgPnl = allTrades.map { it.pnl }.average()
+                        val avgPnl = if (allTrades.isEmpty()) 0.0 else allTrades.map { it.pnl }.average()
                         val totalPnl = allTrades.sumOf { it.pnl }
 
                         val winningTrades = allTrades.filter { it.pnl > 0 }
@@ -335,7 +382,6 @@ fun BacktestScreen() {
                             if (dd > maxDrawdown) maxDrawdown = dd
                         }
 
-                        // 🚀 Commit 106: اضافه شدن liquidated
                         metrics = BacktestEngine.BacktestMetrics(
                             totalTrades = allTrades.size,
                             wins = wins,
@@ -376,7 +422,6 @@ fun BacktestScreen() {
 
         if (isRunning) Text(progress, color = LGr, fontSize = 12.sp)
 
-        // 🚀 Sprint 15 (Commit 12b): دکمهٔ مقایسهٔ A/B
         if (!isRunning && selectedRanges.isNotEmpty()) {
             Button(
                 onClick = {
@@ -388,18 +433,32 @@ fun BacktestScreen() {
                             val allCoins = withContext(Dispatchers.IO) {
                                 try {
                                     ApiClient.getTop1000Coins()
-                                        .sortedByDescending { it.total_volume ?: 0.0 }
-                                        .take(100)
-                                } catch (e: Exception) {
+                                } catch (_: Exception) {
                                     emptyList()
                                 }
                             }
+
+                            if (allCoins.isEmpty()) {
+                                abRunning = false
+                                return@launch
+                            }
+
+                            // 🚀 Commit 112 (B1): A/B هم از همان universe استفاده می‌کند
+                            HistoricalUniverseRepository.recordSnapshot(ctx, allCoins)
+                            val periodStartMs = System.currentTimeMillis() - 90L * 86_400_000L
+                            val universe = HistoricalUniverseRepository.resolve(ctx, periodStartMs, allCoins)
+                            val coinById = allCoins.associateBy { it.id }
 
                             val allIndices = mutableSetOf<Int>()
                             selectedRanges.forEach { label ->
                                 RANGES.find { it.first == label }?.second?.forEach { allIndices.add(it) }
                             }
-                            val coinsToTest = allIndices.mapNotNull { idx -> allCoins.getOrNull(idx)?.let { idx to it } }
+                            val coinsToTest = mutableListOf<Pair<Int, CoinMarket>>()
+                            for (idx in allIndices.sorted()) {
+                                val id = universe.rankedIds.getOrNull(idx) ?: continue
+                                val coin = coinById[id] ?: continue
+                                coinsToTest.add(idx to coin)
+                            }
 
                             val abList = mutableListOf<ABResult>()
                             var processed = 0
@@ -418,13 +477,12 @@ fun BacktestScreen() {
                                     val bars = klines.map { k ->
                                         Bar(k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble)
                                     }
-                                    // فرض ورود در بار 20 (بعد از گرم‌شدن اندیکاتورها)
                                     val entryBar = 20
                                     if (entryBar < bars.size - 10) {
                                         val entry = bars[entryBar].c
-                                        val stop = entry * 0.95  // 5% stop
-                                        val t1 = entry * 1.10   // 10% target1
-                                        val t2 = entry * 1.20   // 20% target2
+                                        val stop = entry * 0.95
+                                        val t1 = entry * 1.10
+                                        val t2 = entry * 1.20
                                         val side = "PUMP"
 
                                         val postBars = bars.subList(entryBar + 1, bars.size)
@@ -497,7 +555,6 @@ fun BacktestScreen() {
 
         if (abRunning) Text(abProgress, color = LGr, fontSize = 12.sp)
 
-        // 🚀 Sprint 15 (Commit 12b): کارت مقایسهٔ A/B
         abSummary?.let { s ->
             Surface(color = LC, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -580,29 +637,20 @@ fun BacktestScreen() {
                         Text(provInfo, fontSize = 9.sp, color = LGr, lineHeight = 14.sp)
                     }
 
-                    // 🚀 Commit 106: اضافه شدن LIQUIDATED به آمار
                     Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                         Text("تعداد: ${m.totalTrades}", fontSize = 11.sp, color = LGr)
                         Text("✅ برد: ${m.wins}", fontSize = 11.sp, color = LG)
                         Text("❌ باخت: ${m.losses}", fontSize = 11.sp, color = LR)
                         Text("⌛ منقضی: ${m.expired}", fontSize = 11.sp, color = LY)
                     }
-                    // 🚀 Commit 106: ردیف مخصوص LIQUIDATED برای فیوچرز
                     if (isFutures) {
                         Row(Modifier.fillMaxWidth(), Arrangement.SpaceAround) {
                             Text(
                                 "💀 لیکوئید: ${m.liquidated}",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (m.liquidated > 0) LPurple else LGr
+                                color = if (m.liquidated > 0) Color(0xFFBA68C8) else LGr
                             )
-                            if (m.liquidated > 0) {
-                                Text(
-                                    "(${String.format(Locale.US, "%.1f%%", m.liquidated * 100.0 / m.totalTrades)} از کل)",
-                                    fontSize = 10.sp,
-                                    color = LPurple
-                                )
-                            }
                         }
                     }
 
@@ -616,17 +664,16 @@ fun BacktestScreen() {
                     Text("Profit Factor: ${String.format(Locale.US, "%.2f", m.profitFactor)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.profitFactor >= 1.5) LG else LR)
                     Text("📉 Max Drawdown: ${String.format(Locale.US, "%.2f%%", m.maxDrawdown)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (m.maxDrawdown < 20) LG else LR)
 
-                    // 🚀 Commit 106: هشدار اگر تعداد LIQUIDATED بالاست
                     if (isFutures && m.liquidated > m.totalTrades * 0.1 && m.totalTrades > 0) {
                         Surface(
-                            color = LPurple.copy(alpha = 0.15f),
+                            color = Color(0xFFBA68C8).copy(alpha = 0.15f),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
                                 "⚠️ هشدار: ${m.liquidated} لیکوئیدیشن از ${m.totalTrades} ترید — اهرم یا فاصلهٔ استاپ نیاز به بازنگری دارد",
                                 fontSize = 10.sp,
-                                color = LPurple,
+                                color = Color(0xFFBA68C8),
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(8.dp)
                             )
@@ -645,7 +692,6 @@ fun BacktestScreen() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                // 🚀 Commit 106: پشتیبانی از LIQUIDATED در کارت ترید
                                 val resultEmoji = when (r.result) {
                                     "WIN" -> "✅"
                                     "LOSS" -> "❌"
@@ -655,7 +701,7 @@ fun BacktestScreen() {
                                 val resultColor = when (r.result) {
                                     "WIN" -> LG
                                     "LOSS" -> LR
-                                    "LIQUIDATED" -> LPurple
+                                    "LIQUIDATED" -> Color(0xFFBA68C8)
                                     else -> LY
                                 }
                                 Text(
@@ -667,7 +713,7 @@ fun BacktestScreen() {
                             Text(
                                 "${String.format(Locale.US, "%+.2f%%", r.pnl)}",
                                 fontWeight = FontWeight.Bold,
-                                color = if (r.pnl >= 0) LG else (if (r.result == "LIQUIDATED") LPurple else LR),
+                                color = if (r.pnl >= 0) LG else (if (r.result == "LIQUIDATED") Color(0xFFBA68C8) else LR),
                                 fontSize = 13.sp
                             )
                         }
