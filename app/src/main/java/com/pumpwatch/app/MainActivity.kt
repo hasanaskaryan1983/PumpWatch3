@@ -61,6 +61,7 @@ import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.ContractRef
+import com.pumpwatch.app.data.HistoricalUniverseRepository
 import com.pumpwatch.app.data.MarketMeta
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
@@ -428,6 +429,13 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
                 meta = ApiClient.marketMeta()
                 platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
+
+                // 🚀 Commit 112 (B1): جمع‌آوری غیرفعال تاریخچهٔ universe
+                // فقط لیست‌های بزرگ‌تر از ۱۰۰ ثبت می‌شوند تا snapshot های
+                // ناقص (top100 فیوچرز) جای snapshot کامل را نگیرند.
+                if (coins.size > 100) {
+                    HistoricalUniverseRepository.recordSnapshot(context, coins)
+                }
             } catch (e: Exception) {
                 NetErr.log("MarketScreen", "coingecko/coins/markets", null, e)
                 errorMsg = NetErr.msg(e)
