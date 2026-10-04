@@ -27,12 +27,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceFutures
+import com.pumpwatch.app.engine.AlertRule
+import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.FuturesScannerEngine
+import com.pumpwatch.app.engine.RuleCondition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,14 +50,13 @@ private val ABlue = Color(0xFF40C4FF)
 private val AGray = Color(0xFF8B949E)
 private val ACard = Color(0xFF1A0E0E)
 
-// 🚀 Sprint 12 (F5): مدل هشدار فیوچرز
 private data class FutAlert(
     val base: String,
-    val type: String,       // FUNDING / MOVE24 / OI_SPIKE / EMA_CROSS / BREAKOUT / SQUEEZE
-    val severity: Int,      // 1..3
+    val type: String,
+    val severity: Int,
     val title: String,
     val detail: String,
-    val rank: Int? = null   // 🚀 Commit 17: رتبه در ۱۰۰ برتر
+    val rank: Int? = null
 )
 
 private fun typeEmoji(type: String): String = when (type) {
@@ -81,11 +84,15 @@ private fun severityLabel(sev: Int): String = when (sev) {
 @Composable
 fun FuturesAlertsScreen() {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
     var alerts by remember { mutableStateOf<List<FutAlert>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var progress by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var scannedStats by remember { mutableStateOf("") }
+
+    // 🚀 Commit 110 (F10): قوانین فاندینگ فعال کاربر
+    var futRules by remember { mutableStateOf<List<AlertRule>>(emptyList()) }
 
     fun scan() {
         scope.launch {
@@ -97,7 +104,6 @@ fun FuturesAlertsScreen() {
                 val result = withContext(Dispatchers.IO) {
                     val out = mutableListOf<FutAlert>()
 
-                    // 🚀 Commit 17: سفیدلیست ۱۰۰ برتر CoinGecko + نقشهٔ رتبه
                     progress = "دریافت ۱۰۰ ارز برتر..."
                     val top100 = try { ApiClient.getTop100Coins() } catch (_: Exception) { emptyList() }
                     val top100Symbols = top100.map { it.symbol.uppercase(Locale.US) }.toSet()
@@ -107,22 +113,18 @@ fun FuturesAlertsScreen() {
                     val prem = try { BinanceFutures.api.premiumIndexAll() } catch (_: Exception) { emptyList() }
                     val tick = try { BinanceFutures.api.ticker24h() } catch (_: Exception) { emptyList() }
 
-                    // 🚀 Commit 17: محاسبه میانگین فاندینگ بازار برای آستانهٔ نسبی
                     val fundingRates = prem.mapNotNull { it.lastFundingRate?.toDoubleOrNull() }
                     val avgAbsFunding = if (fundingRates.isNotEmpty()) fundingRates.map { abs(it) }.average() else 0.0001
-                    // آستانه نسبی: ۳× میانگین بازار (حداقل 0.03%)
                     val fundingThreshold = maxOf(avgAbsFunding * 3.0, 0.0003)
                     val fundingHighThreshold = maxOf(avgAbsFunding * 6.0, 0.0006)
 
                     var perpScanned = 0
                     var perpInTop100 = 0
 
-                    // ---------- ۱) Funding extreme (فقط ۱۰۰ برتر ∩ perp) ----------
                     for (p in prem) {
                         if (!p.symbol.endsWith("USDT")) continue
                         val base = p.symbol.removeSuffix("USDT")
                         perpScanned++
-                        // 🚀 Commit 17: فیلتر ۱۰۰ برتر
                         if (base !in top100Symbols) continue
                         perpInTop100++
 
@@ -146,11 +148,9 @@ fun FuturesAlertsScreen() {
                         )
                     }
 
-                    // ---------- ۲) حرکت شدید ۲۴س (فقط ۱۰۰ برتر) ----------
                     for (t in tick) {
                         if (!t.symbol.endsWith("USDT")) continue
                         val base = t.symbol.removeSuffix("USDT")
-                        // 🚀 Commit 17: فیلتر ۱۰۰ برتر
                         if (base !in top100Symbols) continue
 
                         val chg = t.priceChangePercent?.toDoubleOrNull() ?: continue
@@ -168,7 +168,6 @@ fun FuturesAlertsScreen() {
                         )
                     }
 
-                    // ---------- ۳) اسکن عمیق (top 8 پرحجم از ۱۰۰ برتر) ----------
                     val top8 = tick
                         .filter { it.symbol.endsWith("USDT") }
                         .filter { it.symbol.removeSuffix("USDT") in top100Symbols }
@@ -180,7 +179,6 @@ fun FuturesAlertsScreen() {
                         progress = "اسکن عمیق ${i + 1}/${top8.size}: $base"
                         val rank = top100Rank[base]
 
-                        // OI spike
                         try {
                             val oi = BinanceFutures.api.oiHist(t.symbol, "1h", 24)
                             if (oi.size >= 2) {
@@ -203,7 +201,6 @@ fun FuturesAlertsScreen() {
                             }
                         } catch (_: Exception) { }
 
-                        // EMA cross + Squeeze روی 1h
                         try {
                             val k1 = BinanceFutures.api.klines(t.symbol, "1h", 200)
                                 .mapNotNull { BinanceFutures.parseCandle(it) }
@@ -236,7 +233,6 @@ fun FuturesAlertsScreen() {
                             }
                         } catch (_: Exception) { }
 
-                        // Breakout / Breakdown روی 4h
                         try {
                             val k4 = BinanceFutures.api.klines(t.symbol, "4h", 200)
                                 .mapNotNull { BinanceFutures.parseCandle(it) }
@@ -254,10 +250,8 @@ fun FuturesAlertsScreen() {
                         } catch (_: Exception) { }
                     }
 
-                    // 🚀 Commit 17: آمار پوشش
                     scannedStats = "چک‌شده: $perpScanned ارز perp بایننس • $perpInTop100 تا در ۱۰۰ برتر"
 
-                    // 🚀 Commit 17: مرتب‌سازی + سقف ۵۰ هشدار
                     out.sortedByDescending { it.severity }.take(50)
                 }
                 alerts = result
@@ -270,7 +264,14 @@ fun FuturesAlertsScreen() {
         }
     }
 
-    LaunchedEffect(Unit) { scan() }
+    LaunchedEffect(Unit) {
+        scan()
+        // 🚀 Commit 110 (F10): بارگذاری قوانین فاندینگ فعال
+        futRules = AlertRulesStore.load(ctx).filter {
+            it.enabled && (it.condition == RuleCondition.FUNDING_ABOVE ||
+                          it.condition == RuleCondition.FUNDING_BELOW)
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -295,6 +296,35 @@ fun FuturesAlertsScreen() {
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             fontSize = 9.sp, color = AGray, lineHeight = 15.sp
         )
+
+        // 🚀 Commit 110 (F10): کارت قوانین فاندینگ فعال کاربر
+        if (futRules.isNotEmpty()) {
+            Surface(
+                color = AGold.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(
+                        "🔔 قوانین فاندینگ فعال شما (${futRules.size}):",
+                        fontSize = 10.sp, color = AGold, fontWeight = FontWeight.Bold
+                    )
+                    futRules.take(3).forEach { r ->
+                        Text(
+                            "• ${r.symbol}: ${r.condition.label} ${String.format(Locale.US, "%.4f%%", r.threshold)}",
+                            fontSize = 9.sp, color = AGray,
+                            modifier = Modifier.padding(start = 4.dp)
+                        )
+                    }
+                    Text(
+                        "این قوانین هر ۳۰ دقیقه توسط Worker ارزیابی و در صورت تطابق نوتیفیکیشن ارسال می‌شود.",
+                        fontSize = 8.sp, color = AGray, modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        }
 
         if (loading) {
             Column(
@@ -341,7 +371,6 @@ private fun AlertCard(a: FutAlert) {
                 Text(typeEmoji(a.type), fontSize = 18.sp)
                 Spacer(Modifier.width(8.dp))
                 Text(a.base, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
-                // 🚀 Commit 17: نمایش رتبه در ۱۰۰ برتر
                 if (a.rank != null) {
                     Text(" #${a.rank}", fontSize = 10.sp, color = AGray)
                 }
