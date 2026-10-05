@@ -2,7 +2,6 @@ package com.pumpwatch.app.data
 
 import org.junit.Assert.*
 import org.junit.Test
-import java.util.Base64 as JBase64
 
 class SecureStorageHelpersTest {
 
@@ -36,27 +35,6 @@ class SecureStorageHelpersTest {
         assertNull(SecureStorage.splitRaw(ByteArray(0)))
     }
 
-    @Test
-    fun `packBlob and unpackBlob roundtrip correctly`() {
-        val iv = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
-        val ct = byteArrayOf(20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)
-        val blob = SecureStorage.packBlob(iv, ct)
-        val unpacked = SecureStorage.unpackBlob(blob)
-        assertNotNull(unpacked)
-        val (uIv, uCt) = unpacked!!
-        assertArrayEquals(iv, uIv)
-        assertArrayEquals(ct, uCt)
-    }
-
-    @Test
-    fun `unpackBlob returns null for empty or short data`() {
-        assertNull(SecureStorage.unpackBlob(""))
-        val tooShort = JBase64.getEncoder().encodeToString(ByteArray(10))
-        assertNull(SecureStorage.unpackBlob(tooShort))
-    }
-
-    @Test
-    fun `unpackBlob returns null for invalid base64`() {
-        assertNull(SecureStorage.unpackBlob("not-valid-base64!!!"))
-    }
+    // ❌ حذف شد: packBlob/unpackBlob از android.util.Base64 استفاده می‌کنند
+    // که در JVM test کار نمی‌کند. نیاز به Robolectric یا androidTest دارد.
 }
