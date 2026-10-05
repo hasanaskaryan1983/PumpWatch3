@@ -53,6 +53,7 @@ import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.data.klineSourceLabel
 import com.pumpwatch.app.data.sourceLabel
 import com.pumpwatch.app.engine.PaperRules
+import com.pumpwatch.app.engine.PositionSizer
 import com.pumpwatch.app.engine.ScoringEngine
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
@@ -99,7 +100,7 @@ data class PaperTrade(
 )
 
 data class PaperState(
-    var cash: Double = PaperRules.START_CAPITAL,
+    var cash: Double = 1000.0,
     var trades: MutableList<PaperTrade> = mutableListOf()
 )
 
@@ -117,8 +118,7 @@ private val TIERS = listOf(
     "101-200" to (101..200), "201-1000" to (201..1000), "DEX" to null
 )
 
-// 🚀 Commit 107 (T6): سرمایهٔ واحد از PaperRules (همه‌جا ۱۰۰۰$)
-private const val START_CAPITAL = PaperRules.START_CAPITAL
+private const val START_CAPITAL = 1000.0
 private const val MAX_PER_TIER = 4
 
 private fun tierOfRank(rank: Int?): String = when (rank) {
@@ -132,37 +132,8 @@ private fun loadState(ctx: Context): PaperState = try {
     if (json.isEmpty()) PaperState() else GSON.fromJson(json, PaperState::class.java) ?: PaperState()
 } catch (_: Exception) { PaperState() }
 
-/**
- * 🚀 Commit 107 (T2): save ایمن — زیر قفل مشترک:
- * ۱) تریدهای OPEN/CLOSEDای که Worker روی دیسک ساخته و ما نداریم ادغام می‌شوند
- * ۲) cash از صفر بازمحاسبه می‌شود (هرگز مقدار کهنه نوشته نمی‌شود)
- */
 private fun saveState(ctx: Context, s: PaperState) {
-    synchronized(PaperRules.lock) {
-        val disk = loadState(ctx)
-        val knownOpen = s.trades.filter { it.status == "OPEN" }
-            .map { it.symbol to it.openTime }.toSet()
-        disk.trades.filter { it.status == "OPEN" && (it.symbol to it.openTime) !in knownOpen }
-            .forEach { s.trades.add(it) }
-
-        val knownClosed = s.trades.filter { it.status == "CLOSED" }
-            .map { Triple(it.symbol, it.openTime, it.closeTime) }.toSet()
-        disk.trades.filter {
-            it.status == "CLOSED" && Triple(it.symbol, it.openTime, it.closeTime) !in knownClosed
-        }.forEach { s.trades.add(it) }
-
-        s.cash = PaperRules.recomputeCash(s)
-        ctx.getSharedPreferences("pumpwatch_prefs", 0)
-            .edit().putString("paper_state", GSON.toJson(s)).apply()
-    }
-}
-
-/** 🚀 Commit 107: ریست واقعی — بدون ادغام (همه‌چیز صفر) */
-private fun wipeState(ctx: Context, s: PaperState) {
-    synchronized(PaperRules.lock) {
-        ctx.getSharedPreferences("pumpwatch_prefs", 0)
-            .edit().putString("paper_state", GSON.toJson(s)).apply()
-    }
+    ctx.getSharedPreferences("pumpwatch_prefs", 0).edit().putString("paper_state", GSON.toJson(s)).apply()
 }
 
 private fun loadAlloc(ctx: Context): MutableMap<String, Int> {
@@ -196,11 +167,10 @@ private fun rMultiple(t: PaperTrade): Double {
     return (t.price - t.entry) / risk
 }
 
-// 🚀 Commit 107 (T6): منحنی سرمایه با سرمایهٔ واقعی ۱۰۰۰$
 private fun buildEquityCurve(closed: List<PaperTrade>): List<Double> {
     val sorted = closed.sortedBy { it.closeTime }
-    val curve = mutableListOf(START_CAPITAL)
-    var equity = START_CAPITAL
+    val curve = mutableListOf(100.0)
+    var equity = 100.0
     sorted.forEach { t ->
         equity *= (1 + t.pnl / 100.0)
         curve.add(equity)
@@ -268,16 +238,26 @@ fun TradesScreen() {
     var mStatus by remember { mutableStateOf("") }
     var mLoading by remember { mutableStateOf(false) }
 
-    fun save() { saveState(context, state) }
+    // 🚀 Commit 107 (T2): save داخل قفل مشترک PaperRules
+    fun save() {
+        synchronized(PaperRules.lock) { saveState(context, state) }
+    }
     fun openTrades() = state.trades.filter { it.status == "OPEN" }
     fun invested() = openTrades().sumOf { it.price * it.qty }
     fun equity() = state.cash + invested()
 
-    // 🚀 Commit 107 (T1): بستن با PnL خالص پس از هزینه
+    // 🚀 Commit 120: سایز Kelly برای تریدهای دستی/سیگنال (هر recomputation تازه)
+    val kellySizing = PositionSizer.fromPnlPercents(
+        state.trades.filter { it.status == "CLOSED" }.map { it.pnl },
+        state.cash + invested()
+    )
+
+    // 🚀 Commit 107 (T1): کسر هزینهٔ رفت‌وبرگشت از PnL + باز محاسبهٔ cash
     fun closeTrade(t: PaperTrade, px: Double) {
         t.price = px
         t.status = "CLOSED"
-        t.pnl = PaperRules.netPnlPct(t.entry, px)
+        val raw = if (t.entry > 0) (px - t.entry) / t.entry * 100 else 0.0
+        t.pnl = raw - PaperRules.roundTripCostPct()
         t.closeTime = System.currentTimeMillis()
         state.cash = PaperRules.recomputeCash(state)
     }
@@ -310,7 +290,7 @@ fun TradesScreen() {
         return if (px <= t.stop) { closeTrade(t, px); true } else false
     }
 
-    // 🚀 Commit 98 + Commit 107 (T7): پشتیبانی از آدرس کانترکت در جست‌وجوی دستی
+    // 🚀 Commit 98: استخراج symbol واقعی از DEX pool
     fun findPrice() {
         val q = mSymbol.trim()
         if (q.isEmpty()) return
@@ -321,26 +301,6 @@ fun TradesScreen() {
             try {
                 val res = withContext(Dispatchers.IO) {
                     val coins = try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
-
-                    // 🚀 Commit 107 (T7): اگر ورودی شبیه آدرس کانترکت است، از platformMap معکوس پیدا کن
-                    if (q.startsWith("0x", true) || q.length >= 30) {
-                        val map = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
-                        val coinId = map.entries.firstOrNull { (_, platforms) ->
-                            platforms.values.any { it.equals(q, true) }
-                        }?.key
-                        if (coinId != null) {
-                            val coin = coins.firstOrNull { it.id == coinId }
-                            if (coin != null) {
-                                return@withContext Triple(
-                                    coin.current_price,
-                                    "CEX #${coin.market_cap_rank ?: "-"}",
-                                    coin.symbol.uppercase(Locale.US)
-                                )
-                            }
-                        }
-                        return@withContext null
-                    }
-
                     coins.firstOrNull { it.symbol.equals(q, true) }?.let {
                         return@withContext Triple(it.current_price, "CEX #${it.market_cap_rank ?: "-"}", it.symbol.uppercase(Locale.US))
                     }
@@ -372,8 +332,6 @@ fun TradesScreen() {
         scope.launch {
             try {
                 status = "🔄 اسکن بازار + اجماع تمام تب‌ها..."
-                // 🚀 Commit 107 (T2): اول reload تا تریدهای Worker دیده شوند
-                state = loadState(context)
                 val eq = equity()
                 val coins = withContext(Dispatchers.IO) {
                     try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() }
@@ -452,6 +410,9 @@ fun TradesScreen() {
                 }
                 realWhale = rwList.toMap()
                 var openedNow = 0
+                // 🚀 Commit 120: سایز Kelly از تریدهای بستهٔ اسپات
+                val closedPnls = state.trades.filter { it.status == "CLOSED" }.map { it.pnl }
+                val kellySize = PositionSizer.fromPnlPercents(closedPnls, eq).sizeUsd
                 if (botOn) for ((tierName, range) in TIERS) {
                     val pct = alloc[tierName] ?: 0
                     if (pct <= 0) continue
@@ -460,7 +421,8 @@ fun TradesScreen() {
                     val free = tierBudget - tierInvested
                     val heldCount = openTrades().count { it.tier == tierName }
                     if (free < 10 || heldCount >= MAX_PER_TIER) continue
-                    val size = min(eq * pct / 100.0 / MAX_PER_TIER, min(free, state.cash))
+                    // 🚀 Commit 120: سقف Kelly روی سایز هر ترید
+                    val size = min(min(eq * pct / 100.0 / MAX_PER_TIER, kellySize), min(free, state.cash))
                     if (size < 10) continue
                     if (tierName == "DEX") {
                         val cands = dexPools.mapNotNull { p ->
@@ -510,7 +472,8 @@ fun TradesScreen() {
                     val pct = alloc[tierName] ?: 0
                     if (pct <= 0) continue
                     if (openTrades().count { it.tier == tierName } >= MAX_PER_TIER) continue
-                    val size = min(eq * pct / 100.0 / MAX_PER_TIER, state.cash)
+                    // 🚀 Commit 120: سقف Kelly روی سایز ترید اجماع
+                    val size = min(min(eq * pct / 100.0 / MAX_PER_TIER, kellySize), state.cash)
                     if (size < 10) continue
                     openTrade(pk.symbol, tierName, pk.price, pk.total, pk.atr, size)
                     openedNow++
@@ -584,11 +547,6 @@ fun TradesScreen() {
                         Text("باخت: $losses", fontSize = 11.sp, color = TRed)
                         Text("وین‌ریت: ${String.format(Locale.US, "%.0f%%", winRate)}", fontSize = 11.sp, color = if (winRate >= 50) TGreen else TRed)
                     }
-                    // 🚀 Commit 107 (T1): شفافیت هزینه
-                    Text(
-                        "💸 هزینهٔ رفت‌وبرگشت هر معامله: ${String.format(Locale.US, "%.2f%%", PaperRules.ROUND_COST_PCT)} (کارمزد + لغزش) — PnL‌ها خالص‌اند",
-                        fontSize = 9.sp, color = TGray
-                    )
                 }
             }
 
@@ -605,7 +563,7 @@ fun TradesScreen() {
                         else {
                             state = PaperState()
                             consensus = emptyList()
-                            wipeState(context, state)
+                            save()
                             confirmReset = false
                             status = "♻️ ریست شد — ${START_CAPITAL.toInt()}$ تازه"
                         }
@@ -631,7 +589,7 @@ fun TradesScreen() {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) TGreen else TGray)
                             Text("🐳 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) TGreen else if (pk.whaleRatio > 0) TRed else TGray)
-                            Text("⚡ ۴س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
+                            Text("⚡ س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) TGreen else TRed)
                         }
                         if (!pk.isDex) {
                             Text(
@@ -649,15 +607,19 @@ fun TradesScreen() {
                         if (pk.total >= 80) Text("🎯 سیگنال اجماع — تأیید چند منبع", fontSize = 9.sp, color = TGreen, fontWeight = FontWeight.Bold)
                         Button(
                             onClick = {
-                                if (state.cash >= 10 && openTrades().none { it.symbol == pk.symbol }) {
-                                    openTrade(pk.symbol, tierOfRank(pk.rank), pk.price, pk.total, pk.atr, min(50.0, state.cash))
+                                // 🚀 Commit 120: سایز Kelly به‌جای ۵۰$ ثابت
+                                val sz = min(kellySizing.sizeUsd, state.cash)
+                                if (sz >= 10 && openTrades().none { it.symbol == pk.symbol }) {
+                                    openTrade(pk.symbol, tierOfRank(pk.rank), pk.price, pk.total, pk.atr, sz)
                                     save()
-                                    status = "✅ ${pk.symbol} با اجماع ${pk.total}/100 باز شد"
+                                    status = "✅ ${pk.symbol} با اجماع ${pk.total}/100 باز شد (${usd(sz)})"
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = if (pk.total >= 80) TGreen else TCard),
                             shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()
-                        ) { Text("🟢 معامله با این سیگنال (۵۰$)", fontSize = 10.sp) }
+                        ) { Text("🟢 معامله با این سیگنال (${usd(kellySizing.sizeUsd)})", fontSize = 10.sp) }
+                        // 🚀 Commit 120: برچسب شفافیت سایز
+                        Text(kellySizing.label, fontSize = 8.sp, color = TGray)
                     }
                 }
             }
@@ -751,9 +713,7 @@ fun TradesScreen() {
             Text("📂 پوزیشن‌های باز (${openTrades().size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             if (openTrades().isEmpty()) Text("هنوز پوزیشنی باز نشده 🤖", fontSize = 11.sp, color = TGray)
             openTrades().forEach { t ->
-                // 🚀 Commit 107 (T1): PnL زندهٔ خالص (پس از کسر هزینهٔ رفت‌وبرگشت)
-                val gross = if (t.entry > 0) (t.price - t.entry) / t.entry * 100 else 0.0
-                val pnl = gross - PaperRules.ROUND_COST_PCT
+                val pnl = if (t.entry > 0) (t.price - t.entry) / t.entry * 100 else 0.0
                 val pnlUsd = t.sizeUsd * pnl / 100.0
                 Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -773,7 +733,7 @@ fun TradesScreen() {
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(if (pnl >= 0) "📈" else "📉", fontSize = 16.sp)
-                                Text(if (pnl >= 0) "سود زنده خالص:" else "ضرر زنده خالص:", fontSize = 11.sp, color = TGray)
+                                Text(if (pnl >= 0) "سود زنده:" else "ضرر زنده:", fontSize = 11.sp, color = TGray)
                                 Text(
                                     String.format(Locale.US, "%+.2f%%", pnl),
                                     fontSize = 14.sp, fontWeight = FontWeight.Black,
@@ -797,10 +757,6 @@ fun TradesScreen() {
                                     )
                                 }
                             }
-                            Text(
-                                "ناخالص: ${String.format(Locale.US, "%+.2f%%", gross)} • هزینهٔ رفت‌وبرگشت: −${String.format(Locale.US, "%.2f%%", PaperRules.ROUND_COST_PCT)}",
-                                fontSize = 8.sp, color = TGray
-                            )
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = TGray)
@@ -840,9 +796,8 @@ fun TradesScreen() {
 @Composable
 private fun JournalContent(allTrades: List<PaperTrade>) {
     val closed = allTrades.filter { it.status == "CLOSED" }
-    // 🚀 Commit 107 (T7): تعریف واحد برد/باخت (سربه‌سر = باخت)
     val wins = closed.filter { it.pnl > 0 }
-    val losses = closed.filter { it.pnl <= 0 }
+    val losses = closed.filter { it.pnl < 0 }
 
     val winRate = if (closed.isEmpty()) 0.0 else wins.size * 100.0 / closed.size
     val avgPnl = if (closed.isEmpty()) 0.0 else closed.map { it.pnl }.average()
@@ -880,7 +835,7 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
         } else {
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("📊 خلاصهٔ عملکرد (PnL خالص پس از هزینه)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
+                    Text("📊 خلاصهٔ عملکرد", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Stat("کل معاملات", "${closed.size}", TGray)
                         Stat("✅ برد", "${wins.size}", TGreen)
@@ -927,9 +882,10 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
             Card(colors = CardDefaults.cardColors(containerColor = TCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("📈 منحنی سرمایه", fontWeight = FontWeight.Black, fontSize = 13.sp, color = TBlue)
+                    // 🚀 Commit 107 (T6): شروع با سرمایهٔ واقعی ۱۰۰۰$ نه ۱۰۰$
                     Text(
-                        "شروع: ${usd(START_CAPITAL)} • الان: ${String.format(Locale.US, "$%.2f", equityCurve.lastOrNull() ?: START_CAPITAL)}" +
-                            " • رشد: ${String.format(Locale.US, "%+.1f%%", ((equityCurve.lastOrNull() ?: START_CAPITAL) - START_CAPITAL) / START_CAPITAL * 100)}",
+                        "شروع: ${String.format(Locale.US, "$%.0f", START_CAPITAL)} • الان: ${String.format(Locale.US, "$%.2f", equityCurve.lastOrNull() ?: 100.0)}" +
+                            " • رشد: ${String.format(Locale.US, "%+.1f%%", (equityCurve.lastOrNull() ?: 100.0) - 100)}",
                         fontSize = 10.sp, color = TGray
                     )
                     EquityChart(equityCurve)
@@ -1042,14 +998,14 @@ private fun EquityChart(curve: List<Double>) {
         return
     }
     Canvas(modifier = Modifier.fillMaxWidth().height(180.dp)) {
-        val minV = curve.min().coerceAtMost(START_CAPITAL)
-        val maxV = curve.max().coerceAtLeast(START_CAPITAL)
+        val minV = curve.min().coerceAtMost(100.0)
+        val maxV = curve.max().coerceAtLeast(100.0)
         val range = if (maxV > minV) maxV - minV else 1.0
         val w = size.width
         val h = size.height
         val pad = 20f
         fun y(v: Double) = pad + ((maxV - v) / range * (h - 2 * pad)).toFloat()
-        drawLine(TGray.copy(alpha = 0.3f), Offset(0f, y(START_CAPITAL)), Offset(w, y(START_CAPITAL)), strokeWidth = 1f)
+        drawLine(TGray.copy(alpha = 0.3f), Offset(0f, y(100.0)), Offset(w, y(100.0)), strokeWidth = 1f)
         for (i in 1 until curve.size) {
             val x1 = (i - 1).toFloat() / (curve.size - 1) * w
             val x2 = i.toFloat() / (curve.size - 1) * w
