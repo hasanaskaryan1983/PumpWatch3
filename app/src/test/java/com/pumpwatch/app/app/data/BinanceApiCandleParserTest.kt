@@ -9,10 +9,8 @@ import org.junit.Test
  * هدف: تأیید اینکه فرمت‌های متفاوت Bybit/OKX/Gate به یک ساختار یکسان
  * (BinanceCandle) تبدیل می‌شوند — بدون نیاز به شبکه یا MockWebServer.
  *
- * فرمت‌ها:
- * - Bybit: [ts(ms), open, high, low, close, volume, ...] → indices 0,1,2,3,4,5, timeMs=true
- * - OKX:   [ts(ms), open, high, low, close, vol, ...]   → indices 0,1,2,3,4,5, timeMs=true
- * - Gate:  [ts(s), volume, close, high, low, open, quote_volume] → indices 0,5,3,4,2,1, timeMs=false
+ * 🚀 Commit 122 fix: چون امضا `List<String>` است (نه `List<String?>`)،
+ * از string خالی/نامعتبر استفاده می‌کنیم نه null.
  */
 class BinanceApiCandleParserTest {
 
@@ -65,17 +63,19 @@ class BinanceApiCandleParserTest {
     // ========== خطاها و edge cases ==========
 
     @Test
-    fun `candle returns null when close is missing`() {
-        val raw = listOf("1700000000000", "40000", "40500", "39500", null, "1234.5")
+    fun `candle returns null when close is invalid string`() {
+        // 🚀 Commit 122 fix: use empty/invalid string instead of null (List<String> signature)
+        val raw = listOf("1700000000000", "40000", "40500", "39500", "", "1234.5")
         val c = MultiExchange.candle(raw, t = 0, o = 1, h = 2, l = 3, c = 4, v = 5, timeMs = true)
-        assertNull("Candle with null close should be rejected", c)
+        assertNull("Candle with invalid close should be rejected", c)
     }
 
     @Test
-    fun `candle returns null when time is missing`() {
-        val raw = listOf(null, "40000", "40500", "39500", "40200", "1234.5")
+    fun `candle returns null when time is invalid string`() {
+        // 🚀 Commit 122 fix: use empty string instead of null
+        val raw = listOf("", "40000", "40500", "39500", "40200", "1234.5")
         val c = MultiExchange.candle(raw, t = 0, o = 1, h = 2, l = 3, c = 4, v = 5, timeMs = true)
-        assertNull("Candle with null time should be rejected", c)
+        assertNull("Candle with invalid time should be rejected", c)
     }
 
     @Test
@@ -107,9 +107,10 @@ class BinanceApiCandleParserTest {
     }
 
     @Test
-    fun `candle handles missing non-critical fields gracefully`() {
-        // open/high/low/volume are null but close is present → candle should work with 0.0 defaults
-        val raw = listOf("1700000000000", null, null, null, "40200", null)
+    fun `candle handles invalid non-critical fields gracefully`() {
+        // 🚀 Commit 122 fix: use empty strings instead of null (List<String> signature)
+        // open/high/low/volume are empty/invalid but close is present → candle should work with 0.0 defaults
+        val raw = listOf("1700000000000", "", "", "", "40200", "")
         val c = MultiExchange.candle(raw, t = 0, o = 1, h = 2, l = 3, c = 4, v = 5, timeMs = true)
         assertNotNull("Candle should work if close and time are valid", c)
         c!!
