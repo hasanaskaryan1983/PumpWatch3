@@ -6,8 +6,11 @@ import org.junit.Test
 /**
  * 🚀 Commit 126: تست تابع pure `buildCandlesChecked` در BatchScanner.
  *
- * 🚀 Commit 126 fix: trailing bucket دور ریخته می‌شود (droppedTrailingIncomplete=true).
- * برای تولید N کندل، نیاز به حداقل N+1 ساعت داده داریم.
+ * 🚀 Commit 126 fix:
+ * - trailing bucket دور ریخته می‌شود (برای N کندل، N+1 ساعت لازم است)
+ * - volume فقط داخل حلقه جمع می‌شود → bucket اول برای volume مثبت
+ *   باید حداقل ۲ نقطه داشته باشد
+ * - volumes باید با همان واحد زمانی prices باشند (unitMs از prices می‌آید)
  */
 class BatchScannerCandleBuilderTest {
 
@@ -31,7 +34,6 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `two points in same hour return empty (trailing bucket dropped)`() {
-        // 🚀 Commit 126 fix: trailing bucket is dropped
         val ts1 = 1700000000.0 * 1000
         val ts2 = ts1 + 1800_000.0
         val prices = listOf(
@@ -46,7 +48,6 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `two hours of data produce one candle`() {
-        // 🚀 Commit 126 fix: need 2 hours to produce 1 candle (first bucket closes)
         val ts1 = 1700000000.0 * 1000
         val ts2 = ts1 + hourMs
         val prices = listOf(
@@ -59,12 +60,11 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `multiple points in two hours compute OHLC correctly`() {
-        // 🚀 Commit 126 fix: need 2+ hours to produce 1 candle
         val ts1 = 1700000000.0 * 1000
         val ts2 = ts1 + 600_000.0
         val ts3 = ts1 + 1200_000.0
         val ts4 = ts1 + 1800_000.0
-        val ts5 = ts1 + hourMs  // next hour → closes first bucket
+        val ts5 = ts1 + hourMs
         val prices = listOf(
             listOf(ts1, 100.0),  // open
             listOf(ts2, 115.0),  // high
@@ -83,7 +83,6 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `three hours of data produce two candles`() {
-        // 🚀 Commit 126 fix: need 3 hours to produce 2 candles
         val ts1 = 1700000000.0 * 1000
         val ts2 = ts1 + hourMs
         val ts3 = ts2 + hourMs
@@ -115,8 +114,8 @@ class BatchScannerCandleBuilderTest {
     @Test
     fun `one hour gap detected correctly`() {
         val ts1 = 1700000000.0 * 1000
-        val ts2 = ts1 + 2 * hourMs  // skip one hour
-        val ts3 = ts2 + hourMs      // needed to close second bucket
+        val ts2 = ts1 + 2 * hourMs
+        val ts3 = ts2 + hourMs
         val prices = listOf(
             listOf(ts1, 100.0),
             listOf(ts2, 110.0),
@@ -129,8 +128,8 @@ class BatchScannerCandleBuilderTest {
     @Test
     fun `multiple hour gaps counted correctly`() {
         val ts1 = 1700000000.0 * 1000
-        val ts2 = ts1 + 4 * hourMs  // skip 3 hours
-        val ts3 = ts2 + hourMs      // needed to close second bucket
+        val ts2 = ts1 + 4 * hourMs
+        val ts3 = ts2 + hourMs
         val prices = listOf(
             listOf(ts1, 100.0),
             listOf(ts2, 110.0),
@@ -144,7 +143,6 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `candle time is close time not open time`() {
-        // 🚀 Commit 126 fix: need 2 hours to produce 1 candle
         val ts1 = 1700000000.0 * 1000
         val ts2 = ts1 + hourMs
         val prices = listOf(
@@ -196,7 +194,6 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `no volume data results in zero volume`() {
-        // 🚀 Commit 126 fix: need 2 hours to produce 1 candle
         val ts1 = 1700000000.0 * 1000
         val ts2 = ts1 + hourMs
         val prices = listOf(
@@ -210,20 +207,27 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `volume data aggregated correctly`() {
-        // 🚀 Commit 126 fix: need 2 hours to produce 1 candle
+        // 🚀 Commit 126 fix:
+        // 1) volumes باید با همان واحد زمانی prices باشند (ms اینجا)
+        // 2) bucket اول باید ≥۲ نقطه داشته باشد تا volume جمع شود
+        //    (نقطهٔ اول قبل از حلقه پردازش می‌شود و volume اضافه نمی‌کند)
         val ts1 = 1700000000.0 * 1000
-        val ts2 = ts1 + hourMs
+        val tsMid = ts1 + 1800_000.0   // same hour as ts1
+        val ts2 = ts1 + hourMs         // next hour → closes first bucket
         val prices = listOf(
             listOf(ts1, 100.0),
+            listOf(tsMid, 105.0),
             listOf(ts2, 110.0)
         )
         val volumes = listOf(
-            listOf(ts1 / 1000.0, 1000.0),
-            listOf(ts2 / 1000.0, 2500.0)
+            listOf(ts1, 1000.0),     // cumulative
+            listOf(tsMid, 1800.0),   // cumulative → delta = 800
+            listOf(ts2, 2500.0)
         )
         val result = BatchScanner.buildCandlesChecked(prices, volumes)
         assertEquals(1, result.candles.size)
-        assertTrue("Volume should be positive", result.candles[0].volume > 0)
+        // delta بین ts1 و tsMid = 800 → volume کندل اول
+        assertEquals("Volume should equal cumulative delta", 800.0, result.candles[0].volume, 0.0001)
     }
 
     // ========== Dropped trailing ==========
@@ -244,7 +248,6 @@ class BatchScannerCandleBuilderTest {
 
     @Test
     fun `unsorted prices are sorted by timestamp`() {
-        // 🚀 Commit 126 fix: need 2 hours to produce 1 candle
         val ts1 = 1700000000.0 * 1000
         val ts2 = ts1 + hourMs
         val prices = listOf(
@@ -268,7 +271,6 @@ class BatchScannerCandleBuilderTest {
             listOf(ts2, 110.0)  // valid
         )
         val result = BatchScanner.buildCandlesChecked(prices, null)
-        // After filtering, only 1 valid point in 1 bucket → 0 candles
         assertTrue("Should filter invalid entries and drop trailing", result.candles.isEmpty())
     }
 }
