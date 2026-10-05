@@ -6,16 +6,8 @@ import org.junit.Test
 /**
  * 🚀 Commit 125: تست ماشین مقایسهٔ سیاست‌های خروج (A/B testing).
  *
- * چرا مهم؟
- * - منطق خروج، هستهٔ سود/زیان اپ است
- * - تفاوت بین LEGACY و ENGINE در بک‌تست و A/B حیاتی است
- * - R-multiple (risk-adjusted return) باید درست محاسبه شود
- *
- * این تست‌ها:
- * - Edge cases (empty bars, zero risk)
- * - Stop/Target/OPEN_END برای هر دو side
- * - R-multiple correctness
- * - replayEngine basic paths
+ * 🚀 Commit 125 fix: trailing stop بین کندل‌ها به‌روز می‌شود.
+ * برای جلوگیری از trailing، c باید <= entry (long) یا >= entry (short) باشد.
  */
 class ExitComparatorTest {
 
@@ -40,9 +32,10 @@ class ExitComparatorTest {
 
     @Test
     fun `replayLegacy long stops out when low hits stop`() {
+        // 🚀 Commit 125 fix: c=98 < entry=100 → no trailing update → stop stays at 90
         val bars = listOf(
-            Bar(100.0, 105.0, 95.0, 102.0),  // low 95 > 90 stop, no trigger
-            Bar(102.0, 103.0, 89.0, 91.0)    // low 89 <= 90 stop → STOP
+            Bar(100.0, 105.0, 95.0, 98.0),   // c=98 < 100 → stop stays 90
+            Bar(98.0, 99.0, 85.0, 89.0)      // low 85 <= 90 stop → STOP at 90
         )
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
         assertEquals("STOP", result.exitReason)
@@ -56,8 +49,8 @@ class ExitComparatorTest {
     @Test
     fun `replayLegacy long exits at target when high reaches t2`() {
         val bars = listOf(
-            Bar(100.0, 115.0, 98.0, 110.0),  // high 115 < 120, no target
-            Bar(110.0, 122.0, 108.0, 120.0)   // high 122 >= 120 → TARGET
+            Bar(100.0, 115.0, 98.0, 98.0),   // c=98 < 100 → no trailing, high 115 < 120
+            Bar(98.0, 122.0, 96.0, 120.0)    // high 122 >= 120 → TARGET at 120
         )
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
         assertEquals("TARGET", result.exitReason)
@@ -71,9 +64,9 @@ class ExitComparatorTest {
     @Test
     fun `replayLegacy long returns OPEN_END if no trigger`() {
         val bars = listOf(
-            Bar(100.0, 105.0, 95.0, 102.0),  // high 105 < 120, low 95 > 90
-            Bar(102.0, 108.0, 96.0, 107.0),  // high 108 < 120, low 96 > 90
-            Bar(107.0, 112.0, 101.0, 110.0)  // high 112 < 120, low 101 > 90
+            Bar(100.0, 105.0, 95.0, 98.0),   // high 105 < 120, low 95 > 90, c < entry
+            Bar(98.0, 108.0, 96.0, 99.0),    // high 108 < 120, low 96 > 90, c < entry
+            Bar(99.0, 112.0, 97.0, 110.0)    // high 112 < 120, low 97 > 90, c > entry
         )
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
         assertEquals("OPEN_END", result.exitReason)
@@ -86,9 +79,10 @@ class ExitComparatorTest {
 
     @Test
     fun `replayLegacy short stops out when high hits stop`() {
+        // 🚀 Commit 125 fix: c=102 > entry=100 → no trailing update → stop stays at 110
         val bars = listOf(
-            Bar(100.0, 105.0, 95.0, 98.0),   // high 105 < 110 stop
-            Bar(98.0, 112.0, 97.0, 111.0)    // high 112 >= 110 stop → STOP
+            Bar(100.0, 105.0, 95.0, 102.0),  // c=102 > 100 → stop stays 110
+            Bar(102.0, 112.0, 101.0, 111.0)  // high 112 >= 110 stop → STOP at 110
         )
         val result = ExitComparator.replayLegacy(bars, "DUMP", 100.0, 110.0, 90.0, 80.0)
         assertEquals("STOP", result.exitReason)
@@ -102,8 +96,8 @@ class ExitComparatorTest {
     @Test
     fun `replayLegacy short exits at target when low reaches t2`() {
         val bars = listOf(
-            Bar(100.0, 103.0, 85.0, 88.0),   // low 85 > 80, no target
-            Bar(88.0, 90.0, 78.0, 80.0)      // low 78 <= 80 → TARGET
+            Bar(100.0, 103.0, 85.0, 102.0),  // c=102 > 100 → no trailing, low 85 > 80
+            Bar(102.0, 104.0, 78.0, 80.0)    // low 78 <= 80 → TARGET at 80
         )
         val result = ExitComparator.replayLegacy(bars, "DUMP", 100.0, 110.0, 90.0, 80.0)
         assertEquals("TARGET", result.exitReason)
@@ -117,13 +111,13 @@ class ExitComparatorTest {
     @Test
     fun `replayLegacy short returns OPEN_END if no trigger`() {
         val bars = listOf(
-            Bar(100.0, 105.0, 95.0, 98.0),   // high 105 < 110, low 95 > 80
-            Bar(98.0, 103.0, 90.0, 92.0)     // high 103 < 110, low 90 > 80
+            Bar(100.0, 105.0, 95.0, 102.0),  // high 105 < 110, low 95 > 80, c > entry
+            Bar(102.0, 103.0, 90.0, 101.0)   // high 103 < 110, low 90 > 80, c > entry
         )
         val result = ExitComparator.replayLegacy(bars, "DUMP", 100.0, 110.0, 90.0, 80.0)
         assertEquals("OPEN_END", result.exitReason)
-        // R = (100 - 92) / 10 = 0.8
-        assertEquals(0.8, result.realizedR, 0.0001)
+        // R = (100 - 101) / 10 = -0.1
+        assertEquals(-0.1, result.realizedR, 0.0001)
     }
 
     // ========== replayEngine ==========
@@ -144,23 +138,23 @@ class ExitComparatorTest {
 
     @Test
     fun `replayEngine long stops out on low breach`() {
-        // stop0=90, stopLevel = max(90, 90) = 90 initially
+        // 🚀 Commit 125 fix: c < entry → no trailing via ExitEngine
         val bars = listOf(
-            Bar(100.0, 103.0, 95.0, 98.0),   // low 95 > 90 stopLevel
-            Bar(98.0, 99.0, 88.0, 89.0)      // low 88 <= 90 stopLevel → STOP
+            Bar(100.0, 103.0, 95.0, 98.0),   // c=98 < 100 → stop stays 90
+            Bar(98.0, 99.0, 85.0, 89.0)      // low 85 <= 90 stopLevel → STOP
         )
         val result = ExitComparator.replayEngine(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
         assertEquals("STOP", result.exitReason)
         assertEquals(2, result.barsHeld)
-        // R = (90 - 100) / 10 = -1.0 (assuming no partial)
         assertEquals(-1.0, result.realizedR, 0.0001)
     }
 
     @Test
     fun `replayEngine short stops out on high breach`() {
+        // 🚀 Commit 125 fix: c > entry → no trailing
         val bars = listOf(
-            Bar(100.0, 105.0, 95.0, 98.0),   // high 105 < 110 stopLevel
-            Bar(98.0, 112.0, 97.0, 111.0)    // high 112 >= 110 → STOP
+            Bar(100.0, 105.0, 95.0, 102.0),  // c=102 > 100 → stop stays 110
+            Bar(102.0, 112.0, 101.0, 111.0)  // high 112 >= 110 → STOP
         )
         val result = ExitComparator.replayEngine(bars, "DUMP", 100.0, 110.0, 90.0, 80.0)
         assertEquals("STOP", result.exitReason)
@@ -172,18 +166,16 @@ class ExitComparatorTest {
 
     @Test
     fun `R-multiple is positive when profitable long`() {
-        val bars = listOf(Bar(100.0, 125.0, 98.0, 122.0))  // high 125 >= t2=120
+        val bars = listOf(Bar(100.0, 125.0, 98.0, 98.0))  // c=98 < 100 → no trailing, high 125 >= t2=120
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
-        // R = (120 - 100) / 10 = 2.0
         assertTrue("R should be positive", result.realizedR > 0)
         assertEquals(2.0, result.realizedR, 0.0001)
     }
 
     @Test
     fun `R-multiple is negative when stopped out`() {
-        val bars = listOf(Bar(100.0, 105.0, 85.0, 90.0))  // low 85 <= stop=90
+        val bars = listOf(Bar(100.0, 105.0, 85.0, 98.0))  // c=98 < 100, low 85 <= stop=90
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
-        // R = (90 - 100) / 10 = -1.0
         assertTrue("R should be negative", result.realizedR < 0)
         assertEquals(-1.0, result.realizedR, 0.0001)
     }
@@ -191,17 +183,15 @@ class ExitComparatorTest {
     @Test
     fun `R-multiple scales correctly with risk`() {
         // risk = 20 (entry 100, stop 80)
-        val bars = listOf(Bar(100.0, 145.0, 95.0, 142.0))  // high 145 >= t2=140
+        val bars = listOf(Bar(100.0, 145.0, 95.0, 98.0))  // c=98 < 100, high 145 >= t2=140
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 80.0, 120.0, 140.0)
-        // R = (140 - 100) / 20 = 2.0
         assertEquals(2.0, result.realizedR, 0.0001)
     }
 
     @Test
     fun `R-multiple for short profitable trade`() {
-        val bars = listOf(Bar(100.0, 103.0, 75.0, 78.0))  // low 75 <= t2=80
+        val bars = listOf(Bar(100.0, 103.0, 75.0, 102.0))  // c=102 > 100, low 75 <= t2=80
         val result = ExitComparator.replayLegacy(bars, "DUMP", 100.0, 110.0, 90.0, 80.0)
-        // R = (100 - 80) / 10 = 2.0
         assertTrue("Short profitable R should be positive", result.realizedR > 0)
         assertEquals(2.0, result.realizedR, 0.0001)
     }
@@ -209,9 +199,9 @@ class ExitComparatorTest {
     @Test
     fun `barsHeld counts correctly`() {
         val bars = listOf(
-            Bar(100.0, 102.0, 98.0, 101.0),
-            Bar(101.0, 103.0, 99.0, 102.0),
-            Bar(102.0, 104.0, 85.0, 90.0)  // low 85 <= stop=90 → 3 bars held
+            Bar(100.0, 102.0, 98.0, 98.0),   // c=98 < 100 → no trailing
+            Bar(98.0, 99.0, 97.0, 99.0),     // c=99 < 100
+            Bar(99.0, 100.0, 85.0, 90.0)     // low 85 <= stop=90 → 3 bars held
         )
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
         assertEquals(3, result.barsHeld)
@@ -219,7 +209,7 @@ class ExitComparatorTest {
 
     @Test
     fun `first bar stop hit returns barsHeld equals 1`() {
-        val bars = listOf(Bar(100.0, 102.0, 85.0, 90.0))  // low 85 <= stop=90
+        val bars = listOf(Bar(100.0, 102.0, 85.0, 98.0))  // c=98 < 100, low 85 <= stop=90
         val result = ExitComparator.replayLegacy(bars, "PUMP", 100.0, 90.0, 110.0, 120.0)
         assertEquals("STOP", result.exitReason)
         assertEquals(1, result.barsHeld)
