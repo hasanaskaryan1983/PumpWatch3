@@ -22,6 +22,16 @@ data class FutSignalForPaper(
 
 object PaperTradingEngine {
 
+    /**
+     * 🚀 Commit 120: سایز پوزیشن بر اساس Kelly از تریدهای بستهٔ همان mode
+     */
+    private fun sizingFor(ctx: Context, mode: String): PositionSizer.SizingResult {
+        val closedPnls = TradeStore.load(ctx)
+            .filter { it.status == "CLOSED" && it.mode == mode }
+            .map { it.totalRealizedPnl() }
+        return PositionSizer.fromPnlPercents(closedPnls, TradeStore.getBaseCapital(ctx))
+    }
+
     suspend fun openFromSignal(ctx: Context, sig: SignalResult) {
         if (!TradeStore.isEnabled(ctx)) return
 
@@ -30,6 +40,9 @@ object PaperTradingEngine {
             .map { it.coinId }
             .toSet()
         if (sig.coinId in openIds) return
+
+        // 🚀 Commit 120: سایز Kelly به‌جای سایز ثابت
+        val sizing = sizingFor(ctx, sig.mode)
 
         val venue = BinanceClient.api.lastSource(sig.symbol)
         val fillTime = System.currentTimeMillis()
@@ -57,6 +70,7 @@ object PaperTradingEngine {
             fillTime = fillTime,
             slippagePct = 0.1,
             feePct = 0.1,
+            sizeUsd = sizing.sizeUsd,
             ledgerVersion = 3
         )
         TradeStore.upsert(ctx, trade)
@@ -71,6 +85,9 @@ object PaperTradingEngine {
             .map { it.coinId }
             .toSet()
         if (sig.coinId in openIds) return false
+
+        // 🚀 Commit 120: سایز Kelly به‌جای ۱۰۰$ ثابت
+        val sizing = sizingFor(ctx, "FUT")
 
         val venue = try { BinanceClient.api.lastSource(sig.symbol) } catch (_: Exception) { "binance" }
         val fillTime = System.currentTimeMillis()
@@ -99,8 +116,8 @@ object PaperTradingEngine {
             fillTime = fillTime,
             slippagePct = 0.1,
             feePct = 0.1,
-            ledgerVersion = 3,
-            sizeUsd = 100.0
+            sizeUsd = sizing.sizeUsd,
+            ledgerVersion = 3
         )
         TradeStore.upsert(ctx, trade)
         return true
