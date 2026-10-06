@@ -11,7 +11,8 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.pumpwatch.app.MainActivity
 import com.pumpwatch.app.data.FollowedWhalesStore
-import com.pumpwatch.app.data.WatchlistStore
+// 🚀 Commit 153: مهاجرت از bridge منسوخ data.WatchlistStore به store.WatchlistStore
+import com.pumpwatch.app.store.WatchlistStore
 import com.pumpwatch.app.engine.MemeRadar
 import com.pumpwatch.app.engine.MemeSignal
 import com.pumpwatch.app.engine.WhaleFlowEngine
@@ -23,6 +24,10 @@ import java.util.Locale
 /**
  * 🚀 Commit 91 (A5) + Commit 93 (7.1): Worker پس‌زمینه برای نهنگ و میم.
  * هر ۱۵ دقیقه اجرا می‌شود و در صورت یافتن سیگنال قوی، نوتیفیکیشن ارسال می‌کند.
+ *
+ * 🚀 Commit 153: مهاجرت به store.WatchlistStore (رمزنگاری‌شده)
+ * قبلاً از bridge منسوخ data.WatchlistStore استفاده می‌کرد که فقط plaintext می‌خواند.
+ * حالا از store رمزنگاری‌شده می‌خواند که منبع واحد حقیقت است.
  */
 class WhaleMemeWorker(
     context: Context,
@@ -50,20 +55,22 @@ class WhaleMemeWorker(
     }
 
     private suspend fun checkWhaleAlerts() {
-        val watchlist = WatchlistStore.load(applicationContext)
+        // 🚀 Commit 153: خواندن از store رمزنگاری‌شده (به‌جای bridge منسوخ)
+        // loadGroups همهٔ گروه‌ها را برمی‌گرداند؛ flatMap همهٔ ارزها را استخراج می‌کند
+        val watchlist = WatchlistStore.loadGroups(applicationContext).flatMap { it.coins }
         if (watchlist.isEmpty()) return
 
-        for (entry in watchlist) {
+        for (coin in watchlist) {
             try {
                 val result = WhaleFlowEngine.analyze(
-                    symbol = entry.symbol + "USDT",
+                    symbol = coin.symbol + "USDT",
                     limit = 1000
                 ) ?: continue
 
                 if (result.pressure == WhaleFlowEngine.PRESSURE_ACCUMULATION ||
                     result.pressure == WhaleFlowEngine.PRESSURE_DISTRIBUTION
                 ) {
-                    sendWhaleNotification(entry.symbol, result)
+                    sendWhaleNotification(coin.symbol, result)
                 }
             } catch (_: Exception) {
                 // خطای یک توکن نباید بقیه را متوقف کند
