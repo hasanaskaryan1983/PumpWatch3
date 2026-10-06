@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
+    // 🚀 Commit 136: JaCoCo برای گزارش پوشش تست
+    jacoco
 }
 
 android {
@@ -28,6 +30,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        // 🚀 Commit 136: فعال‌سازی coverage برای unit tests در buildType دیباگ
+        debug {
+            enableUnitTestCoverage = true
         }
     }
 
@@ -108,4 +114,45 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+}
+
+// 🚀 Commit 136: task گزارش coverage (HTML + XML)
+// اجرا: ./gradlew testDebugUnitTest jacocoTestReport
+tasks.register<JacocoReport>("jacocoTestReport") {
+    dependsOn("testDebugUnitTest")
+    group = "verification"
+    description = "Generate JaCoCo coverage report for unit tests"
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+
+    // کلاس‌های تولیدشده و تست‌ها را از گزارش حذف می‌کنیم
+    val fileFilter = listOf(
+        "**/R.class",
+        "**/R$*.class",
+        "**/BuildConfig.*",
+        "**/Manifest*.*",
+        "**/*Test*.*",
+        "android/**/*.*",
+        "**/*_Factory*.*",
+        "**/*_HiltModules*.*"
+    )
+
+    // کلاس‌های کامپایل‌شدهٔ Kotlin برای variant دیباگ
+    val debugTree = fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug")) {
+        exclude(fileFilter)
+    }
+    classDirectories.setFrom(files(debugTree))
+    sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
+
+    // هر دو مسیر ممکن exec را پوشش می‌دهیم (بسته به نسخهٔ AGP)
+    executionData.setFrom(
+        fileTree(layout.buildDirectory).include(
+            "jacoco/testDebugUnitTest.exec",
+            "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"
+        )
+    )
 }
