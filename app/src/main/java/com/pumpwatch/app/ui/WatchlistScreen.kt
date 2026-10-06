@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
+import com.pumpwatch.app.data.SecureStorage
 import com.pumpwatch.app.data.platformContractOf
 import com.pumpwatch.app.store.WatchAlert
 import com.pumpwatch.app.store.WatchCoin
@@ -77,11 +78,16 @@ fun WatchlistScreen() {
     var evalOk by remember { mutableStateOf(true) }
     var evalTs by remember { mutableStateOf(0L) }
 
+    // 🚀 Commit 150: flag صادقانه برای حالت fail-closed
+    var insecureStorage by remember { mutableStateOf(false) }
+
     fun reload() {
         groups = WatchlistStore.loadGroups(context)
         val (ok, ts) = WatchlistStore.lastEvalStatus(context)
         evalOk = ok
         evalTs = ts
+        // 🚀 Commit 150: وضعیت امنیت ذخیره‌سازی را چک می‌کنیم
+        insecureStorage = SecureStorage.isInsecureFallback(context)
     }
 
     fun refresh() {
@@ -122,6 +128,33 @@ fun WatchlistScreen() {
         // 🚀 Commit 115: کارت وضعیت ارزیابی
         EvalStatusCard(evalOk = evalOk, evalTs = evalTs)
 
+        // 🚀 Commit 150: بنر صادقانه وقتی Keystore در دسترس نیست
+        if (insecureStorage) {
+            Surface(
+                color = WRed.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("⚠️", fontSize = 14.sp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "ذخیره‌سازی امن در دسترس نیست",
+                            fontSize = 10.sp, color = WRed, fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Keystore دستگاه فعال نیست. تغییرات شما در این نشست موقتی‌اند و پس از بستن اپ از دست می‌روند.",
+                            fontSize = 9.sp, color = WGray
+                        )
+                    }
+                }
+            }
+        }
+
         Text(
             "تا ${WatchlistStore.MAX_GROUPS} ردیف • هر ردیف تا ${WatchlistStore.MAX_COINS_PER_GROUP} ارز • هر ارز تا ${WatchlistStore.MAX_ALERTS_PER_COIN} هشدار\n" +
                 "هشدارها هر ۳۰ دقیقه توسط MonitorWorker بررسی می‌شوند؛ هنگام باز بودن این تب، آنی.",
@@ -148,7 +181,12 @@ fun WatchlistScreen() {
                             msg = "❌ نام ردیف خالی است"
                         } else {
                             val ok = WatchlistStore.addGroup(context, newGroupName.trim())
-                            msg = if (ok) "✅ ردیف «${newGroupName.trim()}» ساخته شد" else "⚠️ حداکثر ${WatchlistStore.MAX_GROUPS} ردیف"
+                            // 🚀 Commit 150: پیام‌های صادقانه بر اساس حالت ذخیره‌سازی
+                            msg = when {
+                                ok -> "✅ ردیف «${newGroupName.trim()}» ساخته شد"
+                                insecureStorage -> "⚠️ ذخیره نشد: Keystore در دسترس نیست — تغییرات موقتی‌اند"
+                                else -> "⚠️ حداکثر ${WatchlistStore.MAX_GROUPS} ردیف"
+                            }
                             if (ok) newGroupName = ""
                             reload()
                         }
@@ -238,8 +276,12 @@ fun WatchlistScreen() {
                                                             rank = hit.market_cap_rank
                                                         )
                                                     )
-                                                    msg = if (ok) "✅ ${hit.symbol.uppercase(Locale.US)} به «${group.name}» اضافه شد"
-                                                    else "⚠️ قبلاً اضافه شده یا ردیف پر است"
+                                                    // 🚀 Commit 150: پیام‌های صادقانه بر اساس حالت ذخیره‌سازی
+                                                    msg = when {
+                                                        ok -> "✅ ${hit.symbol.uppercase(Locale.US)} به «${group.name}» اضافه شد"
+                                                        insecureStorage -> "⚠️ ذخیره نشد: Keystore در دسترس نیست — تغییرات موقتی‌اند"
+                                                        else -> "⚠️ قبلاً اضافه شده یا ردیف پر است"
+                                                    }
                                                     if (ok) coinSearchInput = ""
                                                     reload()
                                                 }
