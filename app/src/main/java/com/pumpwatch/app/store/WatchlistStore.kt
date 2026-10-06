@@ -31,6 +31,8 @@ import java.util.concurrent.TimeUnit
  * 🚀 Commit 70 (فاز ۱ — پایداری داده): thread-safety + no-wipe guarantee
  * 🚀 Commit 114: ثبت وضعیت ارزیابی (markEval) برای UI صادقانه
  * 🚀 Commit 115: rearmAlert برای فعال‌سازی مجدد هشدارهای تریگرشده
+ * 🚀 Commit 150: انتشار نتیجهٔ واقعی ذخیره — همهٔ mutator ها
+ *                Boolean برمی‌گردانند؛ UI پیام صادقانه می‌دهد
  */
 
 data class WatchAlert(
@@ -69,13 +71,8 @@ object WatchlistStore {
 
     private val gson = Gson()
 
-    /** قفل برای عملیات Read-Modify-Write (بند ۹) */
     private val lock = Any()
 
-    /**
-     * پرچم «آخرین خواندن شکست خورد».
-     * تا وقتی true است، هیچ save خالی‌ای پذیرفته نمی‌شود (بند ۸).
-     */
     @Volatile
     private var lastLoadFailed = false
 
@@ -99,14 +96,29 @@ object WatchlistStore {
         }
     }
 
-    fun saveGroups(ctx: Context, groups: List<WatchGroup>) {
+    // 🚀 Commit 150: helper مرکزی برای persist با چک نتیجهٔ واقعی
+    /**
+     * @return true فقط اگر SecureStorage واقعاً موفق به ذخیرهٔ رمزنگاری‌شده شد
+     */
+    private fun persistGroups(ctx: Context, groups: List<WatchGroup>): Boolean {
+        val result = SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+        return result == SecureStorage.SecretResult.Saved
+    }
+
+    // 🚀 Commit 150: Boolean برگرداندن نتیجهٔ واقعی
+    /**
+     * @return true فقط اگر ذخیرهٔ رمزنگاری‌شده موفق شد؛
+     *         false یعنی Keystore در دسترس نیست یا store قابل خواندن نبود
+     */
+    fun saveGroups(ctx: Context, groups: List<WatchGroup>): Boolean {
         synchronized(lock) {
             if (lastLoadFailed && groups.isEmpty()) {
                 Log.e("WatchlistStore", "SAVE REJECTED: refusing to overwrite unreadable store with empty list")
-                return
+                return false
             }
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
-            if (groups.isNotEmpty()) lastLoadFailed = false
+            val ok = persistGroups(ctx, groups)
+            if (ok && groups.isNotEmpty()) lastLoadFailed = false
+            return ok
         }
     }
 
@@ -124,36 +136,37 @@ object WatchlistStore {
             val groups = current.toMutableList()
             if (groups.size >= MAX_GROUPS) return false
             groups.add(0, WatchGroup(name = name))
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
-            return true
+            return persistGroups(ctx, groups)  // 🚀 Commit 150
         }
     }
 
-    fun renameGroup(ctx: Context, groupId: String, newName: String) {
+    // 🚀 Commit 150: Boolean به‌جای Unit
+    fun renameGroup(ctx: Context, groupId: String, newName: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
                 Log.e("WatchlistStore", "renameGroup ABORTED: store unreadable")
-                return
+                return false
             }
             lastLoadFailed = false
             val groups = current.map { if (it.id == groupId) it.copy(name = newName) else it }
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+            return persistGroups(ctx, groups)
         }
     }
 
-    fun removeGroup(ctx: Context, groupId: String) {
+    // 🚀 Commit 150: Boolean به‌جای Unit
+    fun removeGroup(ctx: Context, groupId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
                 Log.e("WatchlistStore", "removeGroup ABORTED: store unreadable")
-                return
+                return false
             }
             lastLoadFailed = false
             val groups = current.filterNot { it.id == groupId }
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+            return persistGroups(ctx, groups)
         }
     }
 
@@ -175,24 +188,24 @@ object WatchlistStore {
             if (group.coins.size >= MAX_COINS_PER_GROUP) return false
             if (group.coins.any { it.id == coin.id }) return false
             groups[gIdx] = group.copy(coins = group.coins + coin)
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
-            return true
+            return persistGroups(ctx, groups)
         }
     }
 
-    fun removeCoin(ctx: Context, groupId: String, coinId: String) {
+    // 🚀 Commit 150: Boolean به‌جای Unit
+    fun removeCoin(ctx: Context, groupId: String, coinId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
                 Log.e("WatchlistStore", "removeCoin ABORTED: store unreadable")
-                return
+                return false
             }
             lastLoadFailed = false
             val groups = current.map { g ->
                 if (g.id == groupId) g.copy(coins = g.coins.filterNot { it.id == coinId }) else g
             }
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+            return persistGroups(ctx, groups)
         }
     }
 
@@ -218,18 +231,18 @@ object WatchlistStore {
             val newCoin = coin.copy(alerts = coin.alerts + alert)
             val newCoins = group.coins.toMutableList().apply { set(cIdx, newCoin) }
             groups[gIdx] = group.copy(coins = newCoins)
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
-            return true
+            return persistGroups(ctx, groups)
         }
     }
 
-    fun updateAlert(ctx: Context, groupId: String, coinId: String, alertId: String, above: Boolean, threshold: Double) {
+    // 🚀 Commit 150: Boolean به‌جای Unit
+    fun updateAlert(ctx: Context, groupId: String, coinId: String, alertId: String, above: Boolean, threshold: Double): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
                 Log.e("WatchlistStore", "updateAlert ABORTED: store unreadable")
-                return
+                return false
             }
             lastLoadFailed = false
             val groups = current.map { g ->
@@ -241,17 +254,18 @@ object WatchlistStore {
                     })
                 })
             }
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+            return persistGroups(ctx, groups)
         }
     }
 
-    fun removeAlert(ctx: Context, groupId: String, coinId: String, alertId: String) {
+    // 🚀 Commit 150: Boolean به‌جای Unit
+    fun removeAlert(ctx: Context, groupId: String, coinId: String, alertId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
                 Log.e("WatchlistStore", "removeAlert ABORTED: store unreadable")
-                return
+                return false
             }
             lastLoadFailed = false
             val groups = current.map { g ->
@@ -261,22 +275,18 @@ object WatchlistStore {
                     c.copy(alerts = c.alerts.filterNot { it.id == alertId })
                 })
             }
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+            return persistGroups(ctx, groups)
         }
     }
 
-    /**
-     * 🚀 Commit 115: re-arm کردن یک هشدار تریگرشده.
-     * triggeredAt و triggeredPrice را null می‌کند تا هشدار دوباره فعال شود.
-     * این برای کاربرانی است که می‌خواهند هشدار را بدون حذف مجدد، دوباره فعال کنند.
-     */
-    fun rearmAlert(ctx: Context, groupId: String, coinId: String, alertId: String) {
+    // 🚀 Commit 150: Boolean به‌جای Unit
+    fun rearmAlert(ctx: Context, groupId: String, coinId: String, alertId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
                 Log.e("WatchlistStore", "rearmAlert ABORTED: store unreadable")
-                return
+                return false
             }
             lastLoadFailed = false
             val groups = current.map { g ->
@@ -288,7 +298,7 @@ object WatchlistStore {
                     })
                 })
             }
-            SecureStorage.putString(ctx, KEY_GROUPS, gson.toJson(groups))
+            return persistGroups(ctx, groups)
         }
     }
 
@@ -333,10 +343,6 @@ object WatchlistStore {
 
     // ---------- بررسی مشترک (MonitorWorker — Commit 114) ----------
 
-    /**
-     * 🚀 Commit 114: ثبت وضعیت ارزیابی تا UI بتواند صادقانه بگوید
-     * «ارزیابی نشده» (قطع شبکه) در مقابل «بدون هشدار».
-     */
     private fun markEval(ctx: Context, ok: Boolean) {
         ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
             .putBoolean("watchlist_last_eval_ok", ok)
@@ -344,7 +350,6 @@ object WatchlistStore {
             .apply()
     }
 
-    /** وضعیت آخرین ارزیابی: (موفق؟، زمان) — برای نمایش در WatchlistScreen */
     fun lastEvalStatus(ctx: Context): Pair<Boolean, Long> {
         val p = ctx.getSharedPreferences("pumpwatch_prefs", 0)
         return p.getBoolean("watchlist_last_eval_ok", true) to p.getLong("watchlist_last_eval_ts", 0L)
@@ -360,7 +365,6 @@ object WatchlistStore {
             ApiClient.getTop1000Coins()
         } catch (e: Exception) {
             Log.w("WatchlistStore", "checkAndFire: API failed (transient)", e)
-            // 🚀 Commit 114: «ارزیابی نشده» ثبت می‌شود، نه «بدون هشدار»
             markEval(ctx, ok = false)
             return 0
         }
@@ -370,7 +374,14 @@ object WatchlistStore {
             markEval(ctx, ok = true)
             return 0
         }
-        saveGroups(ctx, markTriggered(groups, fired, { priceMap[it] }, System.currentTimeMillis()))
+        // 🚀 Commit 150: اگر persist شکست خورد، ارزیابی را fail گزارش می‌کنیم
+        val updated = markTriggered(groups, fired, { priceMap[it] }, System.currentTimeMillis())
+        val saved = saveGroups(ctx, updated)
+        if (!saved) {
+            Log.w("WatchlistStore", "checkAndFire: triggered alerts could not be persisted")
+            markEval(ctx, ok = false)
+            return 0
+        }
         fired.forEach { (groupId, coinId, alert) ->
             val coin = groups.flatMap { it.coins }.find { it.id == coinId }
             if (coin != null) notify(ctx, coin, alert, priceMap[coinId])
@@ -405,7 +416,6 @@ object WatchlistStore {
     }
 }
 
-/** 🚀 Commit 16: بررسی دوره‌ای هشدارهای واچ‌لیست (هر ۱۵ دقیقه) */
 @Deprecated("ارزیابی به MonitorWorker منتقل شد (Commit 114)")
 class WatchlistWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
@@ -431,16 +441,10 @@ class WatchlistWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(
     }
 }
 
-/**
- * 🚀 Commit 114: DEPRECATED — ارزیابی به MonitorWorker منتقل شد.
- * stop() را یک‌بار از MainActivity صدا بزن تا کار دوره‌ای قدیمی
- * روی دستگاه‌هایی که نسخهٔ قبلی را داشته‌اند لغو شود.
- */
 @Deprecated("ارزیابی واچ‌لیست حالا داخل MonitorWorker اجرا می‌شود (Commit 114)")
 object WatchlistScheduler {
     private const val NAME = "WatchlistAlerts"
 
-    /** لغو کار دوره‌ای قدیمی (ضروری برای دستگاه‌های آپدیت‌شده) */
     fun stop(ctx: Context) {
         WorkManager.getInstance(ctx).cancelUniqueWork(NAME)
     }
