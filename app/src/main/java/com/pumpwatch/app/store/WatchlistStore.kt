@@ -10,29 +10,21 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import androidx.work.BackoffPolicy
-import androidx.work.Constraints
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.WorkerParameters
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.SecureStorage
 import java.util.Locale
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 
 /**
  * 🚀 Sprint 15 (فاز ۲ / Commit 16): واچ‌لیست گروه‌بندی‌شده
  * 🚀 Commit 70 (فاز ۱ — پایداری داده): thread-safety + no-wipe guarantee
  * 🚀 Commit 114: ثبت وضعیت ارزیابی (markEval) برای UI صادقانه
  * 🚀 Commit 115: rearmAlert برای فعال‌سازی مجدد هشدارهای تریگرشده
- * 🚀 Commit 150: انتشار نتیجهٔ واقعی ذخیره — همهٔ mutator ها
- *                Boolean برمی‌گردانند؛ UI پیام صادقانه می‌دهد
+ * 🚀 Commit 150: انتشار نتیجهٔ واقعی ذخیره — همهٔ mutator ها Boolean برمی‌گردانند
+ * 🚀 Commit 154: حذف WatchlistWorker و WatchlistScheduler (منسوخ از Commit 114)
+ *                — ارزیابی فقط داخل MonitorWorker؛ لغو کار قدیمی inline در MainActivity
  */
 
 data class WatchAlert(
@@ -71,8 +63,13 @@ object WatchlistStore {
 
     private val gson = Gson()
 
+    /** قفل برای عملیات Read-Modify-Write (بند ۹) */
     private val lock = Any()
 
+    /**
+     * پرچم «آخرین خواندن شکست خورد».
+     * تا وقتی true است، هیچ save خالی‌ای پذیرفته نمی‌شود (بند ۸).
+     */
     @Volatile
     private var lastLoadFailed = false
 
@@ -136,11 +133,10 @@ object WatchlistStore {
             val groups = current.toMutableList()
             if (groups.size >= MAX_GROUPS) return false
             groups.add(0, WatchGroup(name = name))
-            return persistGroups(ctx, groups)  // 🚀 Commit 150
+            return persistGroups(ctx, groups)
         }
     }
 
-    // 🚀 Commit 150: Boolean به‌جای Unit
     fun renameGroup(ctx: Context, groupId: String, newName: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
@@ -155,7 +151,6 @@ object WatchlistStore {
         }
     }
 
-    // 🚀 Commit 150: Boolean به‌جای Unit
     fun removeGroup(ctx: Context, groupId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
@@ -192,7 +187,6 @@ object WatchlistStore {
         }
     }
 
-    // 🚀 Commit 150: Boolean به‌جای Unit
     fun removeCoin(ctx: Context, groupId: String, coinId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
@@ -235,7 +229,6 @@ object WatchlistStore {
         }
     }
 
-    // 🚀 Commit 150: Boolean به‌جای Unit
     fun updateAlert(ctx: Context, groupId: String, coinId: String, alertId: String, above: Boolean, threshold: Double): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
@@ -258,7 +251,6 @@ object WatchlistStore {
         }
     }
 
-    // 🚀 Commit 150: Boolean به‌جای Unit
     fun removeAlert(ctx: Context, groupId: String, coinId: String, alertId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
@@ -279,7 +271,6 @@ object WatchlistStore {
         }
     }
 
-    // 🚀 Commit 150: Boolean به‌جای Unit
     fun rearmAlert(ctx: Context, groupId: String, coinId: String, alertId: String): Boolean {
         synchronized(lock) {
             val current = loadGroupsOrNull(ctx)
@@ -413,53 +404,5 @@ object WatchlistStore {
         } catch (e: Exception) {
             Log.w("WatchlistStore", "notify failed (non-critical)", e)
         }
-    }
-}
-
-@Deprecated("ارزیابی به MonitorWorker منتقل شد (Commit 114)")
-class WatchlistWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
-    override suspend fun doWork(): Result {
-        return try {
-            WatchlistStore.checkAndFire(applicationContext)
-            Result.success()
-        } catch (e: Exception) {
-            val msg = e.message ?: ""
-            val isTransient = msg.contains("timeout", true) ||
-                msg.contains("429") ||
-                msg.contains("503") ||
-                msg.contains("502") ||
-                msg.contains("504") ||
-                e::class.java.simpleName.contains("Timeout")
-            if (isTransient) {
-                Log.w("WatchlistWorker", "Transient error, will retry", e)
-                Result.retry()
-            } else {
-                Log.e("WatchlistWorker", "Terminal error, failing", e)
-                Result.failure()
-            }
-        }
-    }
-}
-
-@Deprecated("ارزیابی واچ‌لیست حالا داخل MonitorWorker اجرا می‌شود (Commit 114)")
-object WatchlistScheduler {
-    private const val NAME = "WatchlistAlerts"
-
-    fun stop(ctx: Context) {
-        WorkManager.getInstance(ctx).cancelUniqueWork(NAME)
-    }
-
-    fun start(ctx: Context) {
-        val req = PeriodicWorkRequestBuilder<WatchlistWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build()
-            )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
-            .build()
-        WorkManager.getInstance(ctx).enqueueUniquePeriodicWork(
-            NAME, ExistingPeriodicWorkPolicy.UPDATE, req
-        )
     }
 }
