@@ -69,7 +69,7 @@ import com.pumpwatch.app.data.ServedFrom
 import com.pumpwatch.app.data.WatchlistMigration
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.data.platformContractRef
-import com.pumpwatch.app.store.WatchlistScheduler
+// 🚀 Commit 152: حذف import منسوخ WatchlistScheduler
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
@@ -102,6 +102,10 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val SIGNAL_SCANNER_WORK_NAME = "SignalScanner"
         private const val WHALE_MEME_WORK_NAME = "WhaleMeme" // 🚀 Commit 91
+        // 🚀 Commit 152: نام کار دوره‌ای قدیمی که باید روی دستگاه‌های آپدیت‌شده لغو شود
+        // این نام در WatchlistScheduler (منسوخ Commit 114) استفاده می‌شد.
+        // پس از حذف scheduler، این ثابت مستندسازی می‌کند که کدام کار باید لغو شود.
+        private const val LEGACY_WATCHLIST_WORK_NAME = "WatchlistAlerts"
     }
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -128,8 +132,10 @@ class MainActivity : ComponentActivity() {
         MonitorScheduler.start(this)
         scheduleSignalScanner()
         scheduleWhaleMemeWorker() // 🚀 Commit 91 (A5)
-        // 🚀 Commit 114: لغو worker قدیمی واچ‌لیست (ارزیابی حالا داخل MonitorWorker است)
-        WatchlistScheduler.stop(this)
+        // 🚀 Commit 152: لغو کار دوره‌ای قدیمی واچ‌لیست (بدون نیاز به کلاس WatchlistScheduler)
+        // این خط جایگزین WatchlistScheduler.stop(this) از Commit 114 است.
+        // روی دستگاه‌هایی که از نسخهٔ قدیمی آپدیت می‌کنند، کار دوره‌ای باقی‌مانده لغو می‌شود.
+        WorkManager.getInstance(this).cancelUniqueWork(LEGACY_WATCHLIST_WORK_NAME)
         TraderMonitorScheduler.start(this) // 🏆 Sprint 16: هشدار تاپ تریدرها
 
         // 🚀 Commit 113: مهاجرت یک‌بارهٔ دادهٔ واچ‌لیست قدیمی به store رمزنگاری‌شده
