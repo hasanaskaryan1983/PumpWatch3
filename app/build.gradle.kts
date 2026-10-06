@@ -14,9 +14,9 @@ android {
         applicationId = "com.pumpwatch.app"
         minSdk = 24
         targetSdk = 34
-        // 🚀 Commit 145: نسخهٔ 1.4.0
-        versionCode = 5
-        versionName = "1.4.0"
+        // 🚀 Commit 155: نسخهٔ 1.5.0
+        versionCode = 6
+        versionName = "1.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
