@@ -1,168 +1,77 @@
-# 🚀 PumpWatch — رادار هوشمند پامپ/دامپ
+# PumpWatch 🐋
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/yourusername/pumpwatch)
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Kotlin](https://img.shields.io/badge/kotlin-1.9-purple)](https://kotlinlang.org)
+دستیار موبایلی پایش بازار کریپتو و سیگنال‌های **قاعده‌محور** — با مستندات صداقت‌محور.
 
-**PumpWatch** یک اپلیکیشن اندروید برای ردیابی زودهنگام حرکت‌های بزرگ بازار رمزارز است. با ترکیب تحلیل تکنیکال قاعده‌محور، جریان نهنگ‌ها، و هشدارهای سفارشی، به شما کمک می‌کند لحظهٔ درست را شکار کنید.
+> ⚠️ این اپ توصیهٔ مالی نیست. همهٔ خروجی‌ها جنبهٔ آموزشی/پژوهشی دارند.
 
----
+## 🤝 PumpWatch چه چیزی نیست (صداقت اول)
 
-## ✨ ویژگی‌های کلیدی
+- **هوش مصنوعی/ML در سیگنال‌دهی نداریم.** همهٔ لایه‌ها قاعده‌محورند: EMA، MACD، RSI، ADX، حجم.
+- **رئال‌تایم نیستیم.** پایش هر ۳۰ دقیقه یک‌بار توسط `MonitorWorker` انجام می‌شود.
+- **چک‌های rug:** تعداد متفاوت در EVM و Solana (شفاف در صفحهٔ متدولوژی).
+- **بک‌تست بدون سوگیری:** universe نقطه‌درزمان با نمایش پوشش داده (ADR-0003).
+- **همبستگی ≠ علیت.**
 
-### 🎯 هشدارهای بازار (اسکنر قاعده‌محور)
-- **تشخیص زودهنگام**: شتاب ۱ ساعته + حجم غیرعادی + شکست سقف/کف ۲۴ ساعته
-- **بدون AI**: تمام سیگنال‌ها از فرمول‌های شفاف و قابل مشاهده تولید می‌شوند
-- **فیلترهای سفارشی**: HOT (≥۷۰) / MID (۵۰-۶۹) / EARLY (زودهنگام)
-- **قوانین شخصی**: قیمت بالای/زیر X، RSI، فاندینگ، حجم
+## ✨ امکانات
 
-### 🐳 شکار نهنگ‌ها
-- **Large venue trades**: معاملات تکی ≥ ۱۰۰ هزار دلار در صرافی‌های بزرگ
-- **Pool buy/sell mix**: نسبت خرید/فروش استخرهای DEX
-- **جدا برچسب‌گذاری**: تا مفهوم "نهنگ واقعی" و "فشار خرده‌فروش" قاطی نشود
-
-### 🧠 تحلیل قاعده‌محور
-- **۵ تایم‌فریم**: ۱س، ۴س، ۱۲س، ۱ روز، ۱ هفته
-- **۸ اندیکاتور**: EMA، Supertrend، RSI، MACD، ADX، حجم، OBV، ATR
-- **نقاط دقیق**: ورود، استاپ، هدف با فرمول‌های شفاف
-- **بدون look-ahead bias**: فقط کندل‌های بسته‌شده وارد تحلیل می‌شوند
-
-### 🐸 رادار میم‌کوین‌ها
-- **اسکن ۹ شبکه**: Solana, BSC, Base, Ethereum, TON, Robinhood, Avalanche, SEI, Arc
-- **Rug Safety Check**: بررسی امنیتی GoPlus (honeypot، mint، owner، tax، قفل نقدینگی و…)
-- **حالت اسنایپر**: فیلتر برای توکن‌های تازه با Rug Score بالا
-- **نمودار استخر**: اتصال مستقیم به GeckoTerminal
-
-### 📓 ژورنال عملکرد
-- **وین‌ریت واقعی**: ارزیابی خودکار سیگنال‌ها (WIN/LOSS/EXP)
-- **Profit Factor**: نسبت سود به ضرر
-- **Max Drawdown**: بیشترین افت از قله
-- **R-multiple**: کیفیت معاملات نسبت به ریسک
-
-### 🧪 بک‌تست بدون سوگیری
-- **Historical Universe**: انتخاب ارز بر اساس رتبهٔ تاریخی (نه حجم امروز)
-- **Snapshot روزانه**: ذخیرهٔ عضویت بازار تا ۱۲۰ روز
-- **افشای صادقانه**: منبع universe + درصد پوشش + شمارش ارزهای حذف‌شده
-- **مدل هزینه واقعی**: کارمزد + slippage + فاندینگ (برای فیوچرز)
-
-### 📝 Paper Trading
-- **اسپات**: ledger واحد با هزینهٔ واقعی (۰.۳٪ رفت‌وبرگشت)
-- **فیوچرز**: سوییچ opt-in + مدل ریسک واقعی (leverage، funding، liquidation)
-- **بدون سرمایه واقعی**: شبیه‌سازی کامل بدون اجرای سفارش
-
-### 🔔 هشدارهای سفارشی
-- **قوانین شخصی**: قیمت، RSI، فاندینگ، حجم
-- **Cooldown هوشمند**: جلوگیری از اسپم نوتیفیکیشن
-- **منبع یگانهٔ ارزیابی**: `MonitorWorker` هر ۳۰ دقیقه
-- **ارزیابی واچ‌لیست**: هشدارهای واچ‌لیست هم در همان worker
-
-### ⭐ واچ‌لیست گروه‌بندی‌شده
-- **تا ۱۰ گروه**: دسته‌بندی ارزهای مورد علاقه
-- **هشدار قیمت**: "بالای X" یا "زیر X" برای هر ارز
-- **شفافیت وضعیت**: "آخرین بررسی X دقیقه پیش" یا "ارزیابی نشده"
-- **Re-arm**: فعال‌سازی مجدد هشدار تریگرشده
-
-### 🔐 امنیت و حریم خصوصی
-- **AES-256-GCM**: رمزنگاری داده‌های حساس با Android Keystore
-- **غیرامانی**: هیچ کلید، seed یا مجوز برداختی دریافت نمی‌کند
-- **Fail-closed**: اگر Keystore کار نکند، داده ذخیره نمی‌شود (نه plaintext)
-- **مرکز حریم خصوصی**: مشاهدهٔ وضعیت امنیتی + کنترل داده‌ها
-
----
+- سیگنال اسپات و فیوچرز از چند صرافی (Binance / Bybit / OKX / Gate)
+- هشدارهای هوشمند: ۸ شرط + cooldown شش‌ساعته
+- واچ‌لیست رمزنگاری‌شده (AES-256-GCM + Android Keystore، fail-closed)
+- ترید کاغذی با مدل هزینهٔ واحد (۰٫۳٪ رفت‌وبرگشت)
+- بک‌تست نقطه‌درزمان + مقایسهٔ A/B سیاست‌های خروج
+- سایز پوزیشن Kelly با سقف‌های ایمنی
 
 ## 🏗️ معماری
 
-### تکنولوژی‌ها
-- **Kotlin 1.9** + **Jetpack Compose** (UI مدرن)
-- **Coroutines + Flow** (async/non-blocking)
-- **WorkManager** (background tasks)
-- **Retrofit + OkHttp** (network)
-- **Android Keystore** (رمزنگاری)
+| ماژول | مسئولیت |
+|---|---|
+| `engine/` | ScoringEngine، ExitComparator، PositionSizer، PaperRules، BatchScanner |
+| `data/` | BinanceApi، MultiExchange، KlineCache، SecureStorage، HistoricalUniverseRepository، WatchlistMigration |
+| `store/` | WatchlistStore (رمزنگاری‌شده)، AlertRulesStore |
+| `worker/` | MonitorWorker (ارزیاب واحد)، SignalNavigator |
+| `ui/` | صفحه‌های Compose |
 
-### اصول طراحی
-- **Single Source of Truth**: `MonitorWorker` تنها evaluator هشدارها
-- **Fail-Closed**: در صورت خطای امنیتی، داده ذخیره نمی‌شود
-- **Honest UI**: هیچ ادعای غیرقابل اثبات (مثل "AI" یا "۵۰ تریدر برتر")
-- **Transparent Methodology**: صفحهٔ Methodology دقیقاً رفتار واقعی کد را توضیح می‌دهد
+## 🧪 Testing
 
----
+### اجرای همهٔ تست‌ها
+```bash
+./gradlew testDebugUnitTest
+```
 
-## 📦 نصب
+### پوشش (JaCoCo)
+```bash
+./gradlew testDebugUnitTest jacocoTestReport
+# HTML: app/build/reports/jacoco/jacocoTestReport/html/index.html
+```
+
+### لایه‌ها (مطابق ADR-0005)
+1. **JVM unit** — منطق pure موتور/داده (PositionSizer، parserها، scoring، exit)
+2. **Robolectric** — integration بدون دستگاه (prefs، مهاجرت، universe، fail-closed)
+3. **Compose UI روی JVM** — ناوبری + گارد رگرسیون صداقت
+4. **گارد عملکرد** — سقف‌های سخاوتمندانه برای کشف رژیم O(n²)
+
+### CI
+`.github/workflows/test.yml` روی هر push/PR تست‌ها را اجرا و گزارش‌ها را آپلود می‌کند.
+
+### گارد صداقت
+`HonestyScreensUiTest` متن‌های صادقانه را قفل می‌کند (بازهٔ ۳۰ دقیقه، بدون ادعای AI).
+اگر کسی این متن‌ها را به ادعای دروغین برگرداند، CI قرمز می‌شود.
+
+## 📚 مستندات
+
+- `docs/API.md` — مرجع API
+- `docs/adr/` — پنج تصمیم معماری (ADR-0001 تا ADR-0005)
+- `docs/DEPRECATIONS.md` — سیاست و رجیستری نمادهای منسوخ
+- `docs/RELEASE_CHECKLIST.md` — چک‌لیست انتشار
+- `CHANGELOG.md` — تاریخچهٔ نسخه‌ها
+
+## 🛠️ ساخت
 
 ```bash
-git clone https://github.com/yourusername/pumpwatch.git
-cd pumpwatch
 ./gradlew assembleDebug
 ```
 
-APK در `app/build/outputs/apk/debug/app-debug.apk` ساخته می‌شود.
+## ⚖️ سلب‌مسئولیت
 
----
-
-## 🚀 استفاده
-
-### اولین اجرا
-1. اپ را باز کنید
-2. مجوز نوتیفیکیشن را بدهید (برای هشدارها)
-3. Onboarding را رد کنید یا کامل ببینید
-
-### اسکن بازار
-- تب "بازار": لیست ۱۰۰۰ ارز برتر CoinGecko
-- تب "هشدارهای بازار": سیگنال‌های فعال + قوانین شخصی
-- تب "واچ‌لیست": ارزهای مورد علاقه + هشدارهای قیمت
-
-### بک‌تست
-- تب "بک‌تست": انتخاب بازهٔ رتبه + اجرای استراتژی
-- نتایج: وین‌ریت، Profit Factor، Max Drawdown، R-multiple
-
-### Paper Trading
-- تب "Paper اسپات": معاملات کاغذی با ledger واحد
-- تب "Paper فیوچرز": معاملات کاغذی با مدل ریسک واقعی
-
----
-
-## 📖 مستندات
-
-- **[CHANGELOG.md](CHANGELOG.md)**: تاریخچهٔ کامل تغییرات
-- **[Methodology](app/src/main/java/com/pumpwatch/app/ui/MethodologyScreen.kt)**: فرمول‌ها و محدودیت‌ها (داخل اپ)
-- **[Risk Disclosure](app/src/main/java/com/pumpwatch/app/ui/RiskDisclosureScreen.kt)**: صداقت و مرزهای فنی (داخل اپ)
-
----
-
-## ⚠️ سلب مسئولیت
-
-**PumpWatch توصیهٔ مالی نیست.** هر خروجی صرفاً مشاهدهٔ دادهٔ عمومی است. تصمیم خرید/فروش، مسئولیت کامل شماست و می‌تواند به از دست رفتن سرمایه منجر شود.
-
-- بازار رمزارز ذاتاً پرنوسان و پرریسک است
-- نتایج گذشته تضمین آینده نیست
-- همیشه خودتان قرارداد توکن، تیم، و نقدینگی را بررسی کنید (DYOR)
-
----
-
-## 🤝 مشارکت
-
-Pull request خوشحال‌کننده است! لطفاً:
-1. Fork کنید
-2. Branch جدید بسازید (`git checkout -b feature/amazing-feature`)
-3. Commit کنید (`git commit -m 'feat: add amazing feature'`)
-4. Push کنید (`git push origin feature/amazing-feature`)
-5. Pull Request باز کنید
-
----
-
-## 📄 لایسنس
-
-MIT License - جزئیات در [LICENSE](LICENSE)
-
----
-
-## 📞 تماس
-
-- **GitHub Issues**: [گزارش باگ یا درخواست ویژگی](https://github.com/yourusername/pumpwatch/issues)
-- **Email**: your.email@example.com
-
----
-
-<p align="center">
-  <strong>ساخته شده با ❤️ برای جامعهٔ رمزارز فارسی‌زبان</strong>
-</p>
+استفاده از این اپ به مسئولیت خود کاربر است. کریپتو پرنوسان و پرریسک است؛
+ممکن است کل سرمایه از دست برود. این اپ توصیهٔ مالی نیست.
