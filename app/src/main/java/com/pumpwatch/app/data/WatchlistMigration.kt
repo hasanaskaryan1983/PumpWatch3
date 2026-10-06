@@ -13,7 +13,7 @@ import java.util.Locale
  * (`pumpwatch_prefs:watchlist_v1`) به `store.WatchlistStore` رمزنگاری‌شده.
  *
  * چرا مستقیم کلید را می‌خوانیم؟
- * چون `data.WatchlistStore` در همین کامیت به bridge تبدیل شد و دیگر از
+ * چون `data.WatchlistStore` در کامیت ۱۱۳ به bridge تبدیل شد و دیگر از
  * `watchlist_v1` نمی‌خواند — پس مهاجرت باید خود کلید قدیمی را بخواند
  * تا دادهٔ کاربران قدیمی هرگز از دست نرود.
  *
@@ -21,7 +21,20 @@ import java.util.Locale
  * - اگر store جدید خراب باشد (decrypt fail)، مهاجرت abort می‌شود
  *   تا دادهٔ قدیمی دست‌نخورده بماند.
  * - flag `watchlist_migrated_v2` از اجرای مجدد جلوگیری می‌کند.
+ *
+ * 🚀 Commit 154: data class_watchlistEntry از bridge منسوخ به این فایل منتقل شد
+ * تا پس از حذف کامل bridge، مهاجرت legacy همچنان کار کند.
  */
+
+// 🚀 Commit 154: این data class قبلاً داخل data/WatchlistStore.kt (bridge) بود.
+// مصرف‌کننده‌ها: loadLegacyRaw (همین فایل) + WatchlistMigrationTest (کامیت ۱۲۹).
+data class WatchlistEntry(
+    val symbol: String,
+    val chain: String?,
+    val contract: String?,
+    val addedAt: Long = System.currentTimeMillis()
+)
+
 object WatchlistMigration {
 
     private const val FLAG_MIGRATED = "watchlist_migrated_v2"
