@@ -14,8 +14,9 @@ android {
         applicationId = "com.pumpwatch.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3.0"
+        // 🚀 Commit 145: نسخهٔ 1.4.0
+        versionCode = 5
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -133,7 +134,6 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         csv.required.set(false)
     }
 
-    // کلاس‌های تولیدشده و تست‌ها را از گزارش حذف می‌کنیم
     val fileFilter = listOf(
         "**/R.class",
         "**/R$*.class",
@@ -145,14 +145,12 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         "**/*_HiltModules*.*"
     )
 
-    // کلاس‌های کامپایل‌شدهٔ Kotlin برای variant دیباگ
     val debugTree = fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug")) {
         exclude(fileFilter)
     }
     classDirectories.setFrom(files(debugTree))
     sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
 
-    // هر دو مسیر ممکن exec را پوشش می‌دهیم (بسته به نسخهٔ AGP)
     executionData.setFrom(
         fileTree(layout.buildDirectory).include(
             "jacoco/testDebugUnitTest.exec",
