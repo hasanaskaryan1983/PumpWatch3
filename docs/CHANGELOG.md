@@ -2,6 +2,31 @@
 
 فرمت: Keep a Changelog — هر عدد/ادعا باید به کامیت ارجاع‌پذیر باشد.
 
+## [1.5.0] — Sprint 16 (Commits 150–156)
+
+### Added
+- پیام‌های صادقانهٔ شکست: بنر قرمز + پیام هر عملیات وقتی Keystore در دسترس نیست (150، 151)
+- گارد reflection برای جلوگیری از بازگشت کلاس‌های حذف‌شده (154)
+
+### Changed
+- همهٔ mutator های WatchlistStore حالا نتیجهٔ واقعی ذخیره را برمی‌گردانند (150)
+- checkAndFire اگر persist شکست بخورد، ارزیابی را fail ثبت می‌کند (150)
+- versionCode 6، versionName 1.5.0 (155)
+
+### Removed (مطابق سیاست DEPRECATIONS.md)
+- `store.WatchlistScheduler` → لغو inline با WorkManager در MainActivity (152)
+- `store.WatchlistWorker` → ارزیابی از 1.3.0 داخل MonitorWorker است (154)
+- bridge `data.WatchlistStore` → `WatchlistEntry` به WatchlistMigration منتقل شد (153، 154)
+
+### Fixed
+- شکاف UX fail-closed (ADR-0002): کاربر دیگر «موفقیت» دروغین نمی‌بیند
+
+### CI
+- ارتقای اکشن‌ها به نسخه‌های سازگار با Node 24 (156)
+
+### آمار تست
+- 658 تست — 0 شکست، 6 skip عمدی
+
 ## [1.4.0] — Sprint 15 Part 2 (Commits 131–149)
 
 ### Added
