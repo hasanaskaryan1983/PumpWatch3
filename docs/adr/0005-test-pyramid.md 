@@ -1,0 +1,18 @@
+# ADR-0005: هرم تست PumpWatch
+
+Status: Accepted (Commits 121-142)
+
+## Context
+اپ بدون تست بود؛ هر تغییر (مخصوصاً در engine و store) ریسک رگرسیون خاموش داشت.
+
+## Decision
+لایه‌ها به ترتیب هزینهٔ اجرا:
+1. **JVM unit (pure logic)** — PositionSizer، parserهای صرافی، ScoringEngine، ExitComparator، PaperRules، AlertRulesStore.matches
+2. **Robolectric integration** — SharedPreferences، مهاجرت واچ‌لیست، universe، تضمین fail-closed؛ مسیرهای وابسته به Keystore با assume-guard
+3. **Compose UI روی JVM** — ناوبری Onboarding (با ساعت دستی به‌خاطر انیمیشن‌های بی‌پایان) + گارد رگرسیون صداقت
+4. **گارد عملکرد JVM** — سقف‌های زمانی سخاوتمندانه برای کشف رژیم O(n²)؛ نه میکروبنچمارک دستگاه
+
+## Consequences
++ CI سریع و قابل اتکا (همه‌چیز روی JVM اجرا می‌شود)
++ تست‌های وابسته به شبکه/Keystore شکننده نیستند (assume-guarded یا موکول به دستگاه)
+- میکروبنچمارک واقعی روی دستگاه هنوز نداریم (محدودیت آگاهانه؛ کتابخانهٔ benchmark با build دیباگ معتبر نیست)
