@@ -14,6 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 🚀 Commit 158 (X01): برند audit — فقط گزارش می‌دهد، fail نمی‌کند.
+      # وقتی همهٔ "PumpDump"/"PumpWatch3" رفتند، در کامیت بعدی exit 1 می‌کنیم.
+      - name: Brand audit (X01 — report only)
+        run: |
+          echo "== remaining legacy brand strings in main sources =="
+          grep -rnE '"(PumpDump|PumpWatch3)"' app/src/main --include="*.kt" || echo "(none — clean)"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
