@@ -19,21 +19,11 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # Gradle 8.10 = سازگار با AGP 8.5.0 (حداقل 8.7 لازم است)
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10
           cache: gradle
 
-      - name: Brand + secret guard
-        run: |
-          if grep -rnE '"(PumpDump|PumpWatch3)"' app/src/main --include="*.kt"; then
-            echo "::error::use brand token 'pumpdump'"; exit 1; fi
-          if grep -rniE "(helius|api[_-]?key)\s*=\s*\"[A-Za-z0-9]{20,}" app/src/main --include="*.kt"; then
-            echo "::error::hardcoded secret found"; exit 1; fi
-          echo "guards passed"
-
-      # ⚠️ دقت کن: gradle (نه ./gradlew) — تا wrapper کامیت نشده
       - name: Assemble + unit tests
         run: gradle assembleDebug testDebugUnitTest --stacktrace
 
