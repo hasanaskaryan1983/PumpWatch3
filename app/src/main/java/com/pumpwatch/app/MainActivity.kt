@@ -231,7 +231,8 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
         return
     }
 
-    val accent = if (isFutures) FuturesAccent else SpotAccent
+    // 🚀 Commit 158 (X01): 'accent' حذف شد — لوگوی برند دوتُن ثابت است، مستقل از مود
+    // (قبلاً: val accent = if (isFutures) FuturesAccent else SpotAccent)
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -245,15 +246,24 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 🚀 Commit 158 (X01): برند یکپارچه pumpdump — دوتُن ثابت، مستقل از مود
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("🚀", fontSize = 24.sp)
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            "PumpDump",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Black,
-                            color = accent
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "pump",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = SpotAccent
+                            )
+                            Text(
+                                "dump",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                color = FuturesAccent
+                            )
+                        }
                     }
 
                     Spacer(Modifier.weight(1f))
