@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# اگر push جدید آمد، run قبلی روی همان branch را لغو کن → دیگر دو تا موازی نداری
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v4        # ← wrapper/Gradle را خودکار می‌دهد
+      - name: Assemble + Unit tests (یک‌جا)
+        run: ./gradlew assembleDebug testDebugUnitTest --stacktrace
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: app/build/reports/
