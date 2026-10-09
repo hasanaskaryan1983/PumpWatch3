@@ -3,6 +3,8 @@ package com.pumpwatch.app.data
 import android.content.Context
 import com.google.gson.JsonElement
 import kotlinx.coroutines.delay
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -143,7 +145,12 @@ object SolanaRpc3 {
 }
 
 private fun heliusClient(apiKey: String): SolanaRpcApi = Retrofit.Builder()
-    .baseUrl("https://mainnet.helius-rpc.com/?api-key=$apiKey")
+    // Retrofit resolves @POST(".") against the base URL and drops its query, so the key goes on each request.
+    .baseUrl("https://mainnet.helius-rpc.com/")
+    .client(OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+        val req = chain.request()
+        chain.proceed(req.newBuilder().url(req.url.newBuilder().addQueryParameter("api-key", apiKey).build()).build())
+    }).build())
     .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
 
 suspend fun solanaRaw(
