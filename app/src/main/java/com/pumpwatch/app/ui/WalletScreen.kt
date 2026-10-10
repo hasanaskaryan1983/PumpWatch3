@@ -8,17 +8,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -36,6 +36,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.ui.components.GlassCard // 🚀 اضافه شد
+import com.pumpwatch.app.ui.design.TabPalette // 🚀 اضافه شد
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -44,12 +46,8 @@ private val VRed = Color(0xFFFF5252)
 private val VBlue = Color(0xFF40C4FF)
 private val VGold = Color(0xFFFFC107)
 private val VGray = Color(0xFF8B949E)
-private val VPurple = Color(0xFFCE93D8)
-private val VOrange = Color(0xFFFFA726)
-private val VCard = Color(0xFF1A2230)
 
 // 🚀 Commit 100: holder تک‌نمونه — state کیف پول حتی بعد از خروج از تب زنده می‌ماند.
-// عمداً از viewModel() استفاده نکردیم تا dependency جدید لازم نشود (ریسک صفر).
 internal object WalletVMHolder {
     val vm: WalletViewModel = WalletViewModel()
 }
@@ -123,7 +121,7 @@ fun WalletScreen() {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
+            Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -137,17 +135,18 @@ fun WalletScreen() {
                 FilterChip(selected = subTab == 5, onClick = { subTab = 5 }, label = { Text("🔐 Approvals", fontSize = 11.sp) })
             }
             if (infoText.isNotEmpty()) {
-                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(infoText, fontSize = 10.sp, color = VGreen, modifier = Modifier.weight(1f))
-                        Button(onClick = { infoText = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("✖", fontSize = 10.sp) }
+                // 🚀 مهاجرت به GlassCard
+                GlassCard(accent = TabPalette.Wallet, modifier = Modifier.fillMaxWidth(), radius = 10.dp) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(infoText, fontSize = 10.sp, color = TabPalette.Wallet, modifier = Modifier.weight(1f))
+                        Button(onClick = { infoText = "" }, colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent), shape = RoundedCornerShape(6.dp)) { 
+                            Text("✖", fontSize = 10.sp, color = Color(0xFFE6EDF3)) 
+                        }
                     }
                 }
             }
         }
 
-        // 🚀 Commit 99: تب موتورها همیشه در composition می‌ماند تا state و اسکن‌های
-        // در حال اجرا هنگام جابه‌جایی زیرتب‌ها نمیرند.
         Box(modifier = Modifier.weight(1f)) {
             Column(
                 modifier = Modifier
@@ -165,21 +164,24 @@ fun WalletScreen() {
                     }
                 }
 
-                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 🚀 مهاجرت به GlassCard
+                GlassCard(accent = TabPalette.Wallet, modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)",
-                                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VBlue, modifier = Modifier.weight(1f))
+                                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFE6EDF3), modifier = Modifier.weight(1f))
                             Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده + سود/زیان واقعی." },
-                                colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { Text("ℹ️", fontSize = 10.sp) }
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent), shape = RoundedCornerShape(6.dp)) { 
+                                Text("ℹ️", fontSize = 10.sp, color = Color(0xFFE6EDF3)) 
+                            }
                         }
                         TextField(value = viewModel.address, onValueChange = { viewModel.address = it },
-                            placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp) },
+                            placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp, color = VGray) },
                             modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
                         Button(onClick = { check() }, enabled = !viewModel.loading,
-                            colors = ButtonDefaults.buttonColors(containerColor = VBlue),
+                            colors = ButtonDefaults.buttonColors(containerColor = TabPalette.Wallet),
                             shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            Text(if (viewModel.loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول", fontSize = 12.sp)
+                            Text(if (viewModel.loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول", fontSize = 12.sp, color = Color.Black)
                         }
                         if (viewModel.info.isNotEmpty()) Text(viewModel.info, fontSize = 10.sp, color = VGreen)
                     }
@@ -187,6 +189,8 @@ fun WalletScreen() {
 
                 if (viewModel.error != null) Text(viewModel.error ?: "", fontSize = 10.sp, color = VRed)
 
+                // ⚠️ توابع زیر (HoldingsSection, TxHistorySection, ...) را در ادامهٔ فایل خودتان نگه دارید.
+                // آن‌ها را اینجا کپی نکردم تا فایل شما ناقص نشود. فقط کافی است importهای بالا را اضافه کنید.
                 HoldingsSection(
                     holdings = viewModel.holdings,
                     total = viewModel.total,
@@ -195,7 +199,6 @@ fun WalletScreen() {
                 )
 
                 TxHistorySection(txs = viewModel.txs)
-
                 WalletHistorySection()
 
                 ChainForensicsSection(
@@ -221,3 +224,4 @@ fun WalletScreen() {
         }
     }
 }
+// ⬇️⬇️⬇️ بقیهٔ فایل خودتان (توابع HoldingsSection و ...) دقیقاً همین‌جا ادامه پیدا می‌کند ⬇️⬇️⬇️
