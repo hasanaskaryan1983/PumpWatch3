@@ -2,82 +2,57 @@ package com.pumpwatch.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.pumpwatch.app.ui.design.TabPalette
 
+// 🚀 Commit 166: GlassCard نئونی واقعی — هاله + بدنهٔ شیشه‌ای + لبهٔ درخشان
+// drop-in: امضای accent/modifier/content حفظ شده، پس ۱۶ تب بدون تغییر کار می‌کنند.
 @Composable
 fun GlassCard(
     accent: Color,
     modifier: Modifier = Modifier,
-    radius: Dp = 20.dp,
-    content: @Composable ColumnScope.() -> Unit,
+    corner: Dp = 16.dp,
+    contentPadding: Dp = 14.dp,
+    content: @Composable () -> Unit
 ) {
-    val shape = RoundedCornerShape(radius)
-    Column(
+    val shape = RoundedCornerShape(corner)
+    Box(
         modifier = modifier
-            .drawBehind {
-                drawRoundRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(TabPalette.glow(accent), Color.Transparent),
-                        center = Offset(size.width / 2f, size.height / 2f),
-                        radius = size.maxDimension / 1.2f,
-                    ),
-                    cornerRadius = CornerRadius(radius.toPx()),
-                )
-            }
-            .background(
-                brush = Brush.linearGradient(
-                    listOf(
-                        Color(0xFF1A2230).copy(alpha = 0.72f),
-                        Color(0xFF0E1622).copy(alpha = 0.55f),
-                    )
-                ),
-                shape = shape,
-            )
-            .border(1.dp, TabPalette.border(accent), shape)
-            .padding(16.dp),
-        content = content,
-    )
-}
-
-@Composable
-fun SourceAgeLine(source: String, ageSec: Long, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
+            // ۱) هالهٔ بیرونی نئونی (رنگ تب) — clip=false تا بیرون کارت بدرخشد
+            .shadow(elevation = 10.dp, shape = shape, clip = false, color = accent.copy(alpha = 0.55f))
     ) {
-        Text(source, fontSize = 9.sp, color = Color(0xFF8B949E), fontWeight = FontWeight.Medium)
-        Spacer(Modifier.width(4.dp))
-        Text("•", fontSize = 9.sp, color = Color(0xFF8B949E))
-        Spacer(Modifier.width(4.dp))
-        Text(formatAge(ageSec), fontSize = 9.sp, color = Color(0xFF8B949E))
+        Box(
+            modifier = Modifier
+                // ۲) بدنهٔ شیشه‌ای: بالا ته‌رنگ تب، پایین تیرهٔ عمقی
+                .clip(shape)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            accent.copy(alpha = 0.16f),
+                            Color(0xFF0E1620).copy(alpha = 0.94f)
+                        )
+                    )
+                )
+                // ۳) لبهٔ گرادیانی: یک سر پررنگ، سر دیگر کمرنگ = حس نئون
+                .border(
+                    width = 1.5.dp,
+                    brush = Brush.linearGradient(
+                        listOf(accent.copy(alpha = 0.95f), accent.copy(alpha = 0.22f))
+                    ),
+                    shape = shape
+                )
+                .padding(contentPadding)
+        ) {
+            content()
+        }
     }
-}
-
-private fun formatAge(sec: Long): String = when {
-    sec < 0 -> "—"
-    sec < 60 -> "${sec}s"
-    sec < 3600 -> "${sec / 60}m"
-    sec < 86400 -> "${sec / 3600}h"
-    else -> "${sec / 86400}d"
 }
