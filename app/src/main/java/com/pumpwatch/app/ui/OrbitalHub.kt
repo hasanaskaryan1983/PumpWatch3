@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.input.pointer.pointerInput
@@ -78,34 +79,32 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                     val tDeg = atan2((dy/b).toDouble(), (dx/a).toDouble()) * (180.0/PI_D)
                     val adj = (tDeg - outerRot.toDouble() + 360.0) % 360.0
                     val step = 360.0/tabs.size
-                    val idx = (((adj/step).roundToInt() % tabs.size) + tabs.size) % tabs.size  // ✅ roundToInt
+                    val idx = (((adj/step).roundToInt() % tabs.size) + tabs.size) % tabs.size
                     onTabClick(tabs[idx].id)
                 }
             }
         }) {
             val cx = size.width/2f; val cy = size.height/2f
             val minDim = minOf(size.width, size.height)
-            val a = minDim*0.34f; val b = a*0.45f      // بیضی مورب = پرسپکتیو
+            val a = minDim*0.34f; val b = a*0.45f
             val ia = minDim*0.20f; val ib = ia*0.45f
 
             stars.forEach { s -> drawCircle(Color.White.copy(alpha=s.a), radius=s.r, center=Offset(s.x*size.width, s.y*size.height)) }
 
-            // حلقه‌های شیشه‌ای (بیضی)
             drawOval(Color.White.copy(alpha=0.18f), style=Stroke(width=strokePx), topLeft=Offset(cx-a, cy-b), size=Size(a*2f, b*2f))
             drawOval(Color.White.copy(alpha=0.10f), style=Stroke(width=strokePx*2f), topLeft=Offset(cx-a, cy-b+2f), size=Size(a*2f, b*2f))
             drawOval(Color.White.copy(alpha=0.12f), style=Stroke(width=strokePx), topLeft=Offset(cx-ia, cy-ib), size=Size(ia*2f, ib*2f))
 
             fun node(x: Float, y: Float, r: Float, color: Color, depth: Float) {
-                val sc = 0.72f + 0.28f*((depth+1f)/2f)          // عمق: نزدیک بزرگ‌تر
-                val al = 0.55f + 0.45f*((depth+1f)/2f)          // نزدیک روشن‌تر
+                val sc = 0.72f + 0.28f*((depth+1f)/2f)
+                val al = 0.55f + 0.45f*((depth+1f)/2f)
                 val rr = r*sc
                 drawCircle(brush=Brush.radialGradient(listOf(color.copy(alpha=0.32f*al), Color.Transparent), center=Offset(x,y), radius=rr*2.2f), radius=rr*2.2f, center=Offset(x,y))
                 drawCircle(color.copy(alpha=0.30f*al), radius=rr, center=Offset(x,y))
                 drawCircle(Color.White.copy(alpha=0.5f*al), radius=rr, style=Stroke(width=strokePx), center=Offset(x,y))
-                drawCircle(Color.White.copy(alpha=0.22f*al), radius=rr*0.4f, center=Offset(x-rr*0.3f, y-rr*0.34f)) // بازتاب
+                drawCircle(Color.White.copy(alpha=0.22f*al), radius=rr*0.4f, center=Offset(x-rr*0.3f, y-rr*0.34f))
             }
 
-            // ترتیب عمق: دور اول، نزدیک بعد (هم‌پوشانی درست)
             val step = 360f/tabs.size
             val order = tabs.indices.sortedBy { i -> sin(((i*step+outerRot).toDouble())*(PI_D/180.0)) }
             order.forEach { i ->
@@ -141,7 +140,6 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 }
             }
 
-            // گوی مرکزی
             drawCircle(brush=Brush.radialGradient(listOf(Color(0xFFFFE066),Color(0xFFFFC107),Color(0xFFF59E0B).copy(alpha=0.7f),Color.Transparent), center=Offset(cx,cy), radius=centerPx*1.6f), radius=centerPx*1.6f, center=Offset(cx,cy))
             drawCircle(brush=Brush.radialGradient(listOf(Color(0xFFFFD700),Color(0xFFB8860B)), center=Offset(cx-centerPx*0.3f,cy-centerPx*0.3f), radius=centerPx*1.4f), radius=centerPx, center=Offset(cx,cy))
             drawCircle(Color.White.copy(alpha=0.5f), radius=centerPx, style=Stroke(width=strokePx), center=Offset(cx,cy))
