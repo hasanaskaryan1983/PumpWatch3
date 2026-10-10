@@ -28,11 +28,6 @@ import com.pumpwatch.app.MarketScreen
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.worker.SignalNavigator
 
-/**
- * 🚀 Sprint 15 (Commit 29 + 32) + Sprint 16 (Commit 64):
- * - ۱۰ تب (تب جدید: تاپ تریدرها 🏆)
- * - Commit 32: navigationBarsPadding → ناوبری پایین دیگر زیر دکمه‌های گوشی نمی‌رود
- */
 enum class SpotTab(val title: String, val emoji: String) {
     MARKET("بازار", "📊"),
     ALERTS("هشدار", "🔔"),
@@ -56,6 +51,22 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
     var selectedTab by remember { mutableStateOf(SpotTab.MARKET) }
 
     LaunchedEffect(Unit) {
+        // 🚀 Commit 163: تب انتخاب‌شده در هاب را باز کن
+        HubNavigation.consume()?.let { id ->
+            selectedTab = when (id) {
+                "market" -> SpotTab.MARKET
+                "alerts_spot" -> SpotTab.ALERTS
+                "whale" -> SpotTab.WHALE
+                "assistant" -> SpotTab.ASSISTANT
+                "backtest" -> SpotTab.BACKTEST
+                "meme" -> SpotTab.MEME
+                "trades" -> SpotTab.TRADES
+                "wallet" -> SpotTab.WALLETS
+                "watchlist" -> SpotTab.WATCHLIST
+                "traders" -> SpotTab.TRADERS
+                else -> selectedTab
+            }
+        }
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
                 selectedTab = SpotTab.ALERTS
