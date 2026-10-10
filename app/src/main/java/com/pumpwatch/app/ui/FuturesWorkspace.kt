@@ -28,12 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.worker.SignalNavigator
 
-/**
- * 🚀 Sprint 15 (فاز ۳ / Commit 20): ساختار نهایی فیوچرز = ۶ تب
- *
- * حذف: 📊 نمودار (CHART) — در Commit 18 نمودار داخل هر کارت سیگنال هست
- * نگهداری: ۶ تب تمیز و هر کدام با ارزش مشخص
- */
 enum class FuturesTab(val title: String, val emoji: String) {
     DASHBOARD("سیگنال", "🎯"),
     SCANNER("اسکنر", "🔍"),
@@ -55,6 +49,17 @@ fun FuturesWorkspace() {
     var selectedTab by remember { mutableStateOf(FuturesTab.DASHBOARD) }
 
     LaunchedEffect(Unit) {
+        // 🚀 Commit 163: تب انتخاب‌شده در هاب را باز کن
+        HubNavigation.consume()?.let { id ->
+            selectedTab = when (id) {
+                "futures_dash" -> FuturesTab.DASHBOARD
+                "futures_scan" -> FuturesTab.SCANNER
+                "alerts_fut" -> FuturesTab.ALERTS
+                "paper" -> FuturesTab.PAPER
+                "journal" -> FuturesTab.JOURNAL
+                else -> selectedTab
+            }
+        }
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
                 selectedTab = FuturesTab.SCANNER
