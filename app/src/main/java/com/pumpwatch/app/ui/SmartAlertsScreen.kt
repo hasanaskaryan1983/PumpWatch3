@@ -1,6 +1,7 @@
 package com.pumpwatch.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -242,7 +243,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             )
         }
 
-        // کارت کارنامه دقت (بدون تغییر در منطق، فقط ظاهر)
+        // کارت کارنامه دقت
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             colors = CardDefaults.cardColors(containerColor = ACard),
@@ -280,7 +281,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             }
         }
 
-        // کارت قوانین سفارشی (بدون تغییر در منطق)
+        // کارت قوانین سفارشی
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             colors = CardDefaults.cardColors(containerColor = ACard),
@@ -416,7 +417,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(alerts, key = { it.coin.id }) { a ->
-                    // 🚀 Commit 163: مهاجرت به AlertCard شیشه‌ای
                     val isPump = a.side == "PUMP"
                     val severity = when {
                         a.score >= 70 -> 3
@@ -441,7 +441,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                             source = "CoinGecko",
                             ageSec = ageSec
                         ),
-                        tabKey = "alerts" // رنگ امضایی #FB4D6D
+                        tabKey = "alerts"
                     )
                 }
             }
