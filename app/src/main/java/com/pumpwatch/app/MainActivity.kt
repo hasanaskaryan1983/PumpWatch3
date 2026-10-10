@@ -60,6 +60,7 @@ import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.ServedFrom
 import com.pumpwatch.app.data.WatchlistMigration
 import com.pumpwatch.app.ui.FuturesWorkspace
+import com.pumpwatch.app.ui.HubNavigation
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.OrbitalHub
@@ -198,7 +199,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("🚀", fontSize = 24.sp)
                         Spacer(Modifier.width(8.dp))
-                        // 🚀 Commit 162: ترتیب برعکس برای RTL — dump (قرمز) سمت راست، pump (سبز) سمت چپ
+                        // ترتیب RTL: dump (قرمز) راست، pump (سبز) چپ
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("dump", fontSize = 20.sp, fontWeight = FontWeight.Black, color = FuturesAccent)
                             Text("pump", fontSize = 20.sp, fontWeight = FontWeight.Black, color = SpotAccent)
@@ -215,14 +216,14 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                         ) { Text("اسپات", color = if (appMode == AppMode.SPOT) Color.Black else TextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-                        
+
                         TextButton(
                             onClick = { appMode = AppMode.FUTURES; prefs.edit().putString("mode", "FUTURES").apply(); onModeChanged() },
                             colors = ButtonDefaults.textButtonColors(containerColor = if (appMode == AppMode.FUTURES) FuturesAccent else Color.Transparent),
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                         ) { Text("فیوچرز", color = if (appMode == AppMode.FUTURES) Color.Black else TextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-                        
+
                         TextButton(
                             onClick = { appMode = AppMode.HUB; prefs.edit().putString("mode", "HUB").apply() },
                             colors = ButtonDefaults.textButtonColors(containerColor = if (appMode == AppMode.HUB) HubAccent else Color.Transparent),
@@ -238,6 +239,8 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                     AppMode.SPOT -> SpotWorkspace(onCoinClick = { selectedCoin = it })
                     AppMode.FUTURES -> FuturesWorkspace()
                     AppMode.HUB -> OrbitalHub(onTabClick = { tabId ->
+                        // 🚀 Commit 163: تب مقصد به workspace اعلام می‌شود
+                        HubNavigation.pendingTab = tabId
                         when {
                             tabId.startsWith("futures_") -> {
                                 appMode = AppMode.FUTURES
@@ -268,7 +271,7 @@ private fun FreshnessBadge(meta: MarketMeta) {
         meta.servedFrom == ServedFrom.DISK_CACHE -> Triple("🟠", FreshYellow, "آفلاین (${meta.ageSec() / 60}د)")
         meta.ageSec() <= 130 -> Triple("🟢", FreshGreen, "زنده")
         meta.ageSec() <= 1800 -> Triple("🟡", FreshYellow, "کش (${meta.ageSec() / 60}د)")
-        else -> Triple("", FreshRed, "مانده (${meta.ageSec() / 60}د)")
+        else -> Triple("🔴", FreshRed, "مانده (${meta.ageSec() / 60}د)")
     }
     Surface(shape = RoundedCornerShape(8.dp), color = color.copy(alpha = 0.15f)) {
         Text("$emoji $text", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
@@ -337,7 +340,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
             TextField(
                 value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(" جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
+                placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
                 shape = RoundedCornerShape(12.dp),
                 colors = androidx.compose.material3.TextFieldDefaults.colors(
                     focusedContainerColor = DarkCard, unfocusedContainerColor = DarkCard,
