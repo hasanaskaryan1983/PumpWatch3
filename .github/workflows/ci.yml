@@ -1,42 +1,44 @@
 name: CI
+
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+    branches: [ main ]
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      # 🚀 Commit 158 (X01): برند audit — فقط گزارش می‌دهد، fail نمی‌کند.
-      # وقتی همهٔ "PumpDump"/"PumpWatch3" رفتند، در کامیت بعدی exit 1 می‌کنیم.
-      - name: Brand audit (X01 — report only)
-        run: |
-          echo "== remaining legacy brand strings in main sources =="
-          grep -rnE '"(PumpDump|PumpWatch3)"' app/src/main --include="*.kt" || echo "(none — clean)"
-
-      - uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          java-version: '17'
+          distribution: 'temurin'
 
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.10"
-          cache: gradle
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-      - name: Assemble + unit tests
-        run: gradle assembleDebug testDebugUnitTest --stacktrace
+      - name: Build APK
+        run: ./gradlew assembleDebug
 
-      - name: Upload reports
-        if: always()
+      - name: Run tests
+        run: ./gradlew testDebugUnitTest
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: reports
-          path: app/build/reports/
+          name: pumpdump-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7
