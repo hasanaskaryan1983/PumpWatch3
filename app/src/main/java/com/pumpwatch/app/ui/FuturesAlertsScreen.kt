@@ -37,6 +37,8 @@ import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.FuturesScannerEngine
 import com.pumpwatch.app.engine.RuleCondition
+import com.pumpwatch.app.ui.components.AlertCard
+import com.pumpwatch.app.ui.components.AlertView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -48,7 +50,6 @@ private val ARed = Color(0xFFFF5252)
 private val AGold = Color(0xFFFFC107)
 private val ABlue = Color(0xFF40C4FF)
 private val AGray = Color(0xFF8B949E)
-private val ACard = Color(0xFF1A0E0E)
 
 private data class FutAlert(
     val base: String,
@@ -69,18 +70,6 @@ private fun typeEmoji(type: String): String = when (type) {
     else -> "🔔"
 }
 
-private fun severityColor(sev: Int): Color = when (sev) {
-    3 -> ARed
-    2 -> AGold
-    else -> ABlue
-}
-
-private fun severityLabel(sev: Int): String = when (sev) {
-    3 -> "🔥 شدید"
-    2 -> "⚠️ متوسط"
-    else -> "👀 خفیف"
-}
-
 @Composable
 fun FuturesAlertsScreen() {
     val scope = rememberCoroutineScope()
@@ -90,6 +79,8 @@ fun FuturesAlertsScreen() {
     var progress by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var scannedStats by remember { mutableStateOf("") }
+    // 🚀 Commit 161: timestamp شروع اسکن برای محاسبه ageSec واقعی
+    var scannedAtMs by remember { mutableStateOf(0L) }
 
     // 🚀 Commit 110 (F10): قوانین فاندینگ فعال کاربر
     var futRules by remember { mutableStateOf<List<AlertRule>>(emptyList()) }
@@ -100,6 +91,7 @@ fun FuturesAlertsScreen() {
             errorMsg = null
             alerts = emptyList()
             scannedStats = ""
+            scannedAtMs = System.currentTimeMillis()
             try {
                 val result = withContext(Dispatchers.IO) {
                     val out = mutableListOf<FutAlert>()
@@ -353,32 +345,29 @@ fun FuturesAlertsScreen() {
             if (scannedStats.isNotEmpty()) {
                 Text(scannedStats, fontSize = 9.sp, color = ABlue, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
             }
+            // 🚀 Commit 161: محاسبه ageSec واقعی از scannedAtMs
+            val ageSec = if (scannedAtMs > 0L) (System.currentTimeMillis() - scannedAtMs) / 1000L else -1L
             LazyColumn(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(alerts) { a -> AlertCard(a) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AlertCard(a: FutAlert) {
-    Surface(color = ACard, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(typeEmoji(a.type), fontSize = 18.sp)
-                Spacer(Modifier.width(8.dp))
-                Text(a.base, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
-                if (a.rank != null) {
-                    Text(" #${a.rank}", fontSize = 10.sp, color = AGray)
+                items(alerts) { a ->
+                    AlertCard(
+                        a = AlertView(
+                            symbol = a.base,
+                            type = a.type,
+                            severity = a.severity,
+                            title = a.title,
+                            detail = a.detail,
+                            rank = a.rank,
+                            emoji = typeEmoji(a.type),
+                            source = "Binance Futures",
+                            ageSec = ageSec
+                        ),
+                        tabKey = "alerts"  // رنگ امضایی #FB4D6D از TabPalette
+                    )
                 }
-                Spacer(Modifier.weight(1f))
-                Text(severityLabel(a.severity), fontSize = 10.sp, color = severityColor(a.severity), fontWeight = FontWeight.Bold)
             }
-            Text(a.title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = severityColor(a.severity))
-            Text(a.detail, fontSize = 10.sp, color = AGray, lineHeight = 15.sp)
         }
     }
 }
