@@ -254,6 +254,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
 
         if (selectedCoin != null) {
             Surface(color = DarkBackground, modifier = Modifier.fillMaxSize()) {
+                // این تابع در فایل CoinDetailScreen.kt تعریف شده است
                 CoinDetailScreen(coin = selectedCoin!!, onBack = { selectedCoin = null })
             }
         }
@@ -370,15 +371,5 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             }
         }
-    }
-}
-
-// 🚀 اگر CoinDetailScreen در فایل دیگری تعریف نشده باشد، این placeholder جلوی خطا را می‌گیرد.
-// اگر قبلاً در جای دیگری تعریف شده بود، این بخش را می‌توانی حذف کنی.
-@Composable
-fun CoinDetailScreen(coin: CoinMarket, onBack: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("جزئیات ${coin.symbol}", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-        TextButton(onClick = onBack) { Text("بازگشت") }
     }
 }
