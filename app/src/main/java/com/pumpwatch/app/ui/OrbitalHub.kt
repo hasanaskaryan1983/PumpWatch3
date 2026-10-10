@@ -40,12 +40,15 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
     val innerRot by inf.animateFloat(360f, 0f,
         infiniteRepeatable(tween(20000, easing = LinearEasing), RepeatMode.Restart), label = "i")
 
+    // 🚀 Commit 165: ۱۰ تب — واچ‌لیست و معاملات اضافه شدند
     val tabs = remember { listOf(
         TabItem("market", "📊", "بازار", Color(0xFF22D3EE)),
+        TabItem("watchlist", "⭐", "واچ‌لیست", Color(0xFF10B981)),
         TabItem("alerts_spot", "🔔", "هشدار", Color(0xFFFB4D6D)),
         TabItem("whale", "🐳", "نهنگ", Color(0xFF06B6D4)),
         TabItem("meme", "🐸", "میم", Color(0xFFF59E0B)),
         TabItem("wallet", "👛", "کیف", Color(0xFFFFC107)),
+        TabItem("trades", "📈", "معاملات", Color(0xFF00E676)),
         TabItem("assistant", "🤖", "دستیار", Color(0xFFA855F7)),
         TabItem("backtest", "🧪", "بک‌تست", Color(0xFF10B981)),
         TabItem("traders", "🏆", "تریدرها", Color(0xFFFF9500))
@@ -59,11 +62,11 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
     val stars = remember { List(90) { Star(Random.nextFloat(), Random.nextFloat(), 1f + Random.nextFloat()*1.6f, 0.12f + Random.nextFloat()*0.45f) } }
 
     val d = LocalDensity.current
-    val iconPx = with(d) { 26.dp.toPx() }
-    val coinPx = with(d) { 15.dp.toPx() }
-    val centerPx = with(d) { 46.dp.toPx() }
-    val labelOff = with(d) { 34.dp.toPx() }
-    val labelPx = with(d) { 11.sp.toPx() }
+    val iconPx = with(d) { 20.dp.toPx() }      // کوچک‌تر برای ۱۰ آیکون
+    val coinPx = with(d) { 12.dp.toPx() }
+    val centerPx = with(d) { 32.dp.toPx() }    // 🚀 گوی مرکزی کوچک‌تر
+    val labelOff = with(d) { 24.dp.toPx() }
+    val labelPx = with(d) { 10.sp.toPx() }
     val strokePx = with(d) { 1.5.dp.toPx() }
 
     Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Color(0xFF16162B), Color(0xFF101020), Color(0xFF08080F))))) {
@@ -72,10 +75,10 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 val cx = size.width/2f; val cy = size.height/2f
                 val dx = tap.x - cx; val dy = tap.y - cy
                 val minDim = minOf(size.width, size.height)
-                val a = minDim*0.34f; val b = a*0.45f
+                val a = minDim*0.36f; val b = a*0.50f      // 🚀 حلقه بزرگ‌تر + کمتر مورب
                 val nx = dx/a; val ny = dy/b
                 val rr = sqrt(nx*nx + ny*ny)
-                if (abs(rr - 1f) < 0.30f) {
+                if (abs(rr - 1f) < 0.32f) {
                     val tDeg = atan2((dy/b).toDouble(), (dx/a).toDouble()) * (180.0/PI_D)
                     val adj = (tDeg - outerRot.toDouble() + 360.0) % 360.0
                     val step = 360.0/tabs.size
@@ -86,8 +89,8 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
         }) {
             val cx = size.width/2f; val cy = size.height/2f
             val minDim = minOf(size.width, size.height)
-            val a = minDim*0.34f; val b = a*0.45f
-            val ia = minDim*0.20f; val ib = ia*0.45f
+            val a = minDim*0.36f; val b = a*0.50f          // 🚀 بیرونی
+            val ia = minDim*0.21f; val ib = ia*0.50f       // درونی
 
             stars.forEach { s -> drawCircle(Color.White.copy(alpha=s.a), radius=s.r, center=Offset(s.x*size.width, s.y*size.height)) }
 
@@ -105,6 +108,7 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 drawCircle(Color.White.copy(alpha=0.22f*al), radius=rr*0.4f, center=Offset(x-rr*0.3f, y-rr*0.34f))
             }
 
+            // تب‌ها (۱۰ تا) — دور اول، نزدیک بعد
             val step = 360f/tabs.size
             val order = tabs.indices.sortedBy { i -> sin(((i*step+outerRot).toDouble())*(PI_D/180.0)) }
             order.forEach { i ->
@@ -126,6 +130,7 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 }
             }
 
+            // ارزها (حلقه درونی)
             val cStep = 360f/coins.size
             val cOrder = coins.indices.sortedBy { i -> sin(((i*cStep+innerRot).toDouble())*(PI_D/180.0)) }
             cOrder.forEach { i ->
@@ -135,11 +140,12 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 val y = cy + (ib.toDouble()*sin(rad)).toFloat()
                 node(x, y, coinPx, c.color, sin(rad).toFloat())
                 drawContext.canvas.nativeCanvas.apply {
-                    val p = android.graphics.Paint().apply { textSize=coinPx*0.6f; color=android.graphics.Color.WHITE; textAlign=android.graphics.Paint.Align.CENTER; isAntiAlias=true; typeface=android.graphics.Typeface.DEFAULT_BOLD }
+                    val p = android.graphics.Paint().apply { textSize=coinPx*0.62f; color=android.graphics.Color.WHITE; textAlign=android.graphics.Paint.Align.CENTER; isAntiAlias=true; typeface=android.graphics.Typeface.DEFAULT_BOLD }
                     drawText(c.symbol, x, y+coinPx*0.2f, p)
                 }
             }
 
+            // 🚀 گوی مرکزی کوچک‌تر (۳۲dp)
             drawCircle(brush=Brush.radialGradient(listOf(Color(0xFFFFE066),Color(0xFFFFC107),Color(0xFFF59E0B).copy(alpha=0.7f),Color.Transparent), center=Offset(cx,cy), radius=centerPx*1.6f), radius=centerPx*1.6f, center=Offset(cx,cy))
             drawCircle(brush=Brush.radialGradient(listOf(Color(0xFFFFD700),Color(0xFFB8860B)), center=Offset(cx-centerPx*0.3f,cy-centerPx*0.3f), radius=centerPx*1.4f), radius=centerPx, center=Offset(cx,cy))
             drawCircle(Color.White.copy(alpha=0.5f), radius=centerPx, style=Stroke(width=strokePx), center=Offset(cx,cy))
