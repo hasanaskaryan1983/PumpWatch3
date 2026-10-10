@@ -1,10 +1,6 @@
 package com.pumpwatch.app.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,7 +22,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -51,11 +45,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.platformContractOf
 import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
+import com.pumpwatch.app.ui.components.AlertCard
+import com.pumpwatch.app.ui.components.AlertView
+import com.pumpwatch.app.ui.design.TabPalette
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
@@ -64,7 +61,6 @@ import kotlin.math.max
 private val AGreen = Color(0xFF00E676)
 private val ARed = Color(0xFFFF5252)
 private val AGold = Color(0xFFFFC107)
-private val ABlue = Color(0xFF40C4FF)
 private val AGray = Color(0xFF8B949E)
 private val ACard = Color(0xFF1A2230)
 
@@ -113,58 +109,10 @@ private fun eval(c: CoinMarket): AlertEval? {
     return AlertEval(c, side, score, early, if (pump >= dump) pr else dr)
 }
 
-private fun levelOf(score: Int): String = when {
-    score >= 70 -> "🔥 شدید"
-    score >= 50 -> "⚠️ متوسط"
-    else -> "👀 زودهنگام"
-}
-
 private fun fmtThreshold(v: Double): String = when {
     v >= 1000 -> String.format(Locale.US, "%.2f", v)
     v >= 1 -> String.format(Locale.US, "%.4f", v)
     else -> String.format(Locale.US, "%.6f", v)
-}
-
-@Composable
-private fun ContractRow(ctx: Context, contract: String?, coinId: String) {
-    val displayAddr = contract ?: coinId
-    val label = if (contract != null) "📋 کانترکت" else "📋 ID"
-    val copied = remember { mutableStateOf(false) }
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
-    ) {
-        Text(label, fontSize = 9.sp, color = AGray)
-        Spacer(Modifier.width(4.dp))
-        Text(
-            if (displayAddr.length > 22) "${displayAddr.take(10)}...${displayAddr.takeLast(6)}" else displayAddr,
-            fontSize = 9.sp,
-            color = ABlue,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f)
-        )
-        Button(
-            onClick = {
-                try {
-                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                        .setPrimaryClip(ClipData.newPlainText("contract", displayAddr))
-                    copied.value = true
-                } catch (_: Exception) { }
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (copied.value) AGreen else AGold
-            ),
-            shape = RoundedCornerShape(6.dp),
-            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 1.dp)
-        ) {
-            Text(
-                if (copied.value) "✅" else "کپی",
-                fontSize = 9.sp,
-                color = Color.Black
-            )
-        }
-    }
 }
 
 @Composable
@@ -176,13 +124,14 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf("ALL") }
-    var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
+    
+    // 🚀 Commit 163: زمان بارگذاری برای محاسبه ageSec واقعی در SourceAgeLine
+    var loadTimeMs by remember { mutableStateOf(0L) }
 
     var accuracyExpanded by remember { mutableStateOf(false) }
     var accuracyResetKey by remember { mutableStateOf(0) }
     var resetMsg by remember { mutableStateOf<String?>(null) }
 
-    // 🚀 Commit 110 (A1): state های قوانین سفارشی
     var rules by remember { mutableStateOf<List<AlertRule>>(emptyList()) }
     var rulesExpanded by remember { mutableStateOf(false) }
     var ruleSymbol by remember { mutableStateOf("") }
@@ -191,13 +140,13 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var ruleMsg by remember { mutableStateOf("") }
     var conditionDialogOpen by remember { mutableStateOf(false) }
 
-    fun load() {
+    fun load(force: Boolean = false) {
         scope.launch {
             loading = true
             errorMsg = null
+            loadTimeMs = System.currentTimeMillis()
             try {
-                coins = ApiClient.getTop1000Coins(forceRefresh = false)
-                platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
+                coins = ApiClient.getTop1000Coins(forceRefresh = force)
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -210,10 +159,10 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         scope.launch {
             loading = true
             errorMsg = null
+            loadTimeMs = System.currentTimeMillis()
             try {
                 ApiClient.clearMemoryCache()
                 coins = ApiClient.getTop1000Coins(forceRefresh = true)
-                platformMap = try { ApiClient.getPlatformMap(forceRefresh = true) } catch (_: Exception) { emptyMap() }
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -228,7 +177,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 SignalLogger.clear(ctx)
                 accuracyResetKey++
                 resetMsg = "✅ آمار سیگنال‌ها پاک شد"
-                kotlinx.coroutines.delay(2500)
+                delay(2500)
                 resetMsg = null
             } catch (e: Exception) {
                 resetMsg = "⚠️ خطا در پاک‌سازی: ${e.message}"
@@ -236,7 +185,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    // 🚀 Commit 110 (A1): تابع بارگذاری قوانین
     fun reloadRules() {
         rules = AlertRulesStore.load(ctx)
     }
@@ -258,22 +206,23 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
         .sortedByDescending { it.score }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    val ageSec = if (loadTimeMs > 0L) (System.currentTimeMillis() - loadTimeMs) / 1000L else 0L
 
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 🚀 Commit 116: حذف ادعای غیرقابل‌اثبات «هوشمند» — این یک اسکنر قاعده‌محور است
             Text(
                 "🔔 هشدارهای بازار",
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFE6EDF3)
             )
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { forceRefresh() }) { Text("بروزرسانی") }
+            TextButton(onClick = { forceRefresh() }, enabled = !loading) {
+                Text(if (loading) "..." else "بروزرسانی", color = TabPalette.Alerts)
+            }
         }
 
         Text(
@@ -293,32 +242,23 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             )
         }
 
+        // کارت کارنامه دقت (بدون تغییر در منطق، فقط ظاهر)
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             colors = CardDefaults.cardColors(containerColor = ACard),
             shape = RoundedCornerShape(12.dp)
         ) {
             Column {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { accuracyExpanded = !accuracyExpanded }
+                    modifier = Modifier.fillMaxWidth().clickable { accuracyExpanded = !accuracyExpanded }
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        if (accuracyExpanded) "▼" else "▶",
-                        fontSize = 12.sp,
-                        color = AGreen
-                    )
+                    Text(if (accuracyExpanded) "▼" else "▶", fontSize = 12.sp, color = AGreen)
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "📊 کارنامهٔ دقت سیگنال‌ها",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White,
                         modifier = Modifier.weight(1f)
                     )
                     Button(
@@ -330,12 +270,9 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                         Text("🔄 ریست", fontSize = 10.sp, color = Color.White)
                     }
                 }
-
                 AnimatedVisibility(visible = accuracyExpanded) {
                     SignalAccuracyCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                         accent = AGreen,
                         key = accuracyResetKey
                     )
@@ -343,19 +280,15 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             }
         }
 
-        // 🚀 Commit 110 (A1): کارت قوانین سفارشی
+        // کارت قوانین سفارشی (بدون تغییر در منطق)
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             colors = CardDefaults.cardColors(containerColor = ACard),
             shape = RoundedCornerShape(12.dp)
         ) {
             Column {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { rulesExpanded = !rulesExpanded }
+                    modifier = Modifier.fillMaxWidth().clickable { rulesExpanded = !rulesExpanded }
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -363,33 +296,23 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "🔔 قانون‌های من (${rules.size})",
-                        fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                        color = Color.White, modifier = Modifier.weight(1f)
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                        modifier = Modifier.weight(1f)
                     )
-                    Text(
-                        "ارزیابی هر ۳۰ دقیقه توسط Worker",
-                        fontSize = 9.sp, color = AGray
-                    )
+                    Text("ارزیابی هر ۳۰ دقیقه توسط Worker", fontSize = 9.sp, color = AGray)
                 }
 
                 AnimatedVisibility(visible = rulesExpanded) {
                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                         if (rules.isEmpty()) {
-                            Text(
-                                "هنوز قانونی نساختی. مثال: BTC قیمت بالای ۷۰۰۰۰، ETH فاندینگ زیر -۰.۰۰۰۳",
-                                fontSize = 10.sp, color = AGray
-                            )
+                            Text("هنوز قانونی نساختی. مثال: BTC قیمت بالای ۷۰۰۰۰", fontSize = 10.sp, color = AGray)
                         } else {
                             rules.take(5).forEach { r ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(vertical = 2.dp)
-                                ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
                                             "${r.symbol} • ${r.condition.label} ${fmtThreshold(r.threshold)}",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
                                             color = if (r.enabled) AGreen else AGray
                                         )
                                         Text(
@@ -403,42 +326,24 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                     }
                                     Switch(
                                         checked = r.enabled,
-                                        onCheckedChange = {
-                                            AlertRulesStore.toggle(ctx, r.id)
-                                            reloadRules()
-                                        }
+                                        onCheckedChange = { AlertRulesStore.toggle(ctx, r.id); reloadRules() }
                                     )
-                                    TextButton(onClick = {
-                                        AlertRulesStore.delete(ctx, r.id)
-                                        reloadRules()
-                                    }) { Text("🗑", fontSize = 11.sp) }
+                                    TextButton(onClick = { AlertRulesStore.delete(ctx, r.id); reloadRules() }) {
+                                        Text("🗑", fontSize = 11.sp)
+                                    }
                                 }
                             }
                             if (rules.size > 5) {
-                                Text(
-                                    "... و ${rules.size - 5} قانون دیگر",
-                                    fontSize = 9.sp, color = AGray,
-                                    modifier = Modifier.padding(top = 4.dp)
-                                )
+                                Text("... و ${rules.size - 5} قانون دیگر", fontSize = 9.sp, color = AGray, modifier = Modifier.padding(top = 4.dp))
                             }
-                            HorizontalDivider(
-                                color = AGray.copy(alpha = 0.3f),
-                                modifier = Modifier.padding(vertical = 8.dp)
-                            )
+                            HorizontalDivider(color = AGray.copy(alpha = 0.3f), modifier = Modifier.padding(vertical = 8.dp))
                         }
 
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             TextField(
-                                value = ruleSymbol,
-                                onValueChange = { ruleSymbol = it },
+                                value = ruleSymbol, onValueChange = { ruleSymbol = it },
                                 placeholder = { Text("نماد یا *", fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                singleLine = true
+                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true
                             )
                             Button(
                                 onClick = { conditionDialogOpen = true },
@@ -446,18 +351,11 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 shape = RoundedCornerShape(8.dp)
                             ) { Text(ruleCondition.label, fontSize = 9.sp) }
                         }
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             TextField(
-                                value = ruleThreshold,
-                                onValueChange = { ruleThreshold = it },
+                                value = ruleThreshold, onValueChange = { ruleThreshold = it },
                                 placeholder = { Text("آستانه (عدد)", fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                singleLine = true
+                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true
                             )
                             Button(
                                 onClick = {
@@ -468,7 +366,8 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                         val sym = ruleSymbol.trim().uppercase(Locale.US).ifEmpty { "*" }
                                         AlertRulesStore.add(ctx, sym, ruleCondition, thr)
                                         reloadRules()
-                                        ruleSymbol = ""; ruleThreshold = ""
+                                        ruleSymbol = ""
+                                        ruleThreshold = ""
                                         ruleMsg = "✅ قانون اضافه شد"
                                     }
                                 },
@@ -488,80 +387,68 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             }
         }
 
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = filter == "ALL",
-                onClick = { filter = "ALL" },
-                label = { Text("همه ${alerts.size}", fontSize = 11.sp) }
-            )
-            FilterChip(
-                selected = filter == "HOT",
-                onClick = { filter = "HOT" },
-                label = { Text("🔥 شدید", fontSize = 11.sp) }
-            )
-            FilterChip(
-                selected = filter == "MID",
-                onClick = { filter = "MID" },
-                label = { Text("⚠️ متوسط", fontSize = 11.sp) }
-            )
-            FilterChip(
-                selected = filter == "EARLY",
-                onClick = { filter = "EARLY" },
-                label = { Text("👀 زودهنگام", fontSize = 11.sp) }
-            )
+        // فیلترها
+        Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = filter == "ALL", onClick = { filter = "ALL" }, label = { Text("همه ${alerts.size}", fontSize = 11.sp) })
+            FilterChip(selected = filter == "HOT", onClick = { filter = "HOT" }, label = { Text("🔥 شدید", fontSize = 11.sp) })
+            FilterChip(selected = filter == "MID", onClick = { filter = "MID" }, label = { Text("⚠️ متوسط", fontSize = 11.sp) })
+            FilterChip(selected = filter == "EARLY", onClick = { filter = "EARLY" }, label = { Text("👀 زودهنگام", fontSize = 11.sp) })
         }
 
+        // لیست
         when {
-            loading -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) { CircularProgressIndicator(color = AGreen) }
-
-            errorMsg != null -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    errorMsg ?: "",
-                    color = ARed,
-                    modifier = Modifier.padding(16.dp),
-                    textAlign = TextAlign.Center
-                )
+            loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = TabPalette.Alerts)
             }
-
-            alerts.isEmpty() -> Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
+            errorMsg != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(errorMsg ?: "", color = ARed, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center)
+            }
+            alerts.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     "😴 بازار آرومه — هنوز سیگنالی نیست",
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(16.dp),
-                    textAlign = TextAlign.Center
+                    modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center
                 )
             }
-
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(alerts, key = { it.coin.id }) { a ->
-                    AlertSmartCard(
-                        a = a,
-                        platformMap = platformMap,
-                        ctx = ctx,
-                        onClick = { onCoinClick(a.coin) }
+                    // 🚀 Commit 163: مهاجرت به AlertCard شیشه‌ای
+                    val isPump = a.side == "PUMP"
+                    val severity = when {
+                        a.score >= 70 -> 3
+                        a.score >= 50 -> 2
+                        else -> 1
+                    }
+                    val title = if (isPump) {
+                        if (a.early) "شتاب مثبت زودهنگام" else "پامپ قدرتمند"
+                    } else {
+                        if (a.early) "ریزش زودهنگام" else "دامپ شدید"
+                    }
+                    
+                    AlertCard(
+                        a = AlertView(
+                            symbol = a.coin.symbol.uppercase(Locale.US),
+                            type = if (isPump) "PUMP" else "DUMP",
+                            severity = severity,
+                            title = title,
+                            detail = a.reasons.joinToString(" • "),
+                            rank = a.coin.market_cap_rank,
+                            emoji = if (isPump) "🚀" else "🩸",
+                            source = "CoinGecko",
+                            ageSec = ageSec
+                        ),
+                        tabKey = "alerts" // رنگ امضایی #FB4D6D
                     )
                 }
             }
         }
     }
 
-    // 🚀 Commit 110 (A1): AlertDialog برای انتخاب شرط
+    // دیالوگ انتخاب شرط
     if (conditionDialogOpen) {
         AlertDialog(
             onDismissRequest = { conditionDialogOpen = false },
@@ -581,120 +468,5 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 Button(onClick = { conditionDialogOpen = false }) { Text("بستن") }
             }
         )
-    }
-}
-
-@Composable
-private fun AlertSmartCard(
-    a: AlertEval,
-    platformMap: Map<String, Map<String, String>>,
-    ctx: Context,
-    onClick: () -> Unit
-) {
-    val isPump = a.side == "PUMP"
-    val sideColor = if (isPump) AGreen else ARed
-    val c = a.coin
-    val contract = platformContractOf(platformMap, c.id)
-
-    Surface(
-        color = ACard,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (isPump) "🚀" else "🩸", fontSize = 16.sp)
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    c.symbol.uppercase(Locale.US),
-                    fontWeight = FontWeight.Black,
-                    fontSize = 13.sp,
-                    color = Color.White
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(levelOf(a.score), fontSize = 9.sp, color = AGold)
-                if (a.early) {
-                    Spacer(Modifier.width(4.dp))
-                    Text("⏰", fontSize = 9.sp, color = ABlue)
-                }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "${a.score}/100",
-                    color = sideColor,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 13.sp
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    c.name,
-                    fontSize = 10.sp,
-                    color = AGray,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    String.format(Locale.US, "$%,.4f", c.current_price),
-                    fontSize = 11.sp,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            ContractRow(ctx, contract, c.id)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "۱س: ${String.format(Locale.US, "%+.1f%%", c.change1h ?: 0.0)}",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if ((c.change1h ?: 0.0) >= 0) AGreen else ARed
-                )
-                Text(
-                    "۲۴س: ${String.format(Locale.US, "%+.1f%%", c.price_change_percentage_24h ?: 0.0)}",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if ((c.price_change_percentage_24h ?: 0.0) >= 0) AGreen else ARed
-                )
-                Text(
-                    "۷روز: ${String.format(Locale.US, "%+.1f%%", c.change7d ?: 0.0)}",
-                    fontSize = 10.sp,
-                    color = AGray
-                )
-            }
-
-            val high = c.high24h ?: 0.0
-            val low = c.low24h ?: 0.0
-            if (high > low) {
-                val pos = ((c.current_price - low) / (high - low)).toFloat().coerceIn(0f, 1f)
-                LinearProgressIndicator(
-                    progress = { pos },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp),
-                    color = sideColor
-                )
-            }
-
-            if (a.reasons.isNotEmpty()) {
-                Text(
-                    "• ${a.reasons.first()}",
-                    fontSize = 10.sp,
-                    color = AGold
-                )
-            }
-        }
     }
 }
