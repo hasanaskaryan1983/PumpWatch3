@@ -13,14 +13,23 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.*
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 data class TabItem(val id: String, val emoji: String, val label: String, val color: Color)
 data class CoinItem(val symbol: String, val color: Color)
+
+// ثابت PI جاوا برای جلوگیری از تداخل kotlin.math.PI با Compose
+private const val PI_DOUBLE: Double = Math.PI
 
 @Composable
 fun OrbitalHub(onTabClick: (String) -> Unit) {
@@ -72,7 +81,6 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
         )
     }
 
-    // تولید ستاره‌ها با Random استاندارد
     val stars = remember {
         List(100) { 
             Triple(
@@ -83,13 +91,14 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
         }
     }
 
-    // تبدیل dp به px بیرون از Canvas برای جلوگیری از خطای تایپ
     val density = LocalDensity.current
     val iconSizePx = with(density) { 28.dp.toPx() }
     val coinSizePx = with(density) { 20.dp.toPx() }
     val centerSizePx = with(density) { 60.dp.toPx() }
     val labelOffsetPx = with(density) { 40.dp.toPx() }
     val textSizePx = with(density) { 11.sp.toPx() }
+    val coinTextSizePx = with(density) { (coinSizePx * 0.9f).toInt().sp.toPx() }
+    val centerTextSizePx = with(density) { (centerSizePx * 0.9f).toInt().sp.toPx() }
 
     Box(
         modifier = Modifier
@@ -113,16 +122,17 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                         val centerY = size.height / 2f
                         val dx = tapOffset.x - centerX
                         val dy = tapOffset.y - centerY
-                        val distance = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                        val distance = sqrt(dx * dx + dy * dy)
                         val minDim = minOf(size.width, size.height)
                         val outerRadius = minDim * 0.32f
                         
                         if (abs(distance - outerRadius) < iconSizePx * 1.5f) {
-                            var angle = atan2(dy.toDouble(), dx.toDouble()) * (180.0 / PI)
-                            angle = (angle - outerRotation + 360) % 360
-                            val angleStep = 360f / tabs.size
-                            val index = ((angle / angleStep).roundToInt() % tabs.size + tabs.size) % tabs.size
-                            onTabClick(tabs[index].id)
+                            val angleD = atan2(dy.toDouble(), dx.toDouble()) * (180.0 / PI_DOUBLE)
+                            val adjusted = (angleD - outerRotation.toDouble() + 360.0) % 360.0
+                            val angleStep = 360.0 / tabs.size
+                            val idx = (adjusted / angleStep).toInt() % tabs.size
+                            val finalIdx = (idx + tabs.size) % tabs.size
+                            onTabClick(tabs[finalIdx].id)
                         }
                     }
                 }
@@ -131,19 +141,19 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
             val centerY = size.height / 2f
             val minDim = minOf(size.width, size.height)
 
-            // ۱. ستاره‌ها
+            // ستاره‌ها
             stars.forEach { star ->
                 val x = star.first * size.width
                 val y = star.second * size.height
                 val r = star.third
                 drawCircle(
                     color = Color.White.copy(alpha = 0.3f + (Random.nextFloat() * 0.5f)),
-                    radius = r * 0.5f,
+                    radius = r * 2f,
                     center = Offset(x, y)
                 )
             }
 
-            // ۲. حلقه بیرونی
+            // حلقه بیرونی
             val outerRadius = minDim * 0.32f
             drawCircle(
                 color = Color.White.copy(alpha = 0.15f),
@@ -151,7 +161,7 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 style = Stroke(width = 2f)
             )
 
-            // ۳. حلقه درونی
+            // حلقه درونی
             val innerRadius = minDim * 0.18f
             drawCircle(
                 color = Color.White.copy(alpha = 0.15f),
@@ -159,15 +169,16 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 style = Stroke(width = 2f)
             )
 
-            // ۴. آیکون‌های تب (حلقه بیرونی)
+            // آیکون‌های تب
             val angleStep = 360f / tabs.size
             tabs.forEachIndexed { i, tab ->
-                // استفاده از Double برای cos/sin جهت جلوگیری از خطای ComplexDouble
-                val angleRad = (i * angleStep + outerRotation).toDouble() * (PI / 180.0)
-                val x = centerX + (outerRadius * cos(angleRad)).toFloat()
-                val y = centerY + (outerRadius * sin(angleRad)).toFloat()
+                val angleDeg = i * angleStep + outerRotation
+                val angleRad: Double = (angleDeg.toDouble()) * (PI_DOUBLE / 180.0)
+                val offsetX = (outerRadius.toDouble() * cos(angleRad)).toFloat()
+                val offsetY = (outerRadius.toDouble() * sin(angleRad)).toFloat()
+                val x = centerX + offsetX
+                val y = centerY + offsetY
 
-                // Glow
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(tab.color.copy(alpha = 0.4f), Color.Transparent),
@@ -178,14 +189,12 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                     center = Offset(x, y)
                 )
 
-                // دایره آیکون
                 drawCircle(
                     color = tab.color.copy(alpha = 0.9f),
                     radius = iconSizePx,
                     center = Offset(x, y)
                 )
 
-                // حاشیه سفید
                 drawCircle(
                     color = Color.White.copy(alpha = 0.3f),
                     radius = iconSizePx,
@@ -193,7 +202,6 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                     center = Offset(x, y)
                 )
 
-                // Emoji
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = android.graphics.Paint().apply {
                         textSize = iconSizePx * 1.2f
@@ -203,9 +211,11 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                     drawText(tab.emoji, x, y + iconSizePx * 0.35f, paint)
                 }
 
-                // برچسب متنی
-                val labelX = centerX + ((outerRadius + labelOffsetPx) * cos(angleRad)).toFloat()
-                val labelY = centerY + ((outerRadius + labelOffsetPx) * sin(angleRad)).toFloat()
+                val labelDist = outerRadius + labelOffsetPx
+                val labelOffX = (labelDist.toDouble() * cos(angleRad)).toFloat()
+                val labelOffY = (labelDist.toDouble() * sin(angleRad)).toFloat()
+                val labelX = centerX + labelOffX
+                val labelY = centerY + labelOffY
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = android.graphics.Paint().apply {
                         textSize = textSizePx
@@ -218,12 +228,15 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 }
             }
 
-            // ۵. ارزها (حلقه درونی)
+            // ارزها
             val coinAngleStep = 360f / coins.size
             coins.forEachIndexed { i, coin ->
-                val angleRad = (i * coinAngleStep + innerRotation).toDouble() * (PI / 180.0)
-                val x = centerX + (innerRadius * cos(angleRad)).toFloat()
-                val y = centerY + (innerRadius * sin(angleRad)).toFloat()
+                val angleDeg = i * coinAngleStep + innerRotation
+                val angleRad: Double = (angleDeg.toDouble()) * (PI_DOUBLE / 180.0)
+                val offsetX = (innerRadius.toDouble() * cos(angleRad)).toFloat()
+                val offsetY = (innerRadius.toDouble() * sin(angleRad)).toFloat()
+                val x = centerX + offsetX
+                val y = centerY + offsetY
 
                 drawCircle(
                     brush = Brush.radialGradient(
@@ -243,7 +256,7 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
 
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = android.graphics.Paint().apply {
-                        textSize = coinSizePx * 0.9f
+                        textSize = coinTextSizePx
                         color = android.graphics.Color.WHITE
                         textAlign = android.graphics.Paint.Align.CENTER
                         isAntiAlias = true
@@ -253,7 +266,7 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 }
             }
 
-            // ۶. گوی مرکزی طلایی با ₿
+            // گوی مرکزی
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
@@ -270,7 +283,6 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 center = Offset(centerX, centerY)
             )
 
-            // حاشیه درخشان گوی مرکزی
             drawCircle(
                 color = Color.White.copy(alpha = 0.4f),
                 radius = centerSizePx,
@@ -278,10 +290,9 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 center = Offset(centerX, centerY)
             )
 
-            // نماد ₿ در مرکز
             drawContext.canvas.nativeCanvas.apply {
                 val paint = android.graphics.Paint().apply {
-                    textSize = centerSizePx * 0.9f
+                    textSize = centerTextSizePx
                     color = android.graphics.Color.WHITE
                     textAlign = android.graphics.Paint.Align.CENTER
                     isAntiAlias = true
@@ -291,7 +302,6 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
             }
         }
 
-        // متن راهنما
         Box(
             modifier = Modifier
                 .fillMaxSize()
