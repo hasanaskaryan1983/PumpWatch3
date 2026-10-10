@@ -1,11 +1,6 @@
 package com.pumpwatch.app
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -27,7 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -60,20 +54,19 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.ContractRef
 import com.pumpwatch.app.data.HistoricalUniverseRepository
 import com.pumpwatch.app.data.MarketMeta
 import com.pumpwatch.app.data.NetErr
 import com.pumpwatch.app.data.NetError
 import com.pumpwatch.app.data.ServedFrom
 import com.pumpwatch.app.data.WatchlistMigration
-import com.pumpwatch.app.data.cmcUrl
-import com.pumpwatch.app.data.platformContractRef
-// 🚀 Commit 152: حذف import منسوخ WatchlistScheduler
 import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.SpotWorkspace
+import com.pumpwatch.app.ui.components.CoinRow
+import com.pumpwatch.app.ui.components.CoinRowView
+import com.pumpwatch.app.ui.design.TabPalette
 import com.pumpwatch.app.worker.MonitorScheduler
 import com.pumpwatch.app.worker.MonitorWorker
 import com.pumpwatch.app.worker.SignalScannerWorker
@@ -90,8 +83,6 @@ private val DarkSurface = Color(0xFF121820)
 private val DarkCard = Color(0xFF1A2230)
 private val TextPrimary = Color(0xFFE6EDF3)
 private val TextSecondary = Color(0xFF8B949E)
-private val ContractBlue = Color(0xFF40C4FF)
-private val ContractGold = Color(0xFFFFC107)
 private val FreshGreen = Color(0xFF00E676)
 private val FreshYellow = Color(0xFFFFC107)
 private val FreshRed = Color(0xFFFF5252)
@@ -101,10 +92,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val SIGNAL_SCANNER_WORK_NAME = "SignalScanner"
-        private const val WHALE_MEME_WORK_NAME = "WhaleMeme" // 🚀 Commit 91
-        // 🚀 Commit 152: نام کار دوره‌ای قدیمی که باید روی دستگاه‌های آپدیت‌شده لغو شود
-        // این نام در WatchlistScheduler (منسوخ Commit 114) استفاده می‌شد.
-        // پس از حذف scheduler، این ثابت مستندسازی می‌کند که کدام کار باید لغو شود.
+        private const val WHALE_MEME_WORK_NAME = "WhaleMeme"
         private const val LEGACY_WATCHLIST_WORK_NAME = "WatchlistAlerts"
     }
 
@@ -131,14 +119,9 @@ class MainActivity : ComponentActivity() {
 
         MonitorScheduler.start(this)
         scheduleSignalScanner()
-        scheduleWhaleMemeWorker() // 🚀 Commit 91 (A5)
-        // 🚀 Commit 152: لغو کار دوره‌ای قدیمی واچ‌لیست (بدون نیاز به کلاس WatchlistScheduler)
-        // این خط جایگزین WatchlistScheduler.stop(this) از Commit 114 است.
-        // روی دستگاه‌هایی که از نسخهٔ قدیمی آپدیت می‌کنند، کار دوره‌ای باقی‌مانده لغو می‌شود.
+        scheduleWhaleMemeWorker()
         WorkManager.getInstance(this).cancelUniqueWork(LEGACY_WATCHLIST_WORK_NAME)
-        TraderMonitorScheduler.start(this) // 🏆 Sprint 16: هشدار تاپ تریدرها
-
-        // 🚀 Commit 113: مهاجرت یک‌بارهٔ دادهٔ واچ‌لیست قدیمی به store رمزنگاری‌شده
+        TraderMonitorScheduler.start(this)
         WatchlistMigration.migrateIfNeeded(this)
 
         setContent {
@@ -146,7 +129,7 @@ class MainActivity : ComponentActivity() {
                 MainApp(onModeChanged = {
                     MonitorScheduler.start(this)
                     scheduleSignalScanner()
-                    scheduleWhaleMemeWorker() // 🚀 Commit 91
+                    scheduleWhaleMemeWorker()
                     TraderMonitorScheduler.start(this)
                 })
             }
@@ -177,7 +160,6 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    // 🚀 Commit 91 (A5): Schedule worker نهنگ/میم هر ۱۵ دقیقه
     private fun scheduleWhaleMemeWorker() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -231,9 +213,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
         return
     }
 
-    // 🚀 Commit 158 (X01): 'accent' حذف شد — لوگوی برند دوتُن ثابت است، مستقل از مود
-    // (قبلاً: val accent = if (isFutures) FuturesAccent else SpotAccent)
-
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             Surface(
@@ -246,7 +225,7 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 🚀 Commit 158 (X01): برند یکپارچه pumpdump — دوتُن ثابت، مستقل از مود
+                    // 🚀 Commit 158 (X01): برند یکپارچه pumpdump — دوتُن ثابت
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("🚀", fontSize = 24.sp)
                         Spacer(Modifier.width(8.dp))
@@ -343,57 +322,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
-// 🚀 Commit 103 (M4): ContractRow با نمایش نام شبکه + آدرس
-@Composable
-private fun ContractRow(ctx: Context, contractRef: ContractRef?) {
-    if (contractRef == null) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
-        ) {
-            Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TextSecondary)
-        }
-        return
-    }
-    val copied = remember { mutableStateOf(false) }
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
-    ) {
-        Text(
-            "${contractRef.chain}: ",
-            fontSize = 9.sp,
-            color = ContractGold,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            if (contractRef.address.length > 24) {
-                "${contractRef.address.take(12)}...${contractRef.address.takeLast(8)}"
-            } else {
-                contractRef.address
-            },
-            fontSize = 9.sp,
-            color = ContractBlue,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f)
-        )
-        Button(
-            onClick = {
-                try {
-                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                        .setPrimaryClip(ClipData.newPlainText("contract", contractRef.address))
-                    copied.value = true
-                } catch (_: Exception) { }
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (copied.value) SpotAccent else ContractGold
-            ),
-            shape = RoundedCornerShape(6.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = Color.Black) }
-    }
-}
-
 @Composable
 private fun FreshnessBadge(meta: MarketMeta) {
     val (emoji, color, text) = when {
@@ -417,6 +345,7 @@ private fun FreshnessBadge(meta: MarketMeta) {
     }
 }
 
+// 🚀 Commit 162: مهاجرت تب بازار به CoinRow شیشه‌ای
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
@@ -450,7 +379,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 meta = ApiClient.marketMeta()
                 platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
 
-                // 🚀 Commit 112 (B1): جمع‌آوری غیرفعال تاریخچهٔ universe
                 if (coins.size > 100) {
                     HistoricalUniverseRepository.recordSnapshot(context, coins)
                 }
@@ -474,23 +402,36 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("قیمت لحظه‌ای", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "قیمت لحظه‌ای",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFE6EDF3)
+            )
             Spacer(Modifier.width(8.dp))
             FreshnessBadge(meta)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { load() }) { Text("بروزرسانی") }
+            TextButton(onClick = { load() }, enabled = !loading) {
+                Text(if (loading) "..." else "بروزرسانی", color = TabPalette.Market)
+            }
         }
 
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
             TextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("🔍 جستجوی ارز (نماد یا اسم)...", fontSize = 12.sp, color = TextSecondary) },
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                colors = androidx.compose.material3.TextFieldDefaults.colors(
+                    focusedContainerColor = DarkCard,
+                    unfocusedContainerColor = DarkCard,
+                    focusedTextColor = Color(0xFFE6EDF3),
+                    unfocusedTextColor = Color(0xFFE6EDF3)
+                )
             )
         }
 
@@ -500,15 +441,10 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 
         when {
             loading -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = SpotAccent)
+                CircularProgressIndicator(color = TabPalette.Market)
             }
             errorMsg != null -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    errorMsg ?: "",
-                    color = FuturesAccent,
-                    modifier = Modifier.padding(16.dp),
-                    textAlign = TextAlign.Center
-                )
+                Text(errorMsg ?: "", color = FuturesAccent, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center)
             }
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -516,87 +452,19 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(shown) { coin ->
-                    val contractRef = platformContractRef(platformMap, coin.id)
-                    CoinCard(coin = coin, contractRef = contractRef, onClick = { onCoinClick(coin) })
+                    CoinRow(
+                        c = CoinRowView(
+                            symbol = coin.symbol.uppercase(Locale.US),
+                            price = coin.current_price,
+                            change24h = coin.price_change_percentage_24h,
+                            spark = emptyList(),
+                            source = "CoinGecko",
+                            ageSec = meta.ageSec()
+                        ),
+                        tabKey = "market"
+                    )
                 }
             }
         }
     }
-}
-
-// 🚀 Commit 103 (M3 + M4): نمایش صادقانهٔ null ها + هویت شبکه
-@Composable
-fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
-    val context = LocalContext.current
-
-    val change = coin.price_change_percentage_24h
-    val changeText = if (change == null) "—" else String.format(Locale.US, "%+.2f%%", change)
-    val changeColor = when {
-        change == null -> TextSecondary
-        change >= 0 -> SpotAccent
-        else -> FuturesAccent
-    }
-
-    val rankText = coin.market_cap_rank?.let { "#$it" } ?: "#—"
-
-    Surface(
-        color = DarkCard,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "$rankText  ${coin.symbol.uppercase(Locale.US)}",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color.White
-                    )
-                    Text(coin.name, color = TextSecondary, fontSize = 12.sp)
-                    Text("کپ: ${fmtMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 11.sp)
-                }
-
-                Text(
-                    "📊",
-                    fontSize = 18.sp,
-                    modifier = Modifier.clickable {
-                        try {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id))))
-                        } catch (_: Exception) { }
-                    }.padding(8.dp)
-                )
-
-                Spacer(Modifier.width(4.dp))
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(fmtPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Text(
-                        changeText,
-                        color = changeColor,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-            ContractRow(context, contractRef)
-        }
-    }
-}
-
-private fun fmtPrice(p: Double): String = when {
-    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
-    p >= 1 -> String.format(Locale.US, "$%.4f", p)
-    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
-    else -> String.format(Locale.US, "$%.6f", p)
-}
-
-private fun fmtMarketCap(cap: Double?): String = when {
-    cap == null -> "—"
-    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
-    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
-    else -> String.format(Locale.US, "$%.0f", cap)
 }
