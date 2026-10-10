@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,8 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
@@ -43,6 +40,8 @@ import com.pumpwatch.app.data.FollowedWhale
 import com.pumpwatch.app.data.FollowedWhalesStore
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
+import com.pumpwatch.app.ui.components.GlassCard // 🚀 اضافه شد
+import com.pumpwatch.app.ui.design.TabPalette // 🚀 اضافه شد
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,7 +54,6 @@ private val VRed = Color(0xFFFF5252)
 private val VBlue = Color(0xFF40C4FF)
 private val VGold = Color(0xFFFFC107)
 private val VGray = Color(0xFF8B949E)
-private val VCard = Color(0xFF1A2230)
 
 @Composable
 fun WhaleRadarScreen() {
@@ -67,19 +65,16 @@ fun WhaleRadarScreen() {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("🐳 رادار نهنگ‌ها", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = VGreen)
+            Text("🐳 رادار نهنگ‌ها", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("🏆 تحلیل نماد", fontSize = 11.sp) })
                 FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ دنبال‌شده‌ها", fontSize = 11.sp) })
             }
             if (info.isNotEmpty()) {
-                Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                    // 🚀 اصلاح: استفاده از Arrangement.SpaceBetween به‌جای weight برای جلوگیری از باگ کامپایلر
-                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(info, fontSize = 10.sp, color = VGreen)
-                        Button(onClick = { info = "" }, colors = ButtonDefaults.buttonColors(containerColor = VCard), shape = RoundedCornerShape(6.dp)) { 
-                            Text("✖", fontSize = 10.sp) 
-                        }
+                GlassCard(accent = TabPalette.Whale, modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(info, fontSize = 10.sp, color = VGreen, modifier = Modifier.weight(1f))
+                        Button(onClick = { info = "" }, colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent), shape = RoundedCornerShape(6.dp)) { Text("✖", fontSize = 10.sp, color = Color(0xFFE6EDF3)) }
                     }
                 }
             }
@@ -93,140 +88,57 @@ fun WhaleRadarScreen() {
 }
 
 @Composable
-private fun WhaleAnalysisTab(
-    context: Context,
-    scope: kotlinx.coroutines.CoroutineScope,
-    onInfo: (String) -> Unit
-) {
+private fun WhaleAnalysisTab(context: Context, scope: kotlinx.coroutines.CoroutineScope, onInfo: (String) -> Unit) {
     var symbol by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<WhaleFlowResult?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // 🚀 اصلاح: استفاده از fillMaxSize به‌جای weight
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("🔍 تحلیل فعالیت نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = VBlue)
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        GlassCard(accent = TabPalette.Whale, modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("🔍 تحلیل فعالیت نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFE6EDF3))
                 Text("نماد توکن را وارد کنید تا آمار کلان نهنگ‌ها را ببینید", fontSize = 10.sp, color = VGray)
-                TextField(
-                    value = symbol,
-                    onValueChange = { symbol = it },
-                    placeholder = { Text("نماد... (BTC, ETH, SOL)", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    singleLine = true
-                )
-                Button(
-                    onClick = {
-                        if (symbol.trim().isEmpty()) {
-                            onInfo("❌ نماد را وارد کنید")
-                            return@Button
-                        }
-                        scope.launch {
-                            loading = true
-                            error = null
-                            result = null
-                            try {
-                                val res = withContext(Dispatchers.IO) {
-                                    WhaleFlowEngine.analyze(symbol = symbol.trim() + "USDT", limit = 1000)
-                                }
-                                result = res
-                                if (res == null) {
-                                    onInfo("⚠️ داده‌ای یافت نشد")
-                                } else {
-                                    onInfo("✅ تحلیل کامل شد")
-                                }
-                            } catch (e: Exception) {
-                                error = "خطا: ${e.message}"
-                            }
-                            loading = false
-                        }
-                    },
-                    enabled = !loading,
-                    colors = ButtonDefaults.buttonColors(containerColor = VBlue),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (loading) {
-                        // 🚀 اصلاح: استفاده از size به‌جای width و height جداگانه
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                TextField(value = symbol, onValueChange = { symbol = it }, placeholder = { Text("نماد... (BTC, ETH, SOL)", fontSize = 11.sp) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
+                Button(onClick = {
+                    if (symbol.trim().isEmpty()) { onInfo("❌ نماد را وارد کنید"); return@Button }
+                    scope.launch {
+                        loading = true; error = null; result = null
+                        try {
+                            val res = withContext(Dispatchers.IO) { WhaleFlowEngine.analyze(symbol = symbol.trim() + "USDT", limit = 1000) }
+                            result = res
+                            if (res == null) onInfo("⚠️ داده‌ای یافت نشد") else onInfo("✅ تحلیل کامل شد")
+                        } catch (e: Exception) { error = "خطا: ${e.message}" }
+                        loading = false
                     }
-                    Text("🔍 تحلیل نهنگ‌ها", fontSize = 12.sp)
+                }, enabled = !loading, colors = ButtonDefaults.buttonColors(containerColor = TabPalette.Whale), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (loading) CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.Black, strokeWidth = 2.dp)
+                    Text("🔍 تحلیل نهنگ‌ها", fontSize = 12.sp, color = Color.Black)
                 }
-                if (error != null) {
-                    Text(error ?: "", fontSize = 10.sp, color = VRed)
-                }
+                if (error != null) Text(error ?: "", fontSize = 10.sp, color = VRed)
             }
         }
 
         if (result != null) {
             val res = result!!
-            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("📊 آمار کلان نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = VGreen)
-                    
+            GlassCard(accent = TabPalette.Whale, modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("📊 آمار کلان نهنگ‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFE6EDF3))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("وضعیت فشار:", fontSize = 10.sp, color = VGray)
-                        Text(
-                            when (res.pressure) {
-                                WhaleFlowEngine.PRESSURE_ACCUMULATION -> "🐳 تجمع (خرید)"
-                                WhaleFlowEngine.PRESSURE_DISTRIBUTION -> "📉 توزیع (فروش)"
-                                else -> "⚖️ متعادل"
-                            },
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = when (res.pressure) {
-                                WhaleFlowEngine.PRESSURE_ACCUMULATION -> VGreen
-                                WhaleFlowEngine.PRESSURE_DISTRIBUTION -> VRed
-                                else -> VGold
-                            }
-                        )
+                        Text(when (res.pressure) { WhaleFlowEngine.PRESSURE_ACCUMULATION -> "🐳 تجمع (خرید)"; WhaleFlowEngine.PRESSURE_DISTRIBUTION -> "📉 توزیع (فروش)"; else -> "⚖️ متعادل" }, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = when (res.pressure) { WhaleFlowEngine.PRESSURE_ACCUMULATION -> VGreen; WhaleFlowEngine.PRESSURE_DISTRIBUTION -> VRed; else -> VGold })
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("تعداد معاملات نهنگی:", fontSize = 10.sp, color = VGray)
-                        Text("${res.whaleTrades}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VBlue)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("بزرگ‌ترین معامله:", fontSize = 10.sp, color = VGray)
-                        Text("$${String.format(Locale.US, "%,.0f", res.largestTrade)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGold)
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("نسبت خرید:", fontSize = 10.sp, color = VGray)
-                        Text("${(res.buyRatio * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGreen)
-                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("تعداد معاملات نهنگی:", fontSize = 10.sp, color = VGray); Text("${res.whaleTrades}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VBlue) }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("بزرگ‌ترین معامله:", fontSize = 10.sp, color = VGray); Text("$${String.format(Locale.US, "%,.0f", res.largestTrade)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGold) }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("نسبت خرید:", fontSize = 10.sp, color = VGray); Text("${(res.buyRatio * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGreen) }
 
                     Spacer(Modifier.height(8.dp))
 
                     val isFollowing = FollowedWhalesStore.isFollowing(context, symbol.trim().uppercase())
-                    Button(
-                        onClick = {
-                            if (isFollowing) {
-                                FollowedWhalesStore.removeWhale(context, symbol.trim().uppercase())
-                                onInfo("❌ دنبال کردن لغو شد")
-                            } else {
-                                FollowedWhalesStore.addWhale(
-                                    context,
-                                    FollowedWhale(
-                                        address = "N/A",
-                                        symbol = symbol.trim().uppercase(),
-                                        alertThreshold = res.largestTrade.coerceAtLeast(10_000.0)
-                                    )
-                                )
-                                onInfo("✅ فعالیت نهنگی این نماد دنبال شد")
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isFollowing) VRed else VGold
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (isFollowing) "❌ لغو دنبال کردن" else "❤️ دنبال کردن فعالیت نهنگی", fontSize = 11.sp)
-                    }
+                    Button(onClick = {
+                        if (isFollowing) { FollowedWhalesStore.removeWhale(context, symbol.trim().uppercase()); onInfo("❌ دنبال کردن لغو شد") }
+                        else { FollowedWhalesStore.addWhale(context, FollowedWhale(address = "N/A", symbol = symbol.trim().uppercase(), alertThreshold = res.largestTrade.coerceAtLeast(10_000.0))); onInfo("✅ فعالیت نهنگی این نماد دنبال شد") }
+                    }, colors = ButtonDefaults.buttonColors(containerColor = if (isFollowing) VRed else VGold), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) { Text(if (isFollowing) "❌ لغو دنبال کردن" else "❤️ دنبال کردن فعالیت نهنگی", fontSize = 11.sp, color = Color.Black) }
                 }
             }
         }
@@ -234,26 +146,16 @@ private fun WhaleAnalysisTab(
 }
 
 @Composable
-private fun FollowedWhalesTab(
-    context: Context,
-    scope: kotlinx.coroutines.CoroutineScope,
-    onInfo: (String) -> Unit
-) {
+private fun FollowedWhalesTab(context: Context, scope: kotlinx.coroutines.CoroutineScope, onInfo: (String) -> Unit) {
     var followedWhales by remember { mutableStateOf<List<FollowedWhale>>(emptyList()) }
     val sdf = SimpleDateFormat("yyyy/MM/dd", Locale.US)
 
-    LaunchedEffect(Unit) {
-        followedWhales = FollowedWhalesStore.load(context)
-    }
+    LaunchedEffect(Unit) { followedWhales = FollowedWhalesStore.load(context) }
 
-    // 🚀 اصلاح: استفاده از fillMaxSize به‌جای weight
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text("❤️ نمادهای تحت رصد نهنگی", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = VGreen)
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        GlassCard(accent = TabPalette.Whale, modifier = Modifier.fillMaxWidth()) {
+            Column {
+                Text("❤️ نمادهای تحت رصد نهنگی", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFE6EDF3))
                 Text("وقتی در این نمادها معامله بزرگ انجام شود، نوتیفیکیشن دریافت می‌کنید", fontSize = 10.sp, color = VGray)
                 Spacer(Modifier.height(8.dp))
                 Text("تعداد: ${followedWhales.size}", fontSize = 11.sp, color = VBlue)
@@ -261,7 +163,7 @@ private fun FollowedWhalesTab(
         }
 
         if (followedWhales.isEmpty()) {
-            Card(colors = CardDefaults.cardColors(containerColor = VCard), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
+            GlassCard(accent = TabPalette.Whale, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("🔍", fontSize = 32.sp)
                     Text("هنوز نمادی را دنبال نکرده‌اید", fontSize = 11.sp, color = VGray)
@@ -269,51 +171,20 @@ private fun FollowedWhalesTab(
                 }
             }
         } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 items(followedWhales) { whale ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = VCard),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    GlassCard(accent = TabPalette.Whale, modifier = Modifier.fillMaxWidth()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("🐋", fontSize = 16.sp)
                                 Spacer(Modifier.width(6.dp))
-                                // 🚀 اصلاح: استفاده از fillMaxWidth به‌جای weight برای ستون
                                 Column(modifier = Modifier.fillMaxWidth()) {
-                                    Text(
-                                        whale.symbol,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        "دنبال شده از: ${sdf.format(Date(whale.followedAt))}",
-                                        fontSize = 9.sp,
-                                        color = VGray
-                                    )
+                                    Text(whale.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFE6EDF3))
+                                    Text("دنبال شده از: ${sdf.format(Date(whale.followedAt))}", fontSize = 9.sp, color = VGray)
                                 }
                             }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("آستانه آلرت:", fontSize = 9.sp, color = VGray)
-                                Text("$${String.format(Locale.US, "%,.0f", whale.alertThreshold)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGold)
-                            }
-                            Button(
-                                onClick = {
-                                    FollowedWhalesStore.removeWhale(context, whale.symbol)
-                                    followedWhales = FollowedWhalesStore.load(context)
-                                    onInfo("❌ دنبال کردن لغو شد")
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = VRed.copy(alpha = 0.3f)),
-                                shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("❌ لغو دنبال کردن", fontSize = 10.sp, color = Color.White)
-                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("آستانه آلرت:", fontSize = 9.sp, color = VGray); Text("$${String.format(Locale.US, "%,.0f", whale.alertThreshold)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = VGold) }
+                            Button(onClick = { FollowedWhalesStore.removeWhale(context, whale.symbol); followedWhales = FollowedWhalesStore.load(context); onInfo("❌ دنبال کردن لغو شد") }, colors = ButtonDefaults.buttonColors(containerColor = VRed.copy(alpha = 0.3f)), shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth()) { Text("❌ لغو دنبال کردن", fontSize = 10.sp, color = Color.White) }
                         }
                     }
                 }
