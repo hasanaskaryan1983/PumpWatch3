@@ -13,13 +13,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.*
-
-//  Commit 162: هاب مداری واقعی — منظومه شمسی با حلقه‌های شفاف و آیکون‌های واقعی
+import kotlin.random.Random
 
 data class TabItem(val id: String, val emoji: String, val label: String, val color: Color)
 data class CoinItem(val symbol: String, val color: Color)
@@ -74,15 +72,24 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
         )
     }
 
+    // تولید ستاره‌ها با Random استاندارد
     val stars = remember {
         List(100) { 
             Triple(
-                (0..1000).random() / 1000f,
-                (0..1000).random() / 1000f,
-                (0.5f..2f).random()
+                Random.nextFloat(),
+                Random.nextFloat(),
+                0.5f + Random.nextFloat() * 1.5f
             )
         }
     }
+
+    // تبدیل dp به px بیرون از Canvas برای جلوگیری از خطای تایپ
+    val density = LocalDensity.current
+    val iconSizePx = with(density) { 28.dp.toPx() }
+    val coinSizePx = with(density) { 20.dp.toPx() }
+    val centerSizePx = with(density) { 60.dp.toPx() }
+    val labelOffsetPx = with(density) { 40.dp.toPx() }
+    val textSizePx = with(density) { 11.sp.toPx() }
 
     Box(
         modifier = Modifier
@@ -93,9 +100,7 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                         Color(0xFF1a1a2e),
                         Color(0xFF16213e),
                         Color(0xFF0f0f1e)
-                    ),
-                    center = Offset.Unspecified,
-                    radius = Float.POSITIVE_INFINITY
+                    )
                 )
             )
     ) {
@@ -104,16 +109,15 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 .fillMaxSize()
                 .pointerInput(Unit) {
                     detectTapGestures { tapOffset ->
-                        val centerX = size.width / 2
-                        val centerY = size.height / 2
+                        val centerX = size.width / 2f
+                        val centerY = size.height / 2f
                         val dx = tapOffset.x - centerX
                         val dy = tapOffset.y - centerY
-                        val distance = sqrt(dx * dx + dy * dy)
+                        val distance = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
                         val minDim = minOf(size.width, size.height)
                         val outerRadius = minDim * 0.32f
-                        val iconSize = 28.dp.toPx()
                         
-                        if (abs(distance - outerRadius) < iconSize * 1.5f) {
+                        if (abs(distance - outerRadius) < iconSizePx * 1.5f) {
                             var angle = atan2(dy.toDouble(), dx.toDouble()) * (180.0 / PI)
                             angle = (angle - outerRotation + 360) % 360
                             val angleStep = 360f / tabs.size
@@ -123,85 +127,88 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                     }
                 }
         ) {
-            val centerX = size.width / 2
-            val centerY = size.height / 2
+            val centerX = size.width / 2f
+            val centerY = size.height / 2f
             val minDim = minOf(size.width, size.height)
 
-            // ستاره‌ها
-            stars.forEach { (x, y, r) ->
+            // ۱. ستاره‌ها
+            stars.forEach { star ->
+                val x = star.first * size.width
+                val y = star.second * size.height
+                val r = star.third
                 drawCircle(
-                    color = Color.White.copy(alpha = 0.3f + (0..70).random() / 100f * 0.5f),
-                    radius = r.dp.toPx() * 0.5f,
-                    center = Offset(x * size.width, y * size.height)
+                    color = Color.White.copy(alpha = 0.3f + (Random.nextFloat() * 0.5f)),
+                    radius = r * 0.5f,
+                    center = Offset(x, y)
                 )
             }
 
-            // حلقه بیرونی
+            // ۲. حلقه بیرونی
             val outerRadius = minDim * 0.32f
             drawCircle(
                 color = Color.White.copy(alpha = 0.15f),
                 radius = outerRadius,
-                style = Stroke(width = 2.dp.toPx())
+                style = Stroke(width = 2f)
             )
 
-            // حلقه درونی
+            // ۳. حلقه درونی
             val innerRadius = minDim * 0.18f
             drawCircle(
                 color = Color.White.copy(alpha = 0.15f),
                 radius = innerRadius,
-                style = Stroke(width = 2.dp.toPx())
+                style = Stroke(width = 2f)
             )
 
-            // آیکون‌های تب (حلقه بیرونی)
+            // ۴. آیکون‌های تب (حلقه بیرونی)
             val angleStep = 360f / tabs.size
             tabs.forEachIndexed { i, tab ->
-                val angle = (i * angleStep + outerRotation) * (PI / 180.0f)
-                val x = centerX + (outerRadius * cos(angle).toFloat())
-                val y = centerY + (outerRadius * sin(angle).toFloat())
-                val iconSize = 28.dp.toPx()
+                // استفاده از Double برای cos/sin جهت جلوگیری از خطای ComplexDouble
+                val angleRad = (i * angleStep + outerRotation).toDouble() * (PI / 180.0)
+                val x = centerX + (outerRadius * cos(angleRad)).toFloat()
+                val y = centerY + (outerRadius * sin(angleRad)).toFloat()
 
                 // Glow
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(tab.color.copy(alpha = 0.4f), Color.Transparent),
                         center = Offset(x, y),
-                        radius = iconSize * 1.5f
+                        radius = iconSizePx * 1.5f
                     ),
-                    radius = iconSize * 1.5f,
+                    radius = iconSizePx * 1.5f,
                     center = Offset(x, y)
                 )
 
                 // دایره آیکون
                 drawCircle(
                     color = tab.color.copy(alpha = 0.9f),
-                    radius = iconSize,
+                    radius = iconSizePx,
                     center = Offset(x, y)
                 )
 
                 // حاشیه سفید
                 drawCircle(
                     color = Color.White.copy(alpha = 0.3f),
-                    radius = iconSize,
-                    style = Stroke(width = 1.5.dp.toPx()),
+                    radius = iconSizePx,
+                    style = Stroke(width = 1.5f),
                     center = Offset(x, y)
                 )
 
                 // Emoji
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = android.graphics.Paint().apply {
-                        textSize = iconSize * 1.2f
+                        textSize = iconSizePx * 1.2f
                         textAlign = android.graphics.Paint.Align.CENTER
                         isAntiAlias = true
                     }
-                    drawText(tab.emoji, x, y + iconSize * 0.35f, paint)
+                    drawText(tab.emoji, x, y + iconSizePx * 0.35f, paint)
                 }
 
                 // برچسب متنی
-                val labelX = centerX + ((outerRadius + 40.dp.toPx()) * cos(angle).toFloat())
-                val labelY = centerY + ((outerRadius + 40.dp.toPx()) * sin(angle).toFloat())
+                val labelX = centerX + ((outerRadius + labelOffsetPx) * cos(angleRad)).toFloat()
+                val labelY = centerY + ((outerRadius + labelOffsetPx) * sin(angleRad)).toFloat()
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = android.graphics.Paint().apply {
-                        textSize = 11.sp.toPx()
+                        textSize = textSizePx
                         color = android.graphics.Color.WHITE
                         textAlign = android.graphics.Paint.Align.CENTER
                         isAntiAlias = true
@@ -211,44 +218,42 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                 }
             }
 
-            // ارزها (حلقه درونی)
+            // ۵. ارزها (حلقه درونی)
             val coinAngleStep = 360f / coins.size
             coins.forEachIndexed { i, coin ->
-                val angle = (i * coinAngleStep + innerRotation) * (PI / 180.0f)
-                val x = centerX + (innerRadius * cos(angle).toFloat())
-                val y = centerY + (innerRadius * sin(angle).toFloat())
-                val coinSize = 20.dp.toPx()
+                val angleRad = (i * coinAngleStep + innerRotation).toDouble() * (PI / 180.0)
+                val x = centerX + (innerRadius * cos(angleRad)).toFloat()
+                val y = centerY + (innerRadius * sin(angleRad)).toFloat()
 
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(coin.color.copy(alpha = 0.5f), Color.Transparent),
                         center = Offset(x, y),
-                        radius = coinSize * 1.3f
+                        radius = coinSizePx * 1.3f
                     ),
-                    radius = coinSize * 1.3f,
+                    radius = coinSizePx * 1.3f,
                     center = Offset(x, y)
                 )
 
                 drawCircle(
                     color = coin.color.copy(alpha = 0.85f),
-                    radius = coinSize,
+                    radius = coinSizePx,
                     center = Offset(x, y)
                 )
 
                 drawContext.canvas.nativeCanvas.apply {
                     val paint = android.graphics.Paint().apply {
-                        textSize = coinSize * 0.9f
+                        textSize = coinSizePx * 0.9f
                         color = android.graphics.Color.WHITE
                         textAlign = android.graphics.Paint.Align.CENTER
                         isAntiAlias = true
                         typeface = android.graphics.Typeface.DEFAULT_BOLD
                     }
-                    drawText(coin.symbol, x, y + coinSize * 0.3f, paint)
+                    drawText(coin.symbol, x, y + coinSizePx * 0.3f, paint)
                 }
             }
 
-            // گوی مرکزی طلایی با ₿
-            val centerSize = 60.dp.toPx()
+            // ۶. گوی مرکزی طلایی با ₿
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
@@ -259,30 +264,30 @@ fun OrbitalHub(onTabClick: (String) -> Unit) {
                         Color.Transparent
                     ),
                     center = Offset(centerX, centerY),
-                    radius = centerSize
+                    radius = centerSizePx
                 ),
-                radius = centerSize,
+                radius = centerSizePx,
                 center = Offset(centerX, centerY)
             )
 
             // حاشیه درخشان گوی مرکزی
             drawCircle(
                 color = Color.White.copy(alpha = 0.4f),
-                radius = centerSize,
-                style = Stroke(width = 2.dp.toPx()),
+                radius = centerSizePx,
+                style = Stroke(width = 2f),
                 center = Offset(centerX, centerY)
             )
 
             // نماد ₿ در مرکز
             drawContext.canvas.nativeCanvas.apply {
                 val paint = android.graphics.Paint().apply {
-                    textSize = centerSize * 0.9f
+                    textSize = centerSizePx * 0.9f
                     color = android.graphics.Color.WHITE
                     textAlign = android.graphics.Paint.Align.CENTER
                     isAntiAlias = true
                     typeface = android.graphics.Typeface.DEFAULT_BOLD
                 }
-                drawText("₿", centerX, centerY + centerSize * 0.3f, paint)
+                drawText("₿", centerX, centerY + centerSizePx * 0.3f, paint)
             }
         }
 
