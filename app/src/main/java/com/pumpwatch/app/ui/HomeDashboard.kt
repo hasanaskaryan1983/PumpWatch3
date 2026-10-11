@@ -29,8 +29,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -58,9 +55,9 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-// داشبورد استودیو v5 — نمای مداری (گوی BTC + حلقهٔ آیکون) به‌جای کارت BTC،
-// روی همان غروب؛ تایپ/افکت هماهنگ با بقیهٔ داشبورد. بدون nativeCanvas/drawText روی Canvas.
-// (import غلط matchParentSize حذف شد — این عضوِ BoxScope است و نیاز به import ندارد.)
+// داشبورد استودیو v6 — نمای مداری (تأییدشده) + به‌جای کارت mock، همان MarketPulseHeader()
+// یعنی آیتم‌ها و دادهٔ واقعیِ نسخهٔ قدیمی (گیج/دامیننس/ترندها) داخل استودیو.
+// MarketPulseHeader هم‌پکیج است -> بدون import. کارت ساختگی و توابع یتیمش حذف شدند.
 
 private val ORANGE = Color(0xFFE8833A)
 private val AMBER  = Color(0xFFFFB347)
@@ -69,12 +66,10 @@ private val TEAL   = Color(0xFF2DD4BF)
 private val CYAN   = Color(0xFF22D3EE)
 private val YELLOW = Color(0xFFFBBF24)
 private val RED    = Color(0xFFF87171)
-private const val PI_F = 3.14159265f
 
 private val BG    = Color(0xFF070F0D)
 private val CARD  = Color(0xFF0E1F1B)
 private val MUTED = Color(0xFF8B949E)
-private val DIM   = Color(0xFF6B7280)
 
 @Composable
 fun HomeDashboard(onTabClick: (String) -> Unit) {
@@ -88,7 +83,7 @@ fun HomeDashboard(onTabClick: (String) -> Unit) {
             OrbitHeader(onTabClick)
             ModeSwitch(futures) { futures = it }
             TitleBlock(futures)
-            InsightCard(onTabClick)
+            MarketPulseHeader()                 // <-- آیتم‌های واقعیِ قدیمی، اینجا
             if (futures) FuturesTools(onTabClick) else SpotTools(onTabClick)
             Spacer(Modifier.height(4.dp))
         }
@@ -96,7 +91,7 @@ fun HomeDashboard(onTabClick: (String) -> Unit) {
     }
 }
 
-// ---------- نمای مداری: غروب + حلقهٔ چرخان + گوی BTC + نوار قیمت ----------
+// ---------- نمای مداری (عیناً تأییدشدهٔ v5) ----------
 private data class OTab(val id: String, val emoji: String, val label: String, val color: Color)
 
 @Composable
@@ -129,7 +124,6 @@ private fun OrbitHeader(onTabClick: (String) -> Unit) {
         val a = w * 0.40f
         val b = h * 0.26f
 
-        // لایهٔ ۱: آسمان (ستاره + خورشید + کوه + مه)
         Canvas(modifier = Modifier.matchParentSize()) {
             drawRect(Brush.verticalGradient(listOf(
                 Color(0xFF05090F), Color(0xFF0A121C), Color(0xFF14101E), Color(0xFF1C1410), Color(0xFF0C0A0A)
@@ -160,7 +154,6 @@ private fun OrbitHeader(onTabClick: (String) -> Unit) {
                 topLeft = Offset(0f, h * 0.74f), size = Size(w, h * 0.26f))
         }
 
-        // لایهٔ ۲: حلقه + گوی (فقط شکل، بدون متن)
         Canvas(modifier = Modifier.matchParentSize()) {
             drawOval(Color.White.copy(alpha = 0.14f), style = Stroke(width = strokePx),
                 topLeft = Offset(cx - a, cy - b), size = Size(a * 2f, b * 2f))
@@ -171,10 +164,8 @@ private fun OrbitHeader(onTabClick: (String) -> Unit) {
             drawCircle(Color.White.copy(alpha = 0.22f), radius = orbR * 0.34f, center = Offset(cx - orbR * 0.3f, cy - orbR * 0.34f))
         }
 
-        // ₿ مرکزی (overlay متن — امن)
         Text("₿", modifier = Modifier.align(Alignment.Center), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
 
-        // نوار قیمت (گوشهٔ پایین-چپ، دور از آیکونِ پایین)
         Column(modifier = Modifier.align(Alignment.BottomStart).padding(10.dp).clip(RoundedCornerShape(12.dp))
             .background(CARD.copy(alpha = 0.72f)).border(1.dp, GREEN.copy(alpha = 0.30f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
             Text("۶۷,۴۲۰", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
@@ -184,7 +175,6 @@ private fun OrbitHeader(onTabClick: (String) -> Unit) {
             }
         }
 
-        // آیکون‌های چرخان (overlay متن + کلیک‌پذیر — امن)
         val step = 360f / tabs.size
         tabs.forEachIndexed { i, t ->
             val rad = ((i * step + rot).toDouble()) * (PI / 180.0)
@@ -206,7 +196,7 @@ private fun OrbitHeader(onTabClick: (String) -> Unit) {
     }
 }
 
-// ---------- هدر ----------
+// ---------- هدر / سوئیچ / عنوان ----------
 @Composable
 private fun TopHeader() {
     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -240,7 +230,6 @@ private fun MiniBars(modifier: Modifier = Modifier.size(width = 20.dp, height = 
     }
 }
 
-// ---------- سوئیچ ----------
 @Composable
 private fun ModeSwitch(futures: Boolean, onChange: (Boolean) -> Unit) {
     val shape = RoundedCornerShape(12.dp)
@@ -264,110 +253,6 @@ private fun TitleBlock(futures: Boolean) {
         Text(if (futures) "استودیوی فیوچرز" else "استودیوی بازار", fontSize = 21.sp, fontWeight = FontWeight.Black, color = Color.White)
         Spacer(Modifier.height(2.dp))
         Text(if (futures) "داده و ابزارهای مدیریت ریسک، یکجا" else "داده، ابزار، دید بهتر برای تصمیم‌های هوشمندتر", fontSize = 10.sp, color = MUTED)
-    }
-}
-
-@Composable
-private fun Hairline() {
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.06f)))
-}
-
-// ---------- کارت ادغامی: نبض + گیج + جستجو (بدون BTC) ----------
-private data class MockCoin(val symbol: String, val price: String, val change: String, val up: Boolean)
-
-@Composable
-private fun InsightCard(onTabClick: (String) -> Unit) {
-    val shape = RoundedCornerShape(16.dp)
-    var q by remember { mutableStateOf("") }
-    val coins = remember { listOf(
-        MockCoin("BTC", "$67,420", "+2.4%", true), MockCoin("ETH", "$3,569", "+0.65%", true),
-        MockCoin("SOL", "$154", "-1.2%", false), MockCoin("BNB", "$612", "+0.9%", true),
-        MockCoin("XRP", "$0.54", "-0.3%", false), MockCoin("PEPE", "$0.000011", "+8.1%", true)
-    ) }
-    val res = if (q.isBlank()) emptyList() else coins.filter { it.symbol.contains(q, true) }
-    Column(modifier = Modifier.fillMaxWidth().clip(shape)
-        .background(Brush.verticalGradient(listOf(Color(0xFF0E2A26).copy(alpha = 0.90f), Color(0xFF0A1512).copy(alpha = 0.94f))))
-        .border(1.2.dp, Brush.linearGradient(listOf(GREEN.copy(alpha = 0.70f), GREEN.copy(alpha = 0.10f))), shape)
-        .padding(13.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("نبض بازار", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(9.dp))
-            WaveMini(Modifier.weight(1f).height(15.dp))
-            Spacer(Modifier.width(9.dp))
-            Text("متعادل", color = MUTED, fontSize = 8.sp)
-            Spacer(Modifier.width(5.dp)); Text("❮", color = MUTED, fontSize = 10.sp)
-        }
-        Hairline()
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                FgGauge(0.64f, GREEN)
-                Text("64", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(GREEN))
-                    Spacer(Modifier.width(5.dp))
-                    Text("طمع", color = GREEN, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(Modifier.height(1.dp))
-                Text("روند صعودی ملایم؛ منتظر تأیید حجم برای شکست مقاومت.", color = MUTED, fontSize = 8.sp, lineHeight = 12.sp)
-            }
-        }
-        TextField(
-            value = q, onValueChange = { q = it }, modifier = Modifier.fillMaxWidth().height(44.dp), singleLine = true,
-            placeholder = { Text("🔍 جستجوی ارز (BTC, ETH, SOL)...", fontSize = 11.sp, color = MUTED) },
-            shape = RoundedCornerShape(9.dp),
-            colors = TextFieldDefaults.colors(
-                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                focusedContainerColor = Color(0xFF0A1714), unfocusedContainerColor = Color(0xFF0A1714),
-                cursorColor = GREEN,
-                focusedIndicatorColor = GREEN.copy(alpha = .5f), unfocusedIndicatorColor = Color.Transparent,
-                disabledIndicatorColor = Color.Transparent, errorIndicatorColor = Color.Transparent,
-                focusedPlaceholderColor = MUTED, unfocusedPlaceholderColor = MUTED
-            )
-        )
-        if (res.isNotEmpty()) {
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                res.take(3).forEach { c ->
-                    Row(modifier = Modifier.fillMaxWidth().clickable { onTabClick("market") }.padding(vertical = 4.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(c.symbol, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(44.dp))
-                        Text(c.price, color = MUTED, fontSize = 10.sp, modifier = Modifier.weight(1f))
-                        Text(c.change, color = if (c.up) GREEN else RED, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ---------- توابع کمکی (سبزِ قبلی) ----------
-@Composable
-private fun WaveMini(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width; val h = size.height; val mid = h / 2f; val n = 40
-        val pg = Path(); val po = Path()
-        for (i in 0..n) {
-            val fx = i / n.toFloat() * w
-            val gy = mid + sin(fx / w * PI_F * 3f) * (h * .30f)
-            val oy = mid + sin(fx / w * PI_F * 3f + 1.2f) * (h * .22f)
-            if (i == 0) { pg.moveTo(fx, gy); po.moveTo(fx, oy) } else { pg.lineTo(fx, gy); po.lineTo(fx, oy) }
-        }
-        drawPath(pg, GREEN, style = Stroke(1.4f, cap = StrokeCap.Round))
-        drawPath(po, ORANGE, style = Stroke(1.4f, cap = StrokeCap.Round))
-    }
-}
-
-@Composable
-private fun FgGauge(frac: Float, color: Color) {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val stroke = size.width * 0.16f
-        val d = size.width - stroke
-        val top = Offset(stroke / 2f, stroke / 2f)
-        val arc = Size(d, d)
-        drawArc(Color.White.copy(alpha = 0.10f), 135f, 270f, false, top, arc, style = Stroke(stroke, cap = StrokeCap.Round))
-        drawArc(color, 135f, 270f * frac, false, top, arc, style = Stroke(stroke, cap = StrokeCap.Round))
     }
 }
 
