@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.PI
 import kotlin.math.sin
 
-// داشبورد استودیو — مطابق دو تصویر مرجع (رابط تخت). خودبسنده؛ به هیچ فایل دیگر پروژه وابسته نیست.
+// داشبورد استودیو — مطابق دو تصویر مرجع (رابط تخت). خودبسنده؛ بدون nativeCanvas/drawContext.
 
 private val ORANGE = Color(0xFFE8833A)
 private val GREEN  = Color(0xFF34D399)
@@ -170,17 +170,11 @@ private fun HeroCard(futures: Boolean) {
 
 @Composable
 private fun BtcBadge(modifier: Modifier = Modifier.size(38.dp)) {
-    Canvas(modifier = modifier) {
-        val cx = size.width / 2f; val cy = size.height / 2f; val rad = size.minDimension / 2f
-        drawCircle(Color(0xFFF7931A), radius = rad, center = Offset(cx, cy))
-        drawContext.canvas.nativeCanvas.apply {
-            val p = android.graphics.Paint().apply {
-                color = android.graphics.Color.WHITE; textSize = rad * 1.24f
-                textAlign = android.graphics.Paint.Align.CENTER; isAntiAlias = true
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
-            }
-            drawText("₿", cx, cy + rad * 0.44f, p)
-        }
+    Box(
+        modifier = modifier.clip(CircleShape).background(Color(0xFFF7931A)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text("₿", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
     }
 }
 
@@ -266,15 +260,18 @@ private fun SpotTools(onTabClick: (String) -> Unit) {
 
 @Composable
 private fun FuturesTools(onTabClick: (String) -> Unit) {
-    SectionTitle("کشف فرصت", "ابزارهای فیوچرز شما برای معامله‌های هوشمندتر", GREEN, listOf(
+    SectionTitle("کشف فرصت", "ابزارهای فیوچرز شما برای معامله‌های هوشمندتر", GREEN)
+    ToolRow(listOf(
         ToolBig("سیگنال", "📶", "از داده تا ایدهٔ معاملاتی", "futures_dash", GREEN),
         ToolBig("اسکنر", "🎯", "فرصت‌ها را پیدا کن", "futures_scan", GREEN)
     ), onTabClick)
-    SectionTitle("پایش و تمرین", "مدیریت ریسک در عمل، بدون حدس و گمان", ORANGE, listOf(
+    SectionTitle("پایش و تمرین", "مدیریت ریسک در عمل، بدون حدس و گمان", ORANGE)
+    ToolRow(listOf(
         ToolBig("هشدار", "🔔", "هیچ موقعیتی را از دست نده", "alerts_fut", ORANGE),
         ToolBig("Paper", "🎓", "معامله آزمایشی", "paper", ORANGE)
     ), onTabClick)
-    SectionTitle("تحلیل عملکرد", "از داده تا پیشرفت، حرفه‌ای معامله کن", CYAN, listOf(
+    SectionTitle("تحلیل عملکرد", "از داده تا پیشرفت، حرفه‌ای معامله کن", CYAN)
+    ToolRow(listOf(
         ToolBig("ژورنال", "📄", "از معاملاتت یاد بگیر", "journal", CYAN),
         ToolBig("بک‌تست", "🧪", "ایده‌ها را محک بزن", "backtest", CYAN)
     ), onTabClick)
@@ -290,6 +287,13 @@ private fun SectionTitle(title: String, sub: String, accent: Color) {
         }
         Spacer(Modifier.height(2.dp))
         Text(sub, color = MUTED, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun ToolRow(tools: List<ToolBig>, onTabClick: (String) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        tools.forEach { ToolBig(it, onTabClick) }
     }
 }
 
