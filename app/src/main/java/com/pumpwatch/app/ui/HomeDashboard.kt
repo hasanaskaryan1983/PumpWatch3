@@ -1,18 +1,11 @@
 package com.pumpwatch.app.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -20,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,33 +31,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.random.Random
 
-// داشبورد استودیو v6 — نمای مداری (تأییدشده) + به‌جای کارت mock، همان MarketPulseHeader()
-// یعنی آیتم‌ها و دادهٔ واقعیِ نسخهٔ قدیمی (گیج/دامیننس/ترندها) داخل استودیو.
-// MarketPulseHeader هم‌پکیج است -> بدون import. کارت ساختگی و توابع یتیمش حذف شدند.
+// داشبورد استودیو v7 — نمای مداری حذف؛ نبض واقعی بالا؛ سوئیچ داخل هدر زیر لوگو.
+// MarketPulseHeader هم‌پکیج است -> بدون import. importهای بی‌مصرفِ انیمیشن/math حذف شدند.
 
 private val ORANGE = Color(0xFFE8833A)
-private val AMBER  = Color(0xFFFFB347)
 private val GREEN  = Color(0xFF34D399)
 private val TEAL   = Color(0xFF2DD4BF)
 private val CYAN   = Color(0xFF22D3EE)
 private val YELLOW = Color(0xFFFBBF24)
-private val RED    = Color(0xFFF87171)
 
 private val BG    = Color(0xFF070F0D)
 private val CARD  = Color(0xFF0E1F1B)
@@ -75,15 +53,13 @@ private val MUTED = Color(0xFF8B949E)
 fun HomeDashboard(onTabClick: (String) -> Unit) {
     var futures by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxSize().background(BG)) {
-        TopHeader()
+        TopHeader(futures) { futures = it }          // لوگو + سوئیچ، بالا
         Column(
             modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp)
         ) {
-            OrbitHeader(onTabClick)
-            ModeSwitch(futures) { futures = it }
+            MarketPulseHeader()                       // نبض واقعی، اولین بلوک
             TitleBlock(futures)
-            MarketPulseHeader()                 // <-- آیتم‌های واقعیِ قدیمی، اینجا
             if (futures) FuturesTools(onTabClick) else SpotTools(onTabClick)
             Spacer(Modifier.height(4.dp))
         }
@@ -91,129 +67,28 @@ fun HomeDashboard(onTabClick: (String) -> Unit) {
     }
 }
 
-// ---------- نمای مداری (عیناً تأییدشدهٔ v5) ----------
-private data class OTab(val id: String, val emoji: String, val label: String, val color: Color)
-
+// ---------- هدر: ردیف ۱ لوگو+وضعیت، ردیف ۲ سوئیچ ----------
 @Composable
-private fun OrbitHeader(onTabClick: (String) -> Unit) {
-    val inf = rememberInfiniteTransition(label = "orbit")
-    val rot by inf.animateFloat(0f, 360f,
-        infiniteRepeatable(tween(28000, easing = LinearEasing), RepeatMode.Restart), label = "r")
-    val tabs = remember { listOf(
-        OTab("market", "📊", "بازار", GREEN),
-        OTab("alerts_spot", "🔔", "هشدار", ORANGE),
-        OTab("whale", "🐳", "نهنگ", CYAN),
-        OTab("meme", "🐸", "میم", YELLOW),
-        OTab("wallet", "👛", "کیف", ORANGE),
-        OTab("assistant", "🤖", "دستیار", TEAL),
-        OTab("backtest", "🧪", "بک‌تست", GREEN),
-        OTab("traders", "🏆", "تریدرها", ORANGE)
-    ) }
-    val stars = remember { List(42) { Triple(Random.nextFloat(), Random.nextFloat(), 0.4f + Random.nextFloat() * 0.9f) } }
-    val density = LocalDensity.current
-    val strokePx = with(density) { 1.5.dp.toPx() }
-    val orbR = with(density) { 22.dp.toPx() }
-    val colHalf = with(density) { 28.dp.toPx() }
-    val orbTopHalf = with(density) { 20.dp.toPx() }
-
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(18.dp))) {
-        val w = constraints.maxWidth.toFloat()
-        val h = constraints.maxHeight.toFloat()
-        val cx = w / 2f
-        val cy = h / 2f
-        val a = w * 0.40f
-        val b = h * 0.26f
-
-        Canvas(modifier = Modifier.matchParentSize()) {
-            drawRect(Brush.verticalGradient(listOf(
-                Color(0xFF05090F), Color(0xFF0A121C), Color(0xFF14101E), Color(0xFF1C1410), Color(0xFF0C0A0A)
-            )), size = size)
-            stars.forEach { s ->
-                drawCircle(Color.White.copy(alpha = 0.16f + s.third * 0.28f), radius = s.third,
-                    center = Offset(s.first * w, s.second * h * 0.46f))
-            }
-            val sx = w * 0.62f; val sy = h * 0.42f
-            drawCircle(Brush.radialGradient(listOf(AMBER.copy(alpha = 0.50f), ORANGE.copy(alpha = 0.16f), Color.Transparent)), radius = w * 0.30f, center = Offset(sx, sy))
-            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFD27A), AMBER, ORANGE.copy(alpha = 0.5f), Color.Transparent)), radius = w * 0.10f, center = Offset(sx, sy))
-            drawCircle(AMBER, radius = w * 0.052f, center = Offset(sx, sy))
-            val road = Path().apply {
-                moveTo(w * 0.40f, h); lineTo(w * 0.52f, h * 0.74f); lineTo(w * 0.58f, h * 0.62f)
-                lineTo(w * 0.60f, sy + w * 0.02f); lineTo(w * 0.64f, sy + w * 0.02f)
-                lineTo(w * 0.66f, h * 0.62f); lineTo(w * 0.74f, h * 0.76f); lineTo(w * 0.86f, h); close()
-            }
-            drawPath(road, Brush.verticalGradient(listOf(AMBER.copy(alpha = 0.0f), AMBER.copy(alpha = 0.10f), ORANGE.copy(alpha = 0.20f))))
-            val peaks = Path().apply {
-                moveTo(0f, h); lineTo(w * 0.10f, h * 0.70f); lineTo(w * 0.22f, h * 0.82f)
-                lineTo(w * 0.34f, h * 0.58f); lineTo(w * 0.46f, h * 0.74f)
-                lineTo(w * 0.60f, h * 0.34f); lineTo(w * 0.70f, h * 0.52f)
-                lineTo(w * 0.82f, h * 0.40f); lineTo(w * 0.92f, h * 0.62f); lineTo(w, h * 0.50f)
-                lineTo(w, h); close()
-            }
-            drawPath(peaks, Color(0xFF070C0A))
-            drawRect(Brush.verticalGradient(listOf(Color.Transparent, BG.copy(alpha = 0.80f))),
-                topLeft = Offset(0f, h * 0.74f), size = Size(w, h * 0.26f))
-        }
-
-        Canvas(modifier = Modifier.matchParentSize()) {
-            drawOval(Color.White.copy(alpha = 0.14f), style = Stroke(width = strokePx),
-                topLeft = Offset(cx - a, cy - b), size = Size(a * 2f, b * 2f))
-            drawCircle(Brush.radialGradient(listOf(GREEN.copy(alpha = 0.30f), Color.Transparent)), radius = orbR * 2.6f, center = Offset(cx, cy))
-            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFE066), Color(0xFFFFC107), Color(0xFFB8860B)),
-                center = Offset(cx - orbR * 0.3f, cy - orbR * 0.3f), radius = orbR * 1.4f), radius = orbR, center = Offset(cx, cy))
-            drawCircle(Color.White.copy(alpha = 0.55f), radius = orbR, style = Stroke(width = strokePx), center = Offset(cx, cy))
-            drawCircle(Color.White.copy(alpha = 0.22f), radius = orbR * 0.34f, center = Offset(cx - orbR * 0.3f, cy - orbR * 0.34f))
-        }
-
-        Text("₿", modifier = Modifier.align(Alignment.Center), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
-
-        Column(modifier = Modifier.align(Alignment.BottomStart).padding(10.dp).clip(RoundedCornerShape(12.dp))
-            .background(CARD.copy(alpha = 0.72f)).border(1.dp, GREEN.copy(alpha = 0.30f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Text("۶۷,۴۲۰", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+private fun TopHeader(futures: Boolean, onChange: (Boolean) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("⚙️", fontSize = 16.sp, color = MUTED)
+            Spacer(Modifier.width(9.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("+۲,۴٪", color = GREEN, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                Spacer(Modifier.width(3.dp)); Text("▲", color = GREEN, fontSize = 9.sp)
+                Box(Modifier.size(7.dp).clip(CircleShape).background(GREEN))
+                Spacer(Modifier.width(5.dp))
+                Text("بازار فعال", fontSize = 10.sp, color = MUTED)
+            }
+            Spacer(Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("dump", fontSize = 16.sp, fontWeight = FontWeight.Black, color = ORANGE)
+                Text("pump", fontSize = 16.sp, fontWeight = FontWeight.Black, color = GREEN)
+                Spacer(Modifier.width(5.dp))
+                MiniBars()
             }
         }
-
-        val step = 360f / tabs.size
-        tabs.forEachIndexed { i, t ->
-            val rad = ((i * step + rot).toDouble()) * (PI / 180.0)
-            val x = cx + (a * cos(rad)).toFloat()
-            val y = cy + (b * sin(rad)).toFloat()
-            Box(modifier = Modifier.size(56.dp, 52.dp)
-                .offset { IntOffset((x - colHalf).toInt(), (y - orbTopHalf).toInt()) }
-                .clickable { onTabClick(t.id) }, contentAlignment = Alignment.TopCenter) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Box(modifier = Modifier.size(40.dp).clip(CircleShape)
-                        .background(t.color.copy(alpha = 0.18f)).border(1.dp, t.color.copy(alpha = 0.50f), CircleShape),
-                        contentAlignment = Alignment.Center) {
-                        Text(t.emoji, fontSize = 16.sp)
-                    }
-                    Text(t.label, fontSize = 8.sp, color = MUTED, maxLines = 1)
-                }
-            }
-        }
-    }
-}
-
-// ---------- هدر / سوئیچ / عنوان ----------
-@Composable
-private fun TopHeader() {
-    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("⚙️", fontSize = 16.sp, color = MUTED)
-        Spacer(Modifier.width(9.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(GREEN))
-            Spacer(Modifier.width(5.dp))
-            Text("بازار فعال", fontSize = 10.sp, color = MUTED)
-        }
-        Spacer(Modifier.weight(1f))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("dump", fontSize = 16.sp, fontWeight = FontWeight.Black, color = ORANGE)
-            Text("pump", fontSize = 16.sp, fontWeight = FontWeight.Black, color = GREEN)
-            Spacer(Modifier.width(5.dp))
-            MiniBars()
-        }
+        Spacer(Modifier.height(8.dp))
+        ModeSwitch(futures, onChange)
     }
 }
 
