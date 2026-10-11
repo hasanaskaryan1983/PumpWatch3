@@ -20,8 +20,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,16 +38,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.pumpwatch.app.ui.components.GlassCard // 🚀 اضافه شد
-import com.pumpwatch.app.ui.design.TabPalette // 🚀 اضافه شد
+import com.pumpwatch.app.ui.EditorialPageHeader
+import com.pumpwatch.app.ui.PumpWatchPalette
+import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.launch
 import java.util.Locale
-
-private val VGreen = Color(0xFF00E676)
-private val VRed = Color(0xFFFF5252)
-private val VBlue = Color(0xFF40C4FF)
-private val VGold = Color(0xFFFFC107)
-private val VGray = Color(0xFF8B949E)
 
 // 🚀 Commit 100: holder تک‌نمونه — state کیف پول حتی بعد از خروج از تب زنده می‌ماند.
 internal object WalletVMHolder {
@@ -121,26 +118,93 @@ fun WalletScreen() {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text("👛 کارآگاه کیف پول", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
+            EditorialPageHeader(
+                eyebrow = "WALLET · INTELLIGENCE",
+                title = "کارآگاه کیف پول",
+                subtitle = "ردیابی عمومی، با محافظت از دادهٔ شخصی",
+                accent = PumpWatchPalette.TabWallet
+            )
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                FilterChip(selected = subTab == 0, onClick = { subTab = 0 }, label = { Text("⚙️ موتورها", fontSize = 11.sp) })
-                FilterChip(selected = subTab == 1, onClick = { subTab = 1 }, label = { Text("❤️ مورد پسند", fontSize = 11.sp) })
-                FilterChip(selected = subTab == 2, onClick = { subTab = 2 },
-                    label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) })
-                FilterChip(selected = subTab == 3, onClick = { subTab = 3 }, label = { Text("♻️ سطل", fontSize = 11.sp) })
-                FilterChip(selected = subTab == 4, onClick = { subTab = 4 }, label = { Text("🔒 حریم", fontSize = 11.sp) })
-                FilterChip(selected = subTab == 5, onClick = { subTab = 5 }, label = { Text("🔐 Approvals", fontSize = 11.sp) })
+                FilterChip(
+                    selected = subTab == 0,
+                    onClick = { subTab = 0 },
+                    label = { Text("⚙️ موتورها", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PumpWatchPalette.TabWallet,
+                        selectedLabelColor = PumpWatchPalette.Ink,
+                        containerColor = PumpWatchPalette.Glass,
+                        labelColor = PumpWatchPalette.Muted
+                    )
+                )
+                FilterChip(
+                    selected = subTab == 1,
+                    onClick = { subTab = 1 },
+                    label = { Text("❤️ مورد پسند", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PumpWatchPalette.TabWallet,
+                        selectedLabelColor = PumpWatchPalette.Ink,
+                        containerColor = PumpWatchPalette.Glass,
+                        labelColor = PumpWatchPalette.Muted
+                    )
+                )
+                FilterChip(
+                    selected = subTab == 2,
+                    onClick = { subTab = 2 },
+                    label = { Text(if (FavStore.unread() > 0) "⚡️ هشدار 🔴" else "⚡️ هشدار", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PumpWatchPalette.TabWallet,
+                        selectedLabelColor = PumpWatchPalette.Ink,
+                        containerColor = PumpWatchPalette.Glass,
+                        labelColor = PumpWatchPalette.Muted
+                    )
+                )
+                FilterChip(
+                    selected = subTab == 3,
+                    onClick = { subTab = 3 },
+                    label = { Text("♻️ سطل", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PumpWatchPalette.TabWallet,
+                        selectedLabelColor = PumpWatchPalette.Ink,
+                        containerColor = PumpWatchPalette.Glass,
+                        labelColor = PumpWatchPalette.Muted
+                    )
+                )
+                FilterChip(
+                    selected = subTab == 4,
+                    onClick = { subTab = 4 },
+                    label = { Text("🔒 حریم", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PumpWatchPalette.TabWallet,
+                        selectedLabelColor = PumpWatchPalette.Ink,
+                        containerColor = PumpWatchPalette.Glass,
+                        labelColor = PumpWatchPalette.Muted
+                    )
+                )
+                FilterChip(
+                    selected = subTab == 5,
+                    onClick = { subTab = 5 },
+                    label = { Text("🔐 Approvals", fontSize = 11.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = PumpWatchPalette.TabWallet,
+                        selectedLabelColor = PumpWatchPalette.Ink,
+                        containerColor = PumpWatchPalette.Glass,
+                        labelColor = PumpWatchPalette.Muted
+                    )
+                )
             }
             if (infoText.isNotEmpty()) {
-                // 🚀 مهاجرت به GlassCard
-                GlassCard(accent = TabPalette.Wallet, modifier = Modifier.fillMaxWidth(), radius = 10.dp) {
+                GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth(), radius = 10.dp) {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(infoText, fontSize = 10.sp, color = TabPalette.Wallet, modifier = Modifier.weight(1f))
-                        Button(onClick = { infoText = "" }, colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent), shape = RoundedCornerShape(6.dp)) { 
-                            Text("✖", fontSize = 10.sp, color = Color(0xFFE6EDF3)) 
+                        Text(infoText, fontSize = 10.sp, color = PumpWatchPalette.TabWallet, modifier = Modifier.weight(1f))
+                        Button(
+                            onClick = { infoText = "" },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text("✖", fontSize = 10.sp, color = PumpWatchPalette.Text)
                         }
                     }
                 }
@@ -160,34 +224,69 @@ fun WalletScreen() {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     CHAINS.forEach { c ->
-                        FilterChip(selected = viewModel.chain.key == c.key, onClick = { viewModel.chain = c }, label = { Text(c.label, fontSize = 10.sp) })
+                        FilterChip(
+                            selected = viewModel.chain.key == c.key,
+                            onClick = { viewModel.chain = c },
+                            label = { Text(c.label, fontSize = 10.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = PumpWatchPalette.TabWallet,
+                                selectedLabelColor = PumpWatchPalette.Ink,
+                                containerColor = PumpWatchPalette.Glass,
+                                labelColor = PumpWatchPalette.Muted
+                            )
+                        )
                     }
                 }
 
-                // 🚀 مهاجرت به GlassCard
-                GlassCard(accent = TabPalette.Wallet, modifier = Modifier.fillMaxWidth()) {
+                GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)",
-                                fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFE6EDF3), modifier = Modifier.weight(1f))
-                            Button(onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده + سود/زیان واقعی." },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent), shape = RoundedCornerShape(6.dp)) { 
-                                Text("ℹ️", fontSize = 10.sp, color = Color(0xFFE6EDF3)) 
+                            Text(
+                                "🔍 موتور ۱: بررسی کیف پول مشکوک (Auto = تشخیص خودکار شبکه)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = PumpWatchPalette.Text,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                onClick = { infoText = "موتور ۱: آدرس کیف بده → موجودی فعلی همه توکن‌ها + کانترکت با کپی + تاریخ/قیمت اولین مشاهده + سود/زیان واقعی." },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("ℹ️", fontSize = 10.sp, color = PumpWatchPalette.Text)
                             }
                         }
-                        TextField(value = viewModel.address, onValueChange = { viewModel.address = it },
-                            placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp, color = VGray) },
-                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
-                        Button(onClick = { check() }, enabled = !viewModel.loading,
-                            colors = ButtonDefaults.buttonColors(containerColor = TabPalette.Wallet),
-                            shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            Text(if (viewModel.loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول", fontSize = 12.sp, color = Color.Black)
+                        TextField(
+                            value = viewModel.address,
+                            onValueChange = { viewModel.address = it },
+                            placeholder = { Text("آدرس کیف پول...", fontSize = 11.sp, color = PumpWatchPalette.MutedDim) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            singleLine = true,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = PumpWatchPalette.GlassDeep,
+                                unfocusedContainerColor = PumpWatchPalette.GlassDeep,
+                                focusedTextColor = PumpWatchPalette.Text,
+                                unfocusedTextColor = PumpWatchPalette.Text,
+                                cursorColor = PumpWatchPalette.TabWallet,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            )
+                        )
+                        Button(
+                            onClick = { check() },
+                            enabled = !viewModel.loading,
+                            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.TabWallet, contentColor = PumpWatchPalette.Ink),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (viewModel.loading) "⏳ در حال اسکن..." else "🔍 بررسی کیف پول", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
-                        if (viewModel.info.isNotEmpty()) Text(viewModel.info, fontSize = 10.sp, color = VGreen)
+                        if (viewModel.info.isNotEmpty()) Text(viewModel.info, fontSize = 10.sp, color = PumpWatchPalette.Positive)
                     }
                 }
 
-                if (viewModel.error != null) Text(viewModel.error ?: "", fontSize = 10.sp, color = VRed)
+                if (viewModel.error != null) Text(viewModel.error ?: "", fontSize = 10.sp, color = PumpWatchPalette.Negative)
 
                 // ⚠️ توابع زیر (HoldingsSection, TxHistorySection, ...) را در ادامهٔ فایل خودتان نگه دارید.
                 // آن‌ها را اینجا کپی نکردم تا فایل شما ناقص نشود. فقط کافی است importهای بالا را اضافه کنید.
@@ -207,7 +306,7 @@ fun WalletScreen() {
                     onStar = { a, s, sc, n, b, ms, sd, tc -> saveStar(a, s, sc, n, b, ms, sd, tc) }
                 )
 
-                Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = VGold)
+                Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = PumpWatchPalette.Warning)
             }
 
             if (subTab != 0) {
