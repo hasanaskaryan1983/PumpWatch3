@@ -30,6 +30,9 @@ import com.pumpwatch.app.ui.design.TabPalette
  *
  * ⚠️ قانون صداقت: source•age باید از scanner واقعی بیاید، نه hardcode.
  * اگر timestamp در دسترس نیست، ageSec = -1 بفرست تا "—" نمایش دهد.
+ *
+ * 🔧 رفع هم‌پوشانی: محتوای GlassCard داخل Box چیده می‌شود؛ بدون Column،
+ * ردیف‌های کارت روی هم می‌افتادند (نماد/ایموجی/رتبه وسط خط توضیح).
  */
 data class AlertView(
     val symbol: String,
@@ -47,42 +50,45 @@ data class AlertView(
 fun AlertCard(a: AlertView, tabKey: String) {
     val accent = TabPalette.accent(tabKey)
     GlassCard(accent = accent, modifier = Modifier.fillMaxWidth()) {
-        // سطر ۱: emoji + symbol + rank + severity badge
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(a.emoji, fontSize = 22.sp)
-            Spacer(Modifier.width(10.dp))
-            Text(a.symbol, fontSize = 16.sp, fontWeight = FontWeight.Black, color = Color(0xFFE6EDF3))
-            if (a.rank != null) {
-                Text(" #${a.rank}", fontSize = 11.sp, color = Color(0xFF8B949E))
+        // 🔧 ستون عمودی: ردیف‌ها به‌ترتیب زیر هم، نه روی هم
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // سطر ۱: emoji + symbol + rank + severity badge
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(a.emoji, fontSize = 22.sp)
+                Spacer(Modifier.width(10.dp))
+                Text(a.symbol, fontSize = 16.sp, fontWeight = FontWeight.Black, color = Color(0xFFE6EDF3))
+                if (a.rank != null) {
+                    Text(" #${a.rank}", fontSize = 11.sp, color = Color(0xFF8B949E))
+                }
+                Spacer(Modifier.weight(1f))
+                SeverityChip(a.severity)
             }
-            Spacer(Modifier.weight(1f))
-            SeverityChip(a.severity)
+
+            Spacer(Modifier.height(8.dp))
+
+            // سطر ۲: title با رنگ severity
+            Text(
+                a.title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = severityColor(a.severity)
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            // سطر ۳: detail
+            Text(
+                a.detail,
+                fontSize = 11.sp,
+                color = Color(0xFFB0B8C4),
+                lineHeight = 16.sp
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            // سطر ۴: source•age (صداقت)
+            SourceAgeLine(a.source, a.ageSec)
         }
-
-        Spacer(Modifier.height(8.dp))
-
-        // سطر ۲: title با رنگ severity
-        Text(
-            a.title,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = severityColor(a.severity)
-        )
-
-        Spacer(Modifier.height(4.dp))
-
-        // سطر ۳: detail
-        Text(
-            a.detail,
-            fontSize = 11.sp,
-            color = Color(0xFFB0B8C4),
-            lineHeight = 16.sp
-        )
-
-        Spacer(Modifier.height(10.dp))
-
-        // سطر ۴: source•age (صداقت)
-        SourceAgeLine(a.source, a.ageSec)
     }
 }
 
