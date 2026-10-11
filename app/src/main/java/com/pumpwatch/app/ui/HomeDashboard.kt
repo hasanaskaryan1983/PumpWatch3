@@ -46,8 +46,8 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.PI
 import kotlin.math.sin
 
-// داشبورد استودیو v2 — اسم درست، غروب، نبض فشرده، ترس‌وطمع+تحلیل+جستجو.
-// بدون nativeCanvas/drawText روی Canvas.
+// داشبورد استودیو v2.1 — رفع دو خطای بیلد (FgGauge + نام پارامترهای colors).
+// بدون nativeCanvas/drawText روی Canvas. بدون ویرایش دستی.
 
 private val ORANGE = Color(0xFFE8833A)
 private val GREEN  = Color(0xFF34D399)
@@ -123,7 +123,7 @@ private fun TopHeader() {
         }
         Spacer(Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // ترتیب dump→pump تا در چیدمان اپ "pumpdump" با pump سبز خوانده شود
+            // ترتیب dump→pump تا در چیدمان RTL "pumpdump" با pump سبز خوانده شود
             Text("dump", fontSize = 18.sp, fontWeight = FontWeight.Black, color = ORANGE)
             Text("pump", fontSize = 18.sp, fontWeight = FontWeight.Black, color = GREEN)
             Spacer(Modifier.width(6.dp))
@@ -291,7 +291,7 @@ private fun MarketInsightCard(onTabClick: (String) -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().clip(shape).background(CARD).border(1.dp, GREEN.copy(alpha = .18f), shape).padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
-                FG Gauge(0.64f, GREEN)
+                FgGauge(0.64f, GREEN)
                 Text("64", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.width(12.dp))
@@ -310,10 +310,17 @@ private fun MarketInsightCard(onTabClick: (String) -> Unit) {
             placeholder = { Text("🔍 جستجوی ارز (BTC, ETH, SOL)...", fontSize = 12.sp, color = MUTED) },
             shape = RoundedCornerShape(10.dp),
             colors = TextFieldDefaults.colors(
-                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                focusedContainerColor = Color(0xFF0A1714), unfocusedContainerColor = Color(0xFF0A1714),
-                cursorColor = GREEN, focusedBorderColor = GREEN.copy(alpha = .5f), unfocusedBorderColor = Color.Transparent,
-                placeholderColor = MUTED, disabledBorderColor = Color.Transparent, errorBorderColor = Color.Transparent
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedContainerColor = Color(0xFF0A1714),
+                unfocusedContainerColor = Color(0xFF0A1714),
+                cursorColor = GREEN,
+                focusedIndicatorColor = GREEN.copy(alpha = .5f),
+                unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent,
+                errorIndicatorColor = Color.Transparent,
+                focusedPlaceholderColor = MUTED,
+                unfocusedPlaceholderColor = MUTED
             )
         )
         if (res.isNotEmpty()) {
@@ -331,7 +338,7 @@ private fun MarketInsightCard(onTabClick: (String) -> Unit) {
 }
 
 @Composable
-private fun FG Gauge(frac: Float, color: Color) {
+private fun FgGauge(frac: Float, color: Color) {
     Canvas(modifier = Modifier.fillMaxSize()) {
         val stroke = size.width * 0.16f
         val d = size.width - stroke
