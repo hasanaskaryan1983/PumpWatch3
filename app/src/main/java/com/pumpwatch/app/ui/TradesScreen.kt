@@ -674,7 +674,8 @@ private fun EquityChart(curve: List<Double>) {
             val col = if (curve[i] >= curve[i - 1]) PumpWatchPalette.Positive else PumpWatchPalette.Negative
             drawLine(col, Offset(x1, y(curve[i - 1])), Offset(x2, y(curve[i])), strokeWidth = 3f)
         }
-        val paint = android.graphics.Paint().apply { textSize = 22f; color = PumpWatchPalette.Muted.toArgb() }
+        // 🔧 اصلاح: استفاده از مقدار Int مستقیم به‌جای toArgb()
+        val paint = android.graphics.Paint().apply { textSize = 22f; color = 0xFFA6B7D2.toInt() }
         drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%.0f", maxV), 4f, y(maxV) + 14f, paint)
         drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%.0f", minV), 4f, y(minV) - 4f, paint)
     }
