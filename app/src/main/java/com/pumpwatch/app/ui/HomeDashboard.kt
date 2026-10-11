@@ -1,11 +1,18 @@
 package com.pumpwatch.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -13,6 +20,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,15 +49,18 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-// داشبورد استودیو v4 — کارت BTC افقی (مثل مرجع 18)، پس‌زمینهٔ کوه/خورشید/جاده.
-// APIها عیناً همان‌های سبزِ قبلی؛ فقط چیدمان و SkyBackdrop عوض شده.
+// داشبورد استودیو v5 — نمای مداری (گوی BTC + حلقهٔ آیکون) به‌جای کارت BTC،
+// روی همان غروب؛ تایپ/افکت هماهنگ با بقیهٔ داشبورد. بدون nativeCanvas/drawText روی Canvas.
 
 private val ORANGE = Color(0xFFE8833A)
 private val AMBER  = Color(0xFFFFB347)
@@ -67,62 +79,130 @@ private val DIM   = Color(0xFF6B7280)
 @Composable
 fun HomeDashboard(onTabClick: (String) -> Unit) {
     var futures by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxSize().background(BG)) {
-        SkyBackdrop(modifier = Modifier.fillMaxWidth().height(340.dp))
-        Column(modifier = Modifier.fillMaxSize()) {
-            TopHeader()
-            Column(
-                modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp)
-            ) {
-                ModeSwitch(futures) { futures = it }
-                TitleBlock(futures)
-                UnifiedMarketCard(futures, onTabClick)
-                if (futures) FuturesTools(onTabClick) else SpotTools(onTabClick)
-                Spacer(Modifier.height(4.dp))
-            }
-            BottomBar()
+    Column(modifier = Modifier.fillMaxSize().background(BG)) {
+        TopHeader()
+        Column(
+            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            OrbitHeader(onTabClick)
+            ModeSwitch(futures) { futures = it }
+            TitleBlock(futures)
+            InsightCard(onTabClick)
+            if (futures) FuturesTools(onTabClick) else SpotTools(onTabClick)
+            Spacer(Modifier.height(4.dp))
         }
+        BottomBar()
     }
 }
 
-// ---------- پس‌زمینه: کوه تیز + خورشید پشتش + جادهٔ نورانی (مثل مرجع) ----------
+// ---------- نمای مداری: غروب + حلقهٔ چرخان + گوی BTC + نوار قیمت ----------
+private data class OTab(val id: String, val emoji: String, val label: String, val color: Color)
+
 @Composable
-private fun SkyBackdrop(modifier: Modifier = Modifier) {
-    val stars = remember { List(46) { Triple(Random.nextFloat(), Random.nextFloat(), 0.4f + Random.nextFloat() * 0.9f) } }
-    Canvas(modifier = modifier) {
-        val w = size.width; val h = size.height
-        drawRect(Brush.verticalGradient(listOf(
-            Color(0xFF05090F), Color(0xFF0A121C), Color(0xFF14101E), Color(0xFF1C1410), Color(0xFF0C0A0A)
-        )), size = size)
-        stars.forEach { s ->
-            drawCircle(Color.White.copy(alpha = 0.18f + s.third * 0.30f), radius = s.third,
-                center = Offset(s.first * w, s.second * h * 0.42f))
+private fun OrbitHeader(onTabClick: (String) -> Unit) {
+    val inf = rememberInfiniteTransition(label = "orbit")
+    val rot by inf.animateFloat(0f, 360f,
+        infiniteRepeatable(tween(28000, easing = LinearEasing), RepeatMode.Restart), label = "r")
+    val tabs = remember { listOf(
+        OTab("market", "📊", "بازار", GREEN),
+        OTab("alerts_spot", "🔔", "هشدار", ORANGE),
+        OTab("whale", "🐳", "نهنگ", CYAN),
+        OTab("meme", "🐸", "میم", YELLOW),
+        OTab("wallet", "👛", "کیف", ORANGE),
+        OTab("assistant", "🤖", "دستیار", TEAL),
+        OTab("backtest", "🧪", "بک‌تست", GREEN),
+        OTab("traders", "🏆", "تریدرها", ORANGE)
+    ) }
+    val stars = remember { List(42) { Triple(Random.nextFloat(), Random.nextFloat(), 0.4f + Random.nextFloat() * 0.9f) } }
+    val density = LocalDensity.current
+    val strokePx = with(density) { 1.5.dp.toPx() }
+    val orbR = with(density) { 22.dp.toPx() }
+    val colHalf = with(density) { 28.dp.toPx() }
+    val orbTopHalf = with(density) { 20.dp.toPx() }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(18.dp))) {
+        val w = constraints.maxWidth.toFloat()
+        val h = constraints.maxHeight.toFloat()
+        val cx = w / 2f
+        val cy = h / 2f
+        val a = w * 0.40f
+        val b = h * 0.26f
+
+        // لایهٔ ۱: آسمان (ستاره + خورشید + کوه + مه)
+        Canvas(modifier = Modifier.matchParentSize()) {
+            drawRect(Brush.verticalGradient(listOf(
+                Color(0xFF05090F), Color(0xFF0A121C), Color(0xFF14101E), Color(0xFF1C1410), Color(0xFF0C0A0A)
+            )), size = size)
+            stars.forEach { s ->
+                drawCircle(Color.White.copy(alpha = 0.16f + s.third * 0.28f), radius = s.third,
+                    center = Offset(s.first * w, s.second * h * 0.46f))
+            }
+            val sx = w * 0.62f; val sy = h * 0.42f
+            drawCircle(Brush.radialGradient(listOf(AMBER.copy(alpha = 0.50f), ORANGE.copy(alpha = 0.16f), Color.Transparent)), radius = w * 0.30f, center = Offset(sx, sy))
+            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFD27A), AMBER, ORANGE.copy(alpha = 0.5f), Color.Transparent)), radius = w * 0.10f, center = Offset(sx, sy))
+            drawCircle(AMBER, radius = w * 0.052f, center = Offset(sx, sy))
+            val road = Path().apply {
+                moveTo(w * 0.40f, h); lineTo(w * 0.52f, h * 0.74f); lineTo(w * 0.58f, h * 0.62f)
+                lineTo(w * 0.60f, sy + w * 0.02f); lineTo(w * 0.64f, sy + w * 0.02f)
+                lineTo(w * 0.66f, h * 0.62f); lineTo(w * 0.74f, h * 0.76f); lineTo(w * 0.86f, h); close()
+            }
+            drawPath(road, Brush.verticalGradient(listOf(AMBER.copy(alpha = 0.0f), AMBER.copy(alpha = 0.10f), ORANGE.copy(alpha = 0.20f))))
+            val peaks = Path().apply {
+                moveTo(0f, h); lineTo(w * 0.10f, h * 0.70f); lineTo(w * 0.22f, h * 0.82f)
+                lineTo(w * 0.34f, h * 0.58f); lineTo(w * 0.46f, h * 0.74f)
+                lineTo(w * 0.60f, h * 0.34f); lineTo(w * 0.70f, h * 0.52f)
+                lineTo(w * 0.82f, h * 0.40f); lineTo(w * 0.92f, h * 0.62f); lineTo(w, h * 0.50f)
+                lineTo(w, h); close()
+            }
+            drawPath(peaks, Color(0xFF070C0A))
+            drawRect(Brush.verticalGradient(listOf(Color.Transparent, BG.copy(alpha = 0.80f))),
+                topLeft = Offset(0f, h * 0.74f), size = Size(w, h * 0.26f))
         }
-        // خورشید پشت کوه، مرکز-راست
-        val sx = w * 0.62f; val sy = h * 0.46f
-        drawCircle(Brush.radialGradient(listOf(AMBER.copy(alpha = 0.55f), ORANGE.copy(alpha = 0.18f), Color.Transparent)), radius = w * 0.30f, center = Offset(sx, sy))
-        drawCircle(Brush.radialGradient(listOf(Color(0xFFFFD27A), AMBER, ORANGE.copy(alpha = 0.5f), Color.Transparent)), radius = w * 0.11f, center = Offset(sx, sy))
-        drawCircle(AMBER, radius = w * 0.058f, center = Offset(sx, sy))
-        // جادهٔ نورانی: از پایین-مرکز به سمت خورشید بال می‌رود
-        val road = Path().apply {
-            moveTo(w * 0.40f, h); lineTo(w * 0.52f, h * 0.74f); lineTo(w * 0.58f, h * 0.60f)
-            lineTo(w * 0.60f, sy + w * 0.02f); lineTo(w * 0.64f, sy + w * 0.02f)
-            lineTo(w * 0.66f, h * 0.60f); lineTo(w * 0.74f, h * 0.76f); lineTo(w * 0.86f, h); close()
+
+        // لایهٔ ۲: حلقه + گوی (فقط شکل، بدون متن)
+        Canvas(modifier = Modifier.matchParentSize()) {
+            drawOval(Color.White.copy(alpha = 0.14f), style = Stroke(width = strokePx),
+                topLeft = Offset(cx - a, cy - b), size = Size(a * 2f, b * 2f))
+            drawCircle(Brush.radialGradient(listOf(GREEN.copy(alpha = 0.30f), Color.Transparent)), radius = orbR * 2.6f, center = Offset(cx, cy))
+            drawCircle(Brush.radialGradient(listOf(Color(0xFFFFE066), Color(0xFFFFC107), Color(0xFFB8860B)),
+                center = Offset(cx - orbR * 0.3f, cy - orbR * 0.3f), radius = orbR * 1.4f), radius = orbR, center = Offset(cx, cy))
+            drawCircle(Color.White.copy(alpha = 0.55f), radius = orbR, style = Stroke(width = strokePx), center = Offset(cx, cy))
+            drawCircle(Color.White.copy(alpha = 0.22f), radius = orbR * 0.34f, center = Offset(cx - orbR * 0.3f, cy - orbR * 0.34f))
         }
-        drawPath(road, Brush.verticalGradient(listOf(AMBER.copy(alpha = 0.0f), AMBER.copy(alpha = 0.10f), ORANGE.copy(alpha = 0.22f))))
-        // کوه‌ها: بلندترین مرکزی-راست، خورشید پشتش
-        val peaks = Path().apply {
-            moveTo(0f, h); lineTo(w * 0.10f, h * 0.70f); lineTo(w * 0.22f, h * 0.82f)
-            lineTo(w * 0.34f, h * 0.58f); lineTo(w * 0.46f, h * 0.74f)
-            lineTo(w * 0.60f, h * 0.34f); lineTo(w * 0.70f, h * 0.52f)   // قلهٔ مرکزی که خورشید پشتش است
-            lineTo(w * 0.82f, h * 0.40f); lineTo(w * 0.92f, h * 0.62f); lineTo(w, h * 0.50f)
-            lineTo(w, h); close()
+
+        // ₿ مرکزی (overlay متن — امن)
+        Text("₿", modifier = Modifier.align(Alignment.Center), color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
+
+        // نوار قیمت (گوشهٔ پایین-چپ، دور از آیکونِ پایین)
+        Column(modifier = Modifier.align(Alignment.BottomStart).padding(10.dp).clip(RoundedCornerShape(12.dp))
+            .background(CARD.copy(alpha = 0.72f)).border(1.dp, GREEN.copy(alpha = 0.30f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text("۶۷,۴۲", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("+۲,۴٪", color = GREEN, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                Spacer(Modifier.width(3.dp)); Text("▲", color = GREEN, fontSize = 9.sp)
+            }
         }
-        drawPath(peaks, Color(0xFF070C0A))
-        // مه پایین
-        drawRect(Brush.verticalGradient(listOf(Color.Transparent, BG.copy(alpha = 0.85f))),
-            topLeft = Offset(0f, h * 0.72f), size = Size(w, h * 0.28f))
+
+        // آیکون‌های چرخان (overlay متن + کلیک‌پذیر — امن)
+        val step = 360f / tabs.size
+        tabs.forEachIndexed { i, t ->
+            val rad = ((i * step + rot).toDouble()) * (PI / 180.0)
+            val x = cx + (a * cos(rad)).toFloat()
+            val y = cy + (b * sin(rad)).toFloat()
+            Box(modifier = Modifier.size(56.dp, 52.dp)
+                .offset { IntOffset((x - colHalf).toInt(), (y - orbTopHalf).toInt()) }
+                .clickable { onTabClick(t.id) }, contentAlignment = Alignment.TopCenter) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Box(modifier = Modifier.size(40.dp).clip(CircleShape)
+                        .background(t.color.copy(alpha = 0.18f)).border(1.dp, t.color.copy(alpha = 0.50f), CircleShape),
+                        contentAlignment = Alignment.Center) {
+                        Text(t.emoji, fontSize = 16.sp)
+                    }
+                    Text(t.label, fontSize = 8.sp, color = MUTED, maxLines = 1)
+                }
+            }
+        }
     }
 }
 
@@ -192,13 +272,12 @@ private fun Hairline() {
     Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.06f)))
 }
 
-// ---------- کادر یکپارچه: BTC افقی + نبض + گیج/جستجو ----------
+// ---------- کارت ادغامی: نبض + گیج + جستجو (بدون BTC) ----------
 private data class MockCoin(val symbol: String, val price: String, val change: String, val up: Boolean)
 
 @Composable
-private fun UnifiedMarketCard(futures: Boolean, onTabClick: (String) -> Unit) {
-    val shape = RoundedCornerShape(18.dp)
-    val pts = remember { listOf(.10f,.20f,.15f,.28f,.23f,.36f,.31f,.46f,.41f,.54f,.49f,.63f,.58f,.71f,.66f,.80f,.75f,.90f,.85f,1f) }
+private fun InsightCard(onTabClick: (String) -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
     var q by remember { mutableStateOf("") }
     val coins = remember { listOf(
         MockCoin("BTC", "$67,420", "+2.4%", true), MockCoin("ETH", "$3,569", "+0.65%", true),
@@ -206,138 +285,64 @@ private fun UnifiedMarketCard(futures: Boolean, onTabClick: (String) -> Unit) {
         MockCoin("XRP", "$0.54", "-0.3%", false), MockCoin("PEPE", "$0.000011", "+8.1%", true)
     ) }
     val res = if (q.isBlank()) emptyList() else coins.filter { it.symbol.contains(q, true) }
+    Column(modifier = Modifier.fillMaxWidth().clip(shape)
+        .background(Brush.verticalGradient(listOf(Color(0xFF0E2A26).copy(alpha = 0.90f), Color(0xFF0A1512).copy(alpha = 0.94f))))
+        .border(1.2.dp, Brush.linearGradient(listOf(GREEN.copy(alpha = 0.70f), GREEN.copy(alpha = 0.10f))), shape)
+        .padding(13.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
 
-    Box(modifier = Modifier.fillMaxWidth().shadow(10.dp, shape, clip = false, ambientColor = GREEN.copy(alpha = .22f), spotColor = GREEN.copy(alpha = .36f))) {
-        Column(modifier = Modifier.fillMaxWidth().clip(shape)
-            .background(Brush.verticalGradient(listOf(Color(0xFF0E2A26).copy(alpha = .90f), Color(0xFF0A1512).copy(alpha = .94f))))
-            .border(1.2.dp, Brush.linearGradient(listOf(GREEN.copy(alpha = .78f), GREEN.copy(alpha = .10f))), shape)
-            .padding(13.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-
-            // ردیف بالا: هویت + چیپ
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                BtcBadge()
-                Spacer(Modifier.width(9.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("BTC/USDT", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text(if (futures) "Perpetual · نمونهٔ طراحی" else "Bitcoin", color = MUTED, fontSize = 9.sp)
-                }
-                Chip(if (futures) "دادهٔ نمونه" else "داده بازار", GREEN)
-                Spacer(Modifier.width(7.dp))
-                Text("24h ▾", color = MUTED, fontSize = 10.sp)
-            }
-            // ردیف میانی: قیمت چپ + نمودار راست (افقی = فشرده)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text("۶۷,۴۲۰", color = Color.White, fontWeight = FontWeight.Black, fontSize = 24.sp)
-                    Spacer(Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("+۲,۴٪", color = GREEN, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        Spacer(Modifier.width(3.dp)); Text("▲", color = GREEN, fontSize = 10.sp)
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                ChartSpark(pts, GREEN, TEAL, Modifier.weight(1f).height(74.dp))
-            }
-
-            Hairline()
-
-            // نبض (باریک)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("نبض بازار", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(9.dp))
-                WaveMini(Modifier.weight(1f).height(15.dp))
-                Spacer(Modifier.width(9.dp))
-                Text(if (futures) "Liq · 01 · Funding" else "متعادل", color = MUTED, fontSize = 8.sp)
-                Spacer(Modifier.width(5.dp)); Text("❮", color = MUTED, fontSize = 10.sp)
-            }
-
-            Hairline()
-
-            // گیج + تحلیل (یک ردیف) — نگه‌داشته‌شده از خواستهٔ قبلی
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
-                    FgGauge(0.64f, GREEN)
-                    Text("64", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                }
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(6.dp).clip(CircleShape).background(GREEN))
-                        Spacer(Modifier.width(5.dp))
-                        Text("طمع", color = GREEN, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.height(1.dp))
-                    Text("روند صعودی ملایم؛ منتظر تأیید حجم برای شکست مقاومت.", color = MUTED, fontSize = 8.sp, lineHeight = 12.sp)
-                }
-            }
-            // جستجو (باریک، کامل‌عرض)
-            TextField(
-                value = q, onValueChange = { q = it }, modifier = Modifier.fillMaxWidth().height(44.dp), singleLine = true,
-                placeholder = { Text("🔍 جستجوی ارز (BTC, ETH, SOL)...", fontSize = 11.sp, color = MUTED) },
-                shape = RoundedCornerShape(9.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                    focusedContainerColor = Color(0xFF0A1714), unfocusedContainerColor = Color(0xFF0A1714),
-                    cursorColor = GREEN,
-                    focusedIndicatorColor = GREEN.copy(alpha = .5f), unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent, errorIndicatorColor = Color.Transparent,
-                    focusedPlaceholderColor = MUTED, unfocusedPlaceholderColor = MUTED
-                )
-            )
-            if (res.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    res.take(3).forEach { c ->
-                        Row(modifier = Modifier.fillMaxWidth().clickable { onTabClick("market") }.padding(vertical = 4.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(c.symbol, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(44.dp))
-                            Text(c.price, color = MUTED, fontSize = 10.sp, modifier = Modifier.weight(1f))
-                            Text(c.change, color = if (c.up) GREEN else RED, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ---------- توابع کمکی (عیناً سبزِ قبلی) ----------
-@Composable
-private fun BtcBadge(modifier: Modifier = Modifier.size(34.dp)) {
-    Box(modifier = modifier.clip(CircleShape).background(Color(0xFFF7931A)), contentAlignment = Alignment.Center) {
-        Text("₿", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
-    }
-}
-
-@Composable
-private fun Chip(text: String, color: Color) {
-    val s = RoundedCornerShape(20.dp)
-    Box(Modifier.clip(s).background(color.copy(alpha = .12f)).border(1.dp, color.copy(alpha = .4f), s).padding(horizontal = 8.dp, vertical = 3.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).clip(CircleShape).background(color))
-            Spacer(Modifier.width(5.dp)); Text(text, color = color, fontSize = 8.sp, fontWeight = FontWeight.Medium)
+            Text("نبض بازار", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(9.dp))
+            WaveMini(Modifier.weight(1f).height(15.dp))
+            Spacer(Modifier.width(9.dp))
+            Text("متعادل", color = MUTED, fontSize = 8.sp)
+            Spacer(Modifier.width(5.dp)); Text("❮", color = MUTED, fontSize = 10.sp)
+        }
+        Hairline()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) {
+                FgGauge(0.64f, GREEN)
+                Text("64", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(GREEN))
+                    Spacer(Modifier.width(5.dp))
+                    Text("طمع", color = GREEN, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(1.dp))
+                Text("روند صعودی ملایم؛ منتظر تأیید حجم برای شکست مقاومت.", color = MUTED, fontSize = 8.sp, lineHeight = 12.sp)
+            }
+        }
+        TextField(
+            value = q, onValueChange = { q = it }, modifier = Modifier.fillMaxWidth().height(44.dp), singleLine = true,
+            placeholder = { Text("🔍 جستجوی ارز (BTC, ETH, SOL)...", fontSize = 11.sp, color = MUTED) },
+            shape = RoundedCornerShape(9.dp),
+            colors = TextFieldDefaults.colors(
+                focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                focusedContainerColor = Color(0xFF0A1714), unfocusedContainerColor = Color(0xFF0A1714),
+                cursorColor = GREEN,
+                focusedIndicatorColor = GREEN.copy(alpha = .5f), unfocusedIndicatorColor = Color.Transparent,
+                disabledIndicatorColor = Color.Transparent, errorIndicatorColor = Color.Transparent,
+                focusedPlaceholderColor = MUTED, unfocusedPlaceholderColor = MUTED
+            )
+        )
+        if (res.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                res.take(3).forEach { c ->
+                    Row(modifier = Modifier.fillMaxWidth().clickable { onTabClick("market") }.padding(vertical = 4.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.symbol, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(44.dp))
+                        Text(c.price, color = MUTED, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                        Text(c.change, color = if (c.up) GREEN else RED, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }
 
-@Composable
-private fun ChartSpark(points: List<Float>, line: Color, fill: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        if (points.size < 2) return@Canvas
-        val w = size.width; val h = size.height; val pad = h * 0.12f; val uh = h - pad * 2f
-        val sx = w / (points.size - 1)
-        val lp = Path(); val fp = Path()
-        points.forEachIndexed { i, v ->
-            val x = i * sx; val y = pad + (1f - v) * uh
-            if (i == 0) { lp.moveTo(x, y); fp.moveTo(x, h); fp.lineTo(x, y) } else { lp.lineTo(x, y); fp.lineTo(x, y) }
-        }
-        fp.lineTo(w, h); fp.close()
-        drawPath(fp, Brush.verticalGradient(listOf(fill.copy(alpha = .35f), Color.Transparent)))
-        drawPath(lp, line, style = Stroke(2.2f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-        val ly = pad + (1f - points.last()) * uh
-        drawCircle(line.copy(alpha = .3f), 6f, center = Offset(w, ly))
-        drawCircle(line, 3f, center = Offset(w, ly))
-    }
-}
-
+// ---------- توابع کمکی (سبزِ قبلی) ----------
 @Composable
 private fun WaveMini(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
@@ -366,7 +371,7 @@ private fun FgGauge(frac: Float, color: Color) {
     }
 }
 
-// ---------- ابزارها (فشرده‌تر) ----------
+// ---------- ابزارها ----------
 @Composable
 private fun SpotTools(onTabClick: (String) -> Unit) {
     SectionTitle("ابزارهای منتخب", "تحلیل، پایش و اقدام", ORANGE)
