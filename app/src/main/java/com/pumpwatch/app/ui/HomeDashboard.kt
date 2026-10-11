@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -61,6 +60,7 @@ import kotlin.random.Random
 
 // داشبورد استودیو v5 — نمای مداری (گوی BTC + حلقهٔ آیکون) به‌جای کارت BTC،
 // روی همان غروب؛ تایپ/افکت هماهنگ با بقیهٔ داشبورد. بدون nativeCanvas/drawText روی Canvas.
+// (import غلط matchParentSize حذف شد — این عضوِ BoxScope است و نیاز به import ندارد.)
 
 private val ORANGE = Color(0xFFE8833A)
 private val AMBER  = Color(0xFFFFB347)
@@ -177,7 +177,7 @@ private fun OrbitHeader(onTabClick: (String) -> Unit) {
         // نوار قیمت (گوشهٔ پایین-چپ، دور از آیکونِ پایین)
         Column(modifier = Modifier.align(Alignment.BottomStart).padding(10.dp).clip(RoundedCornerShape(12.dp))
             .background(CARD.copy(alpha = 0.72f)).border(1.dp, GREEN.copy(alpha = 0.30f), RoundedCornerShape(12.dp)).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Text("۶۷,۴۲", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+            Text("۶۷,۴۲۰", color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("+۲,۴٪", color = GREEN, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                 Spacer(Modifier.width(3.dp)); Text("▲", color = GREEN, fontSize = 9.sp)
