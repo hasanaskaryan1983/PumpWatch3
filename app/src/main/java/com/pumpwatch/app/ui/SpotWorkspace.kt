@@ -1,49 +1,48 @@
 package com.pumpwatch.app.ui
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.MarketScreen
+import com.pumpwatch.app.R
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.worker.SignalNavigator
 
-enum class SpotTab(val title: String, val emoji: String) {
-    MARKET("بازار", "📊"),
-    ALERTS("هشدار", "🔔"),
-    WHALE("نهنگ", "🐳"),
-    ASSISTANT("دستیار", "🤖"),
-    BACKTEST("بک‌تست", "🧪"),
-    MEME("میم", "🐸"),
-    TRADES("معامله", "📈"),
-    WALLETS("کیف پول", "👛"),
-    WATCHLIST("واچ‌لیست", "⭐"),
-    TRADERS("تریدرها", "🏆")
+enum class SpotTab(val title: String, val iconRes: Int, val accent: Color) {
+    MARKET("بازار", R.drawable.ic_tab_market, PumpWatchPalette.TabMarket),
+    ALERTS("هشدار", R.drawable.ic_tab_alerts, PumpWatchPalette.TabAlerts),
+    WHALE("نهنگ", R.drawable.ic_tab_whale, PumpWatchPalette.TabWhale),
+    ASSISTANT("دستیار", R.drawable.ic_tab_assistant, PumpWatchPalette.TabAssistant),
+    BACKTEST("بک‌تست", R.drawable.ic_tab_backtest, PumpWatchPalette.TabBacktest),
+    TRADERS("تریدرها", R.drawable.ic_tab_traders, PumpWatchPalette.TabLeaderboard),
+    WATCHLIST("واچ‌لیست", R.drawable.ic_tab_watchlist, PumpWatchPalette.TabWatchlist),
+    WALLETS("کیف پول", R.drawable.ic_tab_wallet, PumpWatchPalette.TabWallet),
+    TRADES("معامله", R.drawable.ic_tab_trade, PumpWatchPalette.TabTrade),
+    MEME("میم", R.drawable.ic_tab_meme, PumpWatchPalette.TabMeme)
 }
 
-private val SpotAccent = Color(0xFF00E676)
-private val SpotNavBg = Color(0xFF121820)
-private val SpotNavIdle = Color(0xFF8B949E)
+private val SpotDockTabs = listOf(
+    SpotTab.MARKET,
+    SpotTab.ALERTS,
+    SpotTab.WHALE,
+    SpotTab.ASSISTANT,
+    SpotTab.BACKTEST,
+    SpotTab.TRADERS,
+    SpotTab.WATCHLIST,
+    SpotTab.WALLETS,
+    SpotTab.TRADES,
+    SpotTab.MEME
+).map { EditorialDockTab(it.name, it.title, it.iconRes, it.accent) }
 
 @Composable
 fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
@@ -51,22 +50,6 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
     var selectedTab by remember { mutableStateOf(SpotTab.MARKET) }
 
     LaunchedEffect(Unit) {
-        // 🚀 Commit 163: تب انتخاب‌شده در هاب را باز کن
-        HubNavigation.consume()?.let { id ->
-            selectedTab = when (id) {
-                "market" -> SpotTab.MARKET
-                "alerts_spot" -> SpotTab.ALERTS
-                "whale" -> SpotTab.WHALE
-                "assistant" -> SpotTab.ASSISTANT
-                "backtest" -> SpotTab.BACKTEST
-                "meme" -> SpotTab.MEME
-                "trades" -> SpotTab.TRADES
-                "wallet" -> SpotTab.WALLETS
-                "watchlist" -> SpotTab.WATCHLIST
-                "traders" -> SpotTab.TRADERS
-                else -> selectedTab
-            }
-        }
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
                 selectedTab = SpotTab.ALERTS
@@ -75,7 +58,6 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    // 🚀 Commit 32: padding برای نوار ناوبری سیستم (edge-to-edge)
     Column(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
@@ -91,39 +73,10 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 SpotTab.TRADERS -> TraderLeaderboardScreen()
             }
         }
-
-        Surface(color = SpotNavBg, modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    SpotTab.entries.take(5).forEach { tab ->
-                        SpotNavItem(tab, selectedTab == tab) { selectedTab = tab }
-                    }
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    SpotTab.entries.drop(5).forEach { tab ->
-                        SpotNavItem(tab, selectedTab == tab) { selectedTab = tab }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RowScope.SpotNavItem(tab: SpotTab, selected: Boolean, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.weight(1f).clickable(onClick = onClick).padding(4.dp)
-    ) {
-        Text(tab.emoji, fontSize = 20.sp, color = if (selected) SpotAccent else SpotNavIdle)
-        Text(
-            tab.title,
-            fontSize = 8.sp,
-            color = if (selected) SpotAccent else SpotNavIdle,
-            modifier = Modifier.padding(top = 2.dp)
+        EditorialTabDock(
+            tabs = SpotDockTabs,
+            selectedId = selectedTab.name,
+            onSelect = { selectedTab = SpotTab.valueOf(it) }
         )
     }
 }
