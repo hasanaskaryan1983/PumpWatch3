@@ -1,79 +1,59 @@
 package com.pumpwatch.app.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.ui.PumpWatchPalette
 
-// 🚀 Commit 166 (retry): GlassCard نئونی + بازگرداندن SourceAgeLine
-// - امضای GlassCard با پارامتر radius حفظ شد (فراخوان‌های WalletScreen/TabComponents نمی‌شکنند)
-// - shadow با ambientColor/spotColor (API واقعی)، نه color
-// - SourceAgeLine دوباره تعریف شد (Unresolved reference رفع شد)
+// گزینه ۱ / قدم ۱: کارت مشترک همهٔ تب‌ها با زبان شیشه‌ای Nebula هماهنگ شد
+// (همان GlassDeep + لبهٔ نازکِ کارت‌های بازار و نبض)، با ته‌رنگ ملایم رنگ هر تب.
+// هالهٔ نئونی حذف شد. امضاها دست‌نخورده‌اند تا هیچ تبی نشکند.
 
 @Composable
 fun GlassCard(
     accent: Color,
     modifier: Modifier = Modifier,
-    radius: Dp = 16.dp,
+    radius: Dp = 17.dp,
     contentPadding: Dp = 14.dp,
     content: @Composable () -> Unit
 ) {
     val shape = RoundedCornerShape(radius)
-    Box(
-        modifier = modifier
-            // ۱) هالهٔ نئونی بیرونی (رنگ تب) — clip=false تا بیرون کارت بتابد
-            .shadow(
-                elevation = 12.dp,
-                shape = shape,
-                clip = false,
-                ambientColor = accent.copy(alpha = 0.45f),
-                spotColor = accent.copy(alpha = 0.65f)
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = PumpWatchPalette.GlassDeep,
+        border = BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                listOf(
+                    accent.copy(alpha = 0.38f),
+                    PumpWatchPalette.Border.copy(alpha = 0.28f)
+                )
             )
+        ),
+        shadowElevation = 6.dp
     ) {
-        Box(
-            modifier = Modifier
-                // ۲) بدنهٔ شیشه‌ای: بالا ته‌رنگ تب، پایین تیرهٔ عمقی
-                .clip(shape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            accent.copy(alpha = 0.16f),
-                            Color(0xFF0E1620).copy(alpha = 0.94f)
-                        )
-                    )
-                )
-                // ۳) لبهٔ گرادیانی = حس نئون (یک سر پررنگ، سر دیگر کمرنگ)
-                .border(
-                    width = 1.5.dp,
-                    brush = Brush.linearGradient(
-                        listOf(accent.copy(alpha = 0.95f), accent.copy(alpha = 0.22f))
-                    ),
-                    shape = shape
-                )
-                .padding(contentPadding)
-        ) {
+        Box(modifier = Modifier.padding(contentPadding)) {
             content()
         }
     }
 }
 
-// 🛡️ صداقت داده: «منبع • سن» — با پارامترهای default تا طیف فراخوان‌ها را بپوشاند
 @Composable
 fun SourceAgeLine(
     source: String = "",
@@ -81,7 +61,7 @@ fun SourceAgeLine(
     tabKey: String = "",
     modifier: Modifier = Modifier,
     prefix: String = "📡",
-    dim: Color = Color(0xFF8B949E)
+    dim: Color = PumpWatchPalette.MutedDim
 ) {
     val ageText = when {
         ageSec < 0 -> "—"
