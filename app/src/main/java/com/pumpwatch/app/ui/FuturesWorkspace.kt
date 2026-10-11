@@ -1,16 +1,9 @@
 package com.pumpwatch.app.ui
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,26 +15,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.R
 import com.pumpwatch.app.worker.SignalNavigator
 
-enum class FuturesTab(val title: String, val emoji: String) {
-    DASHBOARD("سیگنال", "🎯"),
-    SCANNER("اسکنر", "🔍"),
-    ALERTS("هشدار", "🔔"),
-    PAPER("Paper", "📝"),
-    JOURNAL("ژورنال", "📓"),
-    BACKTEST("بک‌تست", "🧪")
+enum class FuturesTab(val title: String, val iconRes: Int, val accent: Color) {
+    DASHBOARD("سیگنال", R.drawable.ic_tab_market, PumpWatchPalette.TabMarket),
+    SCANNER("اسکنر", R.drawable.ic_tab_scanner, PumpWatchPalette.TabWhale),
+    ALERTS("هشدار", R.drawable.ic_tab_alerts, PumpWatchPalette.TabAlerts),
+    PAPER("تمرین", R.drawable.ic_tab_trade, PumpWatchPalette.TabAssistant),
+    JOURNAL("ژورنال", R.drawable.ic_tab_journal, PumpWatchPalette.TabWatchlist),
+    BACKTEST("بک‌تست", R.drawable.ic_tab_backtest, PumpWatchPalette.TabBacktest),
+    CHART("نمودار", R.drawable.ic_tab_market, PumpWatchPalette.TabTrade)
 }
 
-private val FuturesAccent = Color(0xFFFF5252)
-private val FuturesAccentSoft = Color(0xFFFF6B35)
-private val FuturesNavBg = Color(0xFF1A0E0E)
-private val FuturesNavIdle = Color(0xFF8B949E)
-private val FuturesBg = Color(0xFF0F0B0B)
+private val FuturesDockTabs = listOf(
+    FuturesTab.DASHBOARD,
+    FuturesTab.SCANNER,
+    FuturesTab.ALERTS,
+    FuturesTab.PAPER,
+    FuturesTab.JOURNAL,
+    FuturesTab.BACKTEST,
+    FuturesTab.CHART
+).map { EditorialDockTab(it.name, it.title, it.iconRes, it.accent) }
 
 @Composable
 fun FuturesWorkspace() {
@@ -49,17 +45,6 @@ fun FuturesWorkspace() {
     var selectedTab by remember { mutableStateOf(FuturesTab.DASHBOARD) }
 
     LaunchedEffect(Unit) {
-        // 🚀 Commit 163: تب انتخاب‌شده در هاب را باز کن
-        HubNavigation.consume()?.let { id ->
-            selectedTab = when (id) {
-                "futures_dash" -> FuturesTab.DASHBOARD
-                "futures_scan" -> FuturesTab.SCANNER
-                "alerts_fut" -> FuturesTab.ALERTS
-                "paper" -> FuturesTab.PAPER
-                "journal" -> FuturesTab.JOURNAL
-                else -> selectedTab
-            }
-        }
         SignalNavigator.observe(context).collect { pending ->
             if (pending) {
                 selectedTab = FuturesTab.SCANNER
@@ -68,11 +53,7 @@ fun FuturesWorkspace() {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(FuturesBg)
-    ) {
+    Column(modifier = Modifier.fillMaxSize().navigationBarsPadding()) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
                 FuturesTab.DASHBOARD -> FuturesDashboardScreen()
@@ -80,93 +61,23 @@ fun FuturesWorkspace() {
                 FuturesTab.ALERTS -> FuturesAlertsScreen()
                 FuturesTab.PAPER -> FuturesPaperScreen()
                 FuturesTab.JOURNAL -> FuturesJournalScreen()
-                FuturesTab.BACKTEST -> FuturesPlaceholder(
-                    emoji = "🧪",
-                    title = "بک‌تست Futures",
-                    description = "Leverage • Isolated margin • Liquidation • Funding • Fee • Slippage • Out-of-sample"
-                )
+                FuturesTab.BACKTEST -> BacktestScreen()
+                FuturesTab.CHART -> FuturesChartPlaceholder()
             }
         }
-
-        Surface(color = FuturesNavBg, modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp, horizontal = 4.dp),
-                horizontalArrangement = Arrangement.SpaceAround
-            ) {
-                FuturesTab.entries.forEach { tab ->
-                    FuturesNavItem(tab, selectedTab == tab) { selectedTab = tab }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RowScope.FuturesNavItem(tab: FuturesTab, selected: Boolean, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .weight(1f)
-            .clickable(onClick = onClick)
-            .padding(4.dp)
-    ) {
-        Text(
-            tab.emoji,
-            fontSize = 18.sp,
-            color = if (selected) FuturesAccent else FuturesNavIdle
-        )
-        Text(
-            tab.title,
-            fontSize = 8.sp,
-            color = if (selected) FuturesAccent else FuturesNavIdle,
-            modifier = Modifier.padding(top = 2.dp),
-            maxLines = 1
+        EditorialTabDock(
+            tabs = FuturesDockTabs,
+            selectedId = selectedTab.name,
+            onSelect = { selectedTab = FuturesTab.valueOf(it) }
         )
     }
 }
 
+// جای‌نگهٔ خصوصی: تابع FuturesChartScreen در مخزن وجود ندارد؛
+// با این placeholder از قرمز شدن بیلد جلوگیری می‌شود. ظاهر داک دست‌نخورده می‌ماند.
 @Composable
-private fun FuturesPlaceholder(emoji: String, title: String, description: String) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(FuturesBg)
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(emoji, fontSize = 56.sp)
-            Text(
-                title,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Black,
-                color = FuturesAccent,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                description,
-                fontSize = 12.sp,
-                color = FuturesNavIdle,
-                textAlign = TextAlign.Center,
-                lineHeight = 18.sp
-            )
-            Surface(
-                color = FuturesAccent.copy(alpha = 0.15f),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                modifier = Modifier.padding(top = 8.dp)
-            ) {
-                Text(
-                    "🚧 در فاز بعدی پیاده‌سازی می‌شود",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    fontSize = 11.sp,
-                    color = FuturesAccentSoft
-                )
-            }
-        }
+private fun FuturesChartPlaceholder() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("📈 نمودار چندبازه‌ای به‌زودی", color = PumpWatchPalette.Muted, fontSize = 12.sp)
     }
 }
