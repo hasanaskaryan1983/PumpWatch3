@@ -20,6 +20,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,8 +41,9 @@ import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.GeckoOhlcv
 import com.pumpwatch.app.data.GeckoTerminal
 import com.pumpwatch.app.engine.MacdCalc
-import com.pumpwatch.app.ui.components.GlassCard // 🚀 اضافه شد
-import com.pumpwatch.app.ui.design.TabPalette // 🚀 اضافه شد
+import com.pumpwatch.app.ui.components.GlassCard
+import com.pumpwatch.app.ui.PumpWatchPalette
+import com.pumpwatch.app.ui.EditorialPageHeader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -49,14 +51,6 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-
-private val AGreen = Color(0xFF00E676)
-private val ARed = Color(0xFFFF5252)
-private val ABlue = Color(0xFF40C4FF)
-private val AGold = Color(0xFFFFC107)
-private val AGray = Color(0xFF8B949E)
-private val AOrange = Color(0xFFFFA726)
-private val ACyan = Color(0xFF26C6DA)
 
 private data class DexCandle(val o: Double, val h: Double, val l: Double, val c: Double)
 
@@ -112,95 +106,177 @@ fun AssistantScreen() {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("📊 تحلیل‌گر قواعدمحور", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-        Text("تحلیل تکنیکال CEX/DEX با RSI/MACD/EMA + جریان نهنگ‌ها (بدون AI)", fontSize = 12.sp, color = AGray, modifier = Modifier.padding(vertical = 8.dp))
+        EditorialPageHeader(
+            eyebrow = "RESEARCH · EXPLAINABLE",
+            title = "تحلیل‌گر قاعده‌محور",
+            subtitle = "تحلیل تکنیکال CEX/DEX با RSI/MACD/EMA + جریان نهنگ‌ها (بدون AI)",
+            accent = PumpWatchPalette.TabAssistant
+        )
 
-        GlassCard(accent = TabPalette.Assistant, modifier = Modifier.fillMaxWidth()) {
-            Column {
-                Text("ℹ️ این ابزار چگونه کار می‌کند؟", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-                Text("این تحلیل‌گر از مدل زبانی یا AI استفاده نمی‌کند. امتیاز ۰-۱۰۰ فقط از جمع وزن‌دار چند اندیکاتور تکنیکال (RSI، MACD، EMA) و نسبت خرید/فروش نهنگ‌ها محاسبه می‌شود. این امتیاز احتمال موفقیت کالیبره‌شده نیست و هیچ سابقهٔ backtest عمومی ندارد. مسئولیت تصمیم نهایی با شماست.", fontSize = 10.sp, color = AGray, lineHeight = 14.sp)
+        Spacer(Modifier.height(12.dp))
+
+        GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("ℹ️ این ابزار چگونه کار می‌کند؟", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                Text(
+                    "این تحلیل‌گر از مدل زبانی یا AI استفاده نمی‌کند. امتیاز ۰-۱۰۰ فقط از جمع وزن‌دار چند اندیکاتور تکنیکال (RSI، MACD، EMA) و نسبت خرید/فروش نهنگ‌ها محاسبه می‌شود. این امتیاز احتمال موفقیت کالیبره‌شده نیست و هیچ سابقهٔ backtest عمومی ندارد. مسئولیت تصمیم نهایی با شماست.",
+                    fontSize = 10.sp,
+                    color = PumpWatchPalette.Muted,
+                    lineHeight = 14.sp
+                )
             }
         }
 
         Spacer(Modifier.height(12.dp))
 
-        GlassCard(accent = TabPalette.Assistant, modifier = Modifier.fillMaxWidth()) {
-            Column {
-                Text("🔍 جستجوی ارز (نماد، اسم یا رتبه)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-                Spacer(Modifier.height(8.dp))
-                TextField(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("مثلاً: BTC ، ANSEM ، USELESS یا 46", fontSize = 11.sp) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true)
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = { doSearch() }, enabled = !loading, colors = ButtonDefaults.buttonColors(containerColor = TabPalette.Assistant), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    if (loading) CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), color = Color.Black, strokeWidth = 2.dp)
-                    Text(" تحلیل کن 🔍", fontSize = 12.sp, color = Color.Black)
+        GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🔍 جستجوی ارز (نماد، اسم یا رتبه)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                TextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("مثلاً: BTC ، ANSEM ، USELESS یا 46", fontSize = 11.sp, color = PumpWatchPalette.MutedDim) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    singleLine = true,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = PumpWatchPalette.GlassDeep,
+                        unfocusedContainerColor = PumpWatchPalette.GlassDeep,
+                        focusedTextColor = PumpWatchPalette.Text,
+                        unfocusedTextColor = PumpWatchPalette.Text,
+                        cursorColor = PumpWatchPalette.TabAssistant,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    )
+                )
+                Button(
+                    onClick = { doSearch() },
+                    enabled = !loading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PumpWatchPalette.TabAssistant,
+                        contentColor = PumpWatchPalette.Ink
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (loading) CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), color = PumpWatchPalette.Ink, strokeWidth = 2.dp)
+                    Text("تحلیل کن 🔍", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
-                if (searchStatus.isNotEmpty()) { Spacer(Modifier.height(6.dp)); Text(searchStatus, fontSize = 10.sp, color = if (searchStatus.contains("✅")) AGreen else if (searchStatus.contains("❌")) ARed else AGray) }
-                if (error != null) { Spacer(Modifier.height(6.dp)); Text(error ?: "", fontSize = 10.sp, color = ARed) }
+                if (searchStatus.isNotEmpty()) {
+                    Text(
+                        searchStatus,
+                        fontSize = 10.sp,
+                        color = when {
+                            searchStatus.contains("✅") -> PumpWatchPalette.Positive
+                            searchStatus.contains("❌") -> PumpWatchPalette.Negative
+                            else -> PumpWatchPalette.Muted
+                        }
+                    )
+                }
+                if (error != null) Text(error ?: "", fontSize = 10.sp, color = PumpWatchPalette.Negative)
             }
         }
 
         Spacer(Modifier.height(16.dp))
 
         searchResult?.let { a ->
-            GlassCard(accent = TabPalette.Assistant, modifier = Modifier.fillMaxWidth()) {
-                Column {
+            GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("${a.symbol}${if (a.isDex) " (DEX)" else ""}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = Color(0xFFE6EDF3))
-                            Text(a.name + (if (a.rank != null) " • رتبه #${a.rank}" else if (a.chainName != null) " • ${a.chainName}" else ""), fontSize = 11.sp, color = AGray)
+                            Text("${a.symbol}${if (a.isDex) " (DEX)" else ""}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Text)
+                            Text(
+                                a.name + (if (a.rank != null) " • رتبه #${a.rank}" else if (a.chainName != null) " • ${a.chainName}" else ""),
+                                fontSize = 11.sp,
+                                color = PumpWatchPalette.Muted
+                            )
                         }
-                        Text("${a.arrow} ${a.recommendation}", fontSize = 14.sp, fontWeight = FontWeight.Black, color = when { a.recommendation.contains("خرید") -> AGreen; a.recommendation.contains("فروش") -> ARed; else -> AGray })
+                        Text(
+                            "${a.arrow} ${a.recommendation}",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Black,
+                            color = when {
+                                a.recommendation.contains("خرید") -> PumpWatchPalette.Positive
+                                a.recommendation.contains("فروش") -> PumpWatchPalette.Negative
+                                else -> PumpWatchPalette.Muted
+                            }
+                        )
                     }
-                    Spacer(Modifier.height(8.dp))
+
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column { Text("📊 امتیاز فنی:", fontSize = 10.sp, color = AGray); Text("${a.score}/100", fontSize = 14.sp, color = AGold, fontWeight = FontWeight.Bold) }
-                        Column(horizontalAlignment = Alignment.End) { Text("🛡️ کیفیت داده:", fontSize = 10.sp, color = AGray); Text("${a.dataScore}/100", fontSize = 14.sp, color = ABlue, fontWeight = FontWeight.Bold) }
-                    }
-                    Text("امتیاز فنی = جمع وزن‌دار اندیکاتورها • کیفیت داده = پوشش و تازگی منابع (نه احتمال سود)", fontSize = 9.sp, color = AGray, modifier = Modifier.padding(top = 4.dp))
-                    Spacer(Modifier.height(8.dp))
-                    GlassCard(accent = TabPalette.Assistant, modifier = Modifier.fillMaxWidth()) {
                         Column {
-                            Text("🎯 سناریوی ابطال:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AOrange)
-                            Text(a.invalidationScenario, fontSize = 10.sp, color = AGray, lineHeight = 13.sp)
+                            Text("📊 امتیاز فنی:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                            Text("${a.score}/100", fontSize = 14.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("🛡️ کیفیت داده:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                            Text("${a.dataScore}/100", fontSize = 14.sp, color = PumpWatchPalette.Info, fontWeight = FontWeight.Bold)
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("⏱️ بازه اعتبار:", fontSize = 10.sp, color = AGray)
-                        Text(if (a.validityHours >= 24) "${a.validityHours / 24} روز" else "${a.validityHours} ساعت", fontSize = 11.sp, color = AOrange, fontWeight = FontWeight.Bold)
+                    Text(
+                        "امتیاز فنی = جمع وزن‌دار اندیکاتورها • کیفیت داده = پوشش و تازگی منابع (نه احتمال سود)",
+                        fontSize = 9.sp,
+                        color = PumpWatchPalette.MutedDim
+                    )
+
+                    // سناریوی ابطال (کادر داخلی با رنگ متفاوت)
+                    GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth()) {
+                        Column {
+                            Text("🎯 سناریوی ابطال:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
+                            Text(a.invalidationScenario, fontSize = 10.sp, color = PumpWatchPalette.Muted, lineHeight = 13.sp)
+                        }
                     }
-                    Text("پس از این زمان، اندیکاتورها تغییر می‌کنند و باید دوباره تحلیل کنید.", fontSize = 9.sp, color = AGray)
-                    Spacer(Modifier.height(8.dp))
-                    Text("📈 اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-                    a.indicators.forEach { (k, v) -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(k, fontSize = 10.sp, color = AGray); Text(v, fontSize = 10.sp, color = AGray) } }
-                    Spacer(Modifier.height(6.dp))
-                    Text("🐳 خرید نهنگ‌ها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-                    Text(a.whaleActivity, fontSize = 10.sp, color = AGray)
-                    Spacer(Modifier.height(6.dp))
-                    Text("💡 چرا این امتیاز؟", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-                    Text(a.reason, fontSize = 10.sp, color = AGray)
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("⏱️ بازه اعتبار:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                        Text(
+                            if (a.validityHours >= 24) "${a.validityHours / 24} روز" else "${a.validityHours} ساعت",
+                            fontSize = 11.sp,
+                            color = PumpWatchPalette.Warning,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text("پس از این زمان، اندیکاتورها تغییر می‌کنند و باید دوباره تحلیل کنید.", fontSize = 9.sp, color = PumpWatchPalette.MutedDim)
+
+                    Text("📈 اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                    a.indicators.forEach { (k, v) ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(k, fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                            Text(v, fontSize = 10.sp, color = PumpWatchPalette.Text)
+                        }
+                    }
+
+                    Text("🐳 خرید نهنگ‌ها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                    Text(a.whaleActivity, fontSize = 10.sp, color = PumpWatchPalette.Muted)
+
+                    Text("💡 چرا این امتیاز؟", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                    Text(a.reason, fontSize = 10.sp, color = PumpWatchPalette.Muted)
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
             if (a.formulaBreakdown.isNotEmpty()) {
-                GlassCard(accent = TabPalette.Assistant, modifier = Modifier.fillMaxWidth()) {
-                    Column {
-                        Text("📐 فرمول امتیازدهی (وزن‌های شفاف)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE6EDF3))
-                        Text("این امتیاز چگونه محاسبه شده؟", fontSize = 9.sp, color = AGray, modifier = Modifier.padding(bottom = 6.dp))
-                        a.formulaBreakdown.forEach { (indicator, weight) -> Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(indicator, fontSize = 10.sp, color = AGray); Text(weight, fontSize = 10.sp, color = AGold, fontWeight = FontWeight.Bold) } }
-                        Text("مجموع امتیازها در بازه ۰-۱۰۰ محدود شده است.", fontSize = 9.sp, color = AGray, modifier = Modifier.padding(top = 6.dp))
+                GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("📐 فرمول امتیازدهی (وزن‌های شفاف)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                        Text("این امتیاز چگونه محاسبه شده؟", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                        a.formulaBreakdown.forEach { (indicator, weight) ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(indicator, fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                                Text(weight, fontSize = 10.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text("مجموع امتیازها در بازه ۰-۱۰۰ محدود شده است.", fontSize = 9.sp, color = PumpWatchPalette.MutedDim)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
             }
 
             if (a.candles.isNotEmpty()) {
-                GlassCard(accent = TabPalette.Assistant, modifier = Modifier.fillMaxWidth()) {
-                    Column {
-                        Text("📊 نمودار ساعتی + میانگین‌های متحرک (قرمز=EMA20، آبی=EMA50)", fontSize = 10.sp, color = AGray)
-                        Spacer(Modifier.height(6.dp))
+                GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("📊 نمودار ساعتی + میانگین‌های متحرک (قرمز=EMA20، آبی=EMA50)", fontSize = 10.sp, color = PumpWatchPalette.Muted)
                         DexChart(a.candles)
                     }
                 }
@@ -212,18 +288,33 @@ fun AssistantScreen() {
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (a.coingeckoId != null) {
-                    Button(onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coingecko.com/en/coins/${a.coingeckoId}/chart"))) } catch (_: Throwable) { } }, colors = ButtonDefaults.buttonColors(containerColor = ABlue), shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) { Text("📊 نمودار CoinGecko", fontSize = 11.sp) }
+                    Button(
+                        onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coingecko.com/en/coins/${a.coingeckoId}/chart"))) } catch (_: Throwable) { } },
+                        colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Info, contentColor = PumpWatchPalette.Ink),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("📊 نمودار CoinGecko", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 }
                 if (a.poolUrl != null) {
-                    Button(onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(a.poolUrl))) } catch (_: Throwable) { } }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2230)), shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f)) { Text("🌊 استخر DEX", fontSize = 11.sp) }
+                    Button(
+                        onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(a.poolUrl))) } catch (_: Throwable) { } },
+                        colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("🌊 استخر DEX", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 }
             }
             Spacer(Modifier.height(12.dp))
-            
-            GlassCard(accent = TabPalette.Assistant, modifier = Modifier.fillMaxWidth()) {
-                Column {
-                    Text("⚠️ محدودیت‌های این تحلیل‌گر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ARed)
-                    Text("• این ابزار AI نیست — فقط چند فرمول تکنیکال ساده است\n• امتیاز ۰-۱۰۰ احتمال موفقیت کالیبره‌شده نیست\n• هیچ backtest عمومی روی این فرمول‌ها انجام نشده\n• مسئولیت تصمیم و معامله کاملاً با شماست", fontSize = 9.sp, color = AGray, lineHeight = 13.sp)
+
+            GlassCard(accent = PumpWatchPalette.Negative, modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("⚠️ محدودیت‌های این تحلیل‌گر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
+                    Text(
+                        "• این ابزار AI نیست — فقط چند فرمول تکنیکال ساده است\n• امتیاز ۰-۱۰۰ احتمال موفقیت کالیبره‌شده نیست\n• هیچ backtest عمومی روی این فرمول‌ها انجام نشده\n• مسئولیت تصمیم و معامله کاملاً با شماست",
+                        fontSize = 9.sp,
+                        color = PumpWatchPalette.Muted,
+                        lineHeight = 13.sp
+                    )
                 }
             }
         }
@@ -232,6 +323,10 @@ fun AssistantScreen() {
 
 @Composable
 private fun DexChart(candles: List<DexCandle>) {
+    val upColor = PumpWatchPalette.Positive
+    val downColor = PumpWatchPalette.Negative
+    val ema20Color = PumpWatchPalette.Negative.copy(alpha = 0.9f)
+    val ema50Color = PumpWatchPalette.Info
     Canvas(modifier = Modifier.fillMaxWidth().height(200.dp)) {
         val vis = candles.takeLast(80)
         if (vis.size < 5) return@Canvas
@@ -242,7 +337,7 @@ private fun DexChart(candles: List<DexCandle>) {
         fun y(v: Double) = (h - ((v - minV) / range * h * 0.9 + h * 0.05)).toFloat()
 
         vis.forEachIndexed { i, c ->
-            val x = i * cw + cw / 2; val col = if (c.c >= c.o) AGreen else ARed
+            val x = i * cw + cw / 2; val col = if (c.c >= c.o) upColor else downColor
             drawLine(col, Offset(x, y(c.h)), Offset(x, y(c.l)), strokeWidth = 2f)
             val yo = y(c.o); val yc = y(c.c)
             drawRect(col, topLeft = Offset(x - bw / 2, min(yo, yc)), size = Size(bw, max(3f, abs(yo - yc))))
@@ -258,7 +353,7 @@ private fun DexChart(candles: List<DexCandle>) {
                 prev = cur
             }
         }
-        drawLine2(e20, ARed); drawLine2(e50, ACyan)
+        drawLine2(e20, ema20Color); drawLine2(e50, ema50Color)
     }
 }
 
@@ -314,7 +409,7 @@ private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String
         val dataScore = when { rank != null && rank <= 10 -> 95; rank != null && rank <= 50 -> 85; rank != null && rank <= 100 -> 75; rank != null && rank <= 500 -> 60; rank != null -> 50; else -> 30 }
         val invalidation = when { score >= 65 -> "اگر RSI > ۷۰ یا MACD نزولی شود، این توصیه باطل است."; score <= 35 -> "اگر RSI < ۳۰ یا MACD صعودی شود، این توصیه باطل است."; else -> "اگر RSI یا MACD سیگنال قوی بدهند، این توصیه باطل است." }
         val validityHours = when { closes.size >= 24 -> 24; closes.size >= 12 -> 12; else -> 4 }
-        
+
         CoinAnalysis(symbol.uppercase(Locale.US), name, coingeckoId, rank, score.coerceIn(0, 100), rec, arrow, ind, whale, "رتبه #$rank • امتیاز $score/100", dataScore, false, null, poolUrl, emptyList(), invalidation, validityHours, formula)
     } catch (t: Throwable) {
         CoinAnalysis(symbol, name, coingeckoId, rank, 50, "صبر", "➡️", mapOf("خطا" to "داده نیست"), "بدون داده", "تحلیل در دسترس نیست", 50, false, null, null, emptyList(), "داده کافی برای تعیین سناریوی ابطال موجود نیست.", 4, emptyMap())
@@ -349,7 +444,7 @@ private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Disp
         score += when { ch24 > 5 -> 10; ch24 > 0 -> 5; ch24 < -5 -> -10; else -> -3 }
         ind["روند ۲۴س"] = String.format(Locale.US, "%+.1f%%", ch24) + if (ch24 > 0) " 🟢" else " 🔴"
         when { ch24 > 5 -> formula["روند ۲۴س > ۵٪"] = "+۱۰"; ch24 > 0 -> formula["روند ۲۴س > ۰٪"] = "+۵"; ch24 < -5 -> formula["روند ۲۴س < −۵٪"] = "−۱۰"; else -> formula["روند ۲۴س خنثی"] = "−۳" }
-        
+
         score += when { ratio >= 0.6 -> 10; ratio >= 0.5 -> 4; ratio <= 0.4 -> -10; else -> 0 }
         ind["فشار خرید نهنگی"] = "${(ratio * 100).toInt()}٪" + if (ratio >= 0.6) " " else if (ratio <= 0.4) " 🔴" else " ⚪"
         when { ratio >= 0.6 -> formula["فشار خرید ≥ ۶۰٪"] = "+۱۰"; ratio >= 0.5 -> formula["فشار خرید ≥ ۵۰٪"] = "+۴"; ratio <= 0.4 -> formula["فشار خرید ≤ ۴۰٪"] = "−۱۰" }
