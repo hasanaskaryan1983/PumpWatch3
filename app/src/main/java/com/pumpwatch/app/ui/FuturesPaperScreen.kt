@@ -15,8 +15,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,17 +36,11 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.Trade
 import com.pumpwatch.app.engine.PaperTradingEngine
 import com.pumpwatch.app.store.TradeStore
+import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-private val FGreen = Color(0xFF00E676)
-private val FRed = Color(0xFFFF5252)
-private val FGold = Color(0xFFFFC107)
-private val FGray = Color(0xFF8B949E)
-private val FBlue = Color(0xFF40C4FF)
-private val FCard = Color(0xFF1A0E0E)
 
 @Composable
 fun FuturesPaperScreen() {
@@ -54,7 +48,6 @@ fun FuturesPaperScreen() {
     val scope = rememberCoroutineScope()
     var trades by remember { mutableStateOf<List<Trade>>(emptyList()) }
     var msg by remember { mutableStateOf("") }
-    // 🚀 Commit 105: سوییچ opt-in واقعی
     var isEnabled by remember { mutableStateOf(TradeStore.isEnabled(context)) }
 
     fun reload() {
@@ -74,100 +67,64 @@ fun FuturesPaperScreen() {
     val open = trades.filter { it.status == "OPEN" }
     val closed = trades.filter { it.status == "CLOSED" }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        EditorialPageHeader(
+            eyebrow = "FUTURES · PAPER",
+            title = "Paper فیوچرز",
+            subtitle = "معاملات کاغذی از سیگنال‌های تاییدشده • استاپ شناور",
+            accent = PumpWatchPalette.TabAssistant
+        )
+
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("📝 Paper فیوچرز", fontWeight = FontWeight.Black, fontSize = 18.sp)
-            Spacer(Modifier.weight(1f))
-            // 🚀 Commit 105: سوییچ opt-in واقعی
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (isEnabled) "✅ فعال" else "⚫ غیرفعال",
-                    fontSize = 10.sp,
-                    color = if (isEnabled) FGreen else FGray,
-                    fontWeight = FontWeight.Bold
-                )
+                Text(if (isEnabled) "✅ فعال" else "⚫ غیرفعال", fontSize = 10.sp, color = if (isEnabled) PumpWatchPalette.Positive else PumpWatchPalette.Muted, fontWeight = FontWeight.Bold)
                 Switch(
                     checked = isEnabled,
                     onCheckedChange = { enabled ->
                         isEnabled = enabled
                         TradeStore.setEnabled(context, enabled)
-                        msg = if (enabled) "✅ Paper فیوچرز فعال شد — از Dashboard تمرین کن"
-                              else "⚫ Paper فیوچرز غیرفعال شد"
+                        msg = if (enabled) "✅ Paper فیوچرز فعال شد — از Dashboard تمرین کن" else "⚫ Paper فیوچرز غیرفعال شد"
                     },
-                    modifier = Modifier.padding(start = 4.dp)
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = PumpWatchPalette.Ink,
+                        checkedTrackColor = PumpWatchPalette.TabAssistant,
+                        uncheckedThumbColor = PumpWatchPalette.Muted,
+                        uncheckedTrackColor = PumpWatchPalette.Glass
+                    )
                 )
             }
+            Spacer(Modifier.weight(1f))
             TextButton(onClick = {
                 scope.launch {
                     try {
                         val closed = PaperTradingEngine.checkAndClose(context)
-                        if (closed.isNotEmpty()) msg = "🔔 ${closed.size} ترید بسته شد"
-                        else msg = "✅ وضعیت تریدها به‌روز شد"
+                        if (closed.isNotEmpty()) msg = "🔔 ${closed.size} ترید بسته شد" else msg = "✅ وضعیت تریدها به‌روز شد"
                     } catch (_: Exception) { msg = "⚠️ خطا" }
                     reload()
                 }
-            }) { Text("🔄 بررسی", fontSize = 11.sp) }
+            }) { Text("🔄 بررسی", fontSize = 11.sp, color = PumpWatchPalette.TabAssistant) }
         }
-
-        // 🚀 Commit 105: متن صادقانه (حذف ادعای "خودکار")
-        Text(
-            "معاملات کاغذی از سیگنال‌های تاییدشده • استاپ شناور (ExitEngine) • رمزنگاری‌شده\n" +
-            "💡 برای بازکردن ترید، از تب «تابلوی سیگنال» دکمهٔ «📝 تمرین» را بزن",
-            fontSize = 9.sp, color = FGray, lineHeight = 15.sp
-        )
 
         if (!isEnabled) {
-            Surface(
-                color = FGold.copy(alpha = 0.15f),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "⚠️ Paper غیرفعال است — سوییچ بالا را روشن کن تا بتوانی از سیگنال‌ها تمرین کنی",
-                    fontSize = 10.sp,
-                    color = FGold,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(12.dp)
-                )
+            GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth()) {
+                Text("⚠️ Paper غیرفعال است — سوییچ بالا را روشن کن تا بتوانی از سیگنال‌ها تمرین کنی", fontSize = 10.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
             }
         }
 
-        if (msg.isNotEmpty()) Text(msg, fontSize = 10.sp, color = FGold, fontWeight = FontWeight.Bold)
+        if (msg.isNotEmpty()) Text(msg, fontSize = 10.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
 
-        Text("🟢 باز (${open.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGreen)
+        Text("🟢 باز (${open.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PumpWatchPalette.Positive)
         if (open.isEmpty()) {
-            Text(
-                if (isEnabled) "فعلاً ترید باز FUT نداری — از Dashboard سیگنال‌ها را تمرین کن"
-                else "Paper غیرفعال است — سوییچ بالا را روشن کن",
-                fontSize = 10.sp, color = FGray
-            )
+            Text(if (isEnabled) "فعلاً ترید باز FUT نداری — از Dashboard سیگنال‌ها را تمرین کن" else "Paper غیرفعال است", fontSize = 10.sp, color = PumpWatchPalette.Muted)
         } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                items(open) { t -> PaperTradeCard(t) { price ->
-                    PaperTradingEngine.closeManual(context, t.id, price)
-                    reload()
-                } }
+            LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(open) { t -> PaperTradeCard(t) { price -> PaperTradingEngine.closeManual(context, t.id, price); reload() } }
             }
         }
 
-        Text("⚫ بسته اخیر (${closed.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FGray)
-        if (closed.isEmpty()) {
-            Text("هنوز تریدی بسته نشده", fontSize = 10.sp, color = FGray)
-        } else {
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 300.dp),
-                contentPadding = PaddingValues(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+        Text("⚫ بسته اخیر (${closed.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PumpWatchPalette.Muted)
+        if (closed.isNotEmpty()) {
+            LazyColumn(modifier = Modifier.heightIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(closed.take(10)) { t -> ClosedTradeCard(t) }
             }
         }
@@ -176,88 +133,53 @@ fun FuturesPaperScreen() {
 
 @Composable
 private fun PaperTradeCard(t: Trade, onClose: (Double) -> Unit) {
-    val dirColor = if (t.side == "PUMP") FGreen else FRed
+    val dirColor = if (t.side == "PUMP") PumpWatchPalette.Positive else PumpWatchPalette.Negative
     val dirLabel = if (t.side == "PUMP") "🚀 LONG" else "🩸 SHORT"
-    val unrealizedPnlPct = if (t.side == "PUMP")
-        (t.currentPrice - t.entryPrice) / t.entryPrice * 100.0
-    else
-        (t.entryPrice - t.currentPrice) / t.entryPrice * 100.0
+    val unrealizedPnlPct = if (t.side == "PUMP") (t.currentPrice - t.entryPrice) / t.entryPrice * 100.0 else (t.entryPrice - t.currentPrice) / t.entryPrice * 100.0
 
-    Surface(color = FCard, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(t.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
+                Text(t.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = PumpWatchPalette.Text)
                 Spacer(Modifier.width(6.dp))
-                Surface(color = dirColor.copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
-                    Text(
-                        dirLabel,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontSize = 9.sp, fontWeight = FontWeight.Bold, color = dirColor
-                    )
+                androidx.compose.material3.Surface(color = dirColor.copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
+                    Text(dirLabel, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = dirColor)
                 }
                 Spacer(Modifier.weight(1f))
-                Text(
-                    String.format(Locale.US, "%+.2f%%", unrealizedPnlPct),
-                    fontSize = 13.sp, fontWeight = FontWeight.Black,
-                    color = if (unrealizedPnlPct >= 0) FGreen else FRed
-                )
-            }
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("ورود: ${String.format(Locale.US, "$%.4f", t.entryPrice)}", fontSize = 10.sp, color = FGray)
-                Text("جاری: ${String.format(Locale.US, "$%.4f", t.currentPrice)}", fontSize = 10.sp, color = FBlue, fontWeight = FontWeight.Bold)
+                Text(String.format(Locale.US, "%+.2f%%", unrealizedPnlPct), fontSize = 13.sp, fontWeight = FontWeight.Black, color = if (unrealizedPnlPct >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("استاپ: ${String.format(Locale.US, "$%.4f", t.currentStop)}", fontSize = 10.sp, color = FRed)
-                Text("تارگت: ${t.target2?.let { String.format(Locale.US, "$%.4f", it) } ?: "—"}", fontSize = 10.sp, color = FGreen)
+                Text("ورود: ${String.format(Locale.US, "$%.4f", t.entryPrice)}", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                Text("جاری: ${String.format(Locale.US, "$%.4f", t.currentPrice)}", fontSize = 10.sp, color = PumpWatchPalette.Info, fontWeight = FontWeight.Bold)
             }
-
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("استاپ: ${String.format(Locale.US, "$%.4f", t.currentStop)}", fontSize = 10.sp, color = PumpWatchPalette.Negative)
+                Text("تارگت: ${t.target2?.let { String.format(Locale.US, "$%.4f", it) } ?: "—"}", fontSize = 10.sp, color = PumpWatchPalette.Positive)
+            }
             val timeFmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.US) }
-            Text(
-                "باز از ${timeFmt.format(Date(t.entryTime))}",
-                fontSize = 9.sp, color = FGray
-            )
-
+            Text("باز از ${timeFmt.format(Date(t.entryTime))}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
             Button(
                 onClick = { onClose(t.currentPrice) },
-                colors = ButtonDefaults.buttonColors(containerColor = FRed.copy(alpha = 0.2f)),
+                colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Negative.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("❌ بستن دستی", fontSize = 10.sp) }
+            ) { Text("❌ بستن دستی", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
         }
     }
 }
 
 @Composable
 private fun ClosedTradeCard(t: Trade) {
-    val pnl = t.exitPrice?.let { exit ->
-        if (t.side == "PUMP") (exit - t.entryPrice) / t.entryPrice * 100.0
-        else (t.entryPrice - exit) / t.entryPrice * 100.0
-    } ?: 0.0
-    val pnlColor = if (pnl >= 0) FGreen else FRed
+    val pnl = t.exitPrice?.let { exit -> if (t.side == "PUMP") (exit - t.entryPrice) / t.entryPrice * 100.0 else (t.entryPrice - exit) / t.entryPrice * 100.0 } ?: 0.0
+    val pnlColor = if (pnl >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative
     val timeFmt = remember { SimpleDateFormat("MM/dd HH:mm", Locale.US) }
-
-    Surface(color = FCard.copy(alpha = 0.8f), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+    GlassCard(accent = PumpWatchPalette.TabAssistant, radius = 10.dp, modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "${t.symbol} • ${if (t.side == "PUMP") "LONG" else "SHORT"} • ${t.exitReason ?: "?"}",
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White
-                )
-                Text(
-                    t.entryTime.let { timeFmt.format(Date(it)) } +
-                        (t.exitTime?.let { " → " + timeFmt.format(Date(it)) } ?: ""),
-                    fontSize = 8.sp, color = FGray
-                )
+                Text("${t.symbol} • ${if (t.side == "PUMP") "LONG" else "SHORT"} • ${t.exitReason ?: "?"}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                Text(t.entryTime.let { timeFmt.format(Date(it)) } + (t.exitTime?.let { " → " + timeFmt.format(Date(it)) } ?: ""), fontSize = 8.sp, color = PumpWatchPalette.Muted)
             }
-            Text(
-                String.format(Locale.US, "%+.2f%%", pnl),
-                fontSize = 13.sp, fontWeight = FontWeight.Black, color = pnlColor
-            )
+            Text(String.format(Locale.US, "%+.2f%%", pnl), fontSize = 13.sp, fontWeight = FontWeight.Black, color = pnlColor)
         }
     }
 }
