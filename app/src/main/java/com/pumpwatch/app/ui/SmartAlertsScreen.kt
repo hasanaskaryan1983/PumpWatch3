@@ -121,11 +121,12 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
 
-    var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    // 🔗 از هاب بازار می‌خوانیم: بازگشت به تب = نمایش آنی، بدون اسکن از صفر
+    var coins by remember { mutableStateOf<List<CoinMarket>>(MarketHub.coins) }
+    var loading by remember { mutableStateOf(MarketHub.coins.isEmpty()) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf("ALL") }
-    
+
     // 🚀 Commit 163: زمان بارگذاری برای محاسبه ageSec واقعی در SourceAgeLine
     var loadTimeMs by remember { mutableStateOf(0L) }
 
@@ -147,7 +148,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             errorMsg = null
             loadTimeMs = System.currentTimeMillis()
             try {
-                coins = ApiClient.getTop1000Coins(forceRefresh = force)
+                coins = MarketHub.ensure(force)
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -163,7 +164,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             loadTimeMs = System.currentTimeMillis()
             try {
                 ApiClient.clearMemoryCache()
-                coins = ApiClient.getTop1000Coins(forceRefresh = true)
+                coins = MarketHub.ensure(force = true)
             } catch (e: Exception) {
                 errorMsg = "خطا در دریافت اطلاعات: ${e.message}"
             } finally {
@@ -231,6 +232,14 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             modifier = Modifier.padding(horizontal = 16.dp),
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+        )
+
+        // 🕒 زمان آخرین دریافت داده از هاب
+        Text(
+            "🕒 آخرین دریافت: ${hubAgeText(MarketHub.lastUpdateMs)}",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            fontSize = 9.sp,
+            color = AGray
         )
 
         if (resetMsg != null) {
@@ -428,7 +437,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                     } else {
                         if (a.early) "ریزش زودهنگام" else "دامپ شدید"
                     }
-                    
+
                     AlertCard(
                         a = AlertView(
                             symbol = a.coin.symbol.uppercase(Locale.US),
