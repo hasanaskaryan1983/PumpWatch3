@@ -17,8 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,13 +40,7 @@ import com.pumpwatch.app.data.WhaleExporter
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.store.TradeStore
-
-private val PrGreen = Color(0xFF00E676)
-private val PrRed = Color(0xFFFF5252)
-private val PrGold = Color(0xFFFFC107)
-private val PrGray = Color(0xFF8B949E)
-private val PrCard = Color(0xFF1A2230)
-private val PrBlue = Color(0xFF40C4FF)
+import com.pumpwatch.app.ui.components.GlassCard
 
 internal fun dataProviders(): List<Pair<String, String>> = listOf(
     "CoinGecko" to "قیمت، رتبهٔ بازار و نمودارهای تاریخی",
@@ -65,12 +58,12 @@ private fun StatusRow(title: String, value: String, ok: Boolean) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, fontSize = 11.sp, color = PrGray, modifier = Modifier.weight(1f))
+        Text(title, fontSize = 11.sp, color = PumpWatchPalette.Muted, modifier = Modifier.weight(1f))
         Text(
             value,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            color = if (ok) PrGreen else PrRed
+            color = if (ok) PumpWatchPalette.Positive else PumpWatchPalette.Negative
         )
     }
 }
@@ -96,11 +89,13 @@ fun PrivacyCenterScreen() {
     }
 
     if (showMethodology) {
+        // فرض بر این است که این کامپوزابل در جای دیگری تعریف شده است
         MethodologyScreen(onBack = { showMethodology = false })
         return
     }
 
     if (showRiskDisclosure) {
+        // فرض بر این است که این کامپوزابل در جای دیگری تعریف شده است
         RiskDisclosureScreen(onBack = { showRiskDisclosure = false })
         return
     }
@@ -112,16 +107,16 @@ fun PrivacyCenterScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("🔒 مرکز حریم خصوصی", fontWeight = FontWeight.Black, fontSize = 18.sp)
-        Text(
-            "این اپ غیرامانی است: هیچ کلید صرافی، seed یا دارایی نگه نمی‌دارد. " +
-                "دادهٔ کیف‌پول فقط روی همین دستگاه است.",
-            fontSize = 10.sp, color = PrGold, lineHeight = 16.sp
+        EditorialPageHeader(
+            eyebrow = "SECURITY · PRIVACY",
+            title = "مرکز حریم خصوصی",
+            subtitle = "این اپ غیرامانی است: هیچ کلید صرافی یا seed نگه نمی‌دارد. داده فقط روی همین دستگاه است.",
+            accent = PumpWatchPalette.TabWallet
         )
 
-        Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("🛡️ وضعیت امنیتی", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PrBlue)
+                Text("🛡️ وضعیت امنیتی", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Info)
                 StatusRow(
                     "رمزنگاری داده‌ها",
                     if (keystoreOk) "فعال (AES-256-GCM / Keystore)" else "در دسترس نیست!",
@@ -136,8 +131,8 @@ fun PrivacyCenterScreen() {
                 )
 
                 if (keystoreFailed) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = PrRed.copy(alpha = 0.15f)),
+                    Surface(
+                        color = PumpWatchPalette.Negative.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -146,14 +141,14 @@ fun PrivacyCenterScreen() {
                                 "🚨 خطای امنیتی بحرانی",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = PrRed
+                                color = PumpWatchPalette.Negative
                             )
                             Text(
                                 "Keystore این دستگاه کار نمی‌کند. داده‌های جدید ذخیره نمی‌شوند. " +
                                 "ممکن است PIN/بیومتریک تغییر کرده باشد. " +
                                 "برای رفع: اپ را کامل حذف و دوباره نصب کنید.",
                                 fontSize = 10.sp,
-                                color = PrRed,
+                                color = PumpWatchPalette.Negative,
                                 lineHeight = 14.sp
                             )
                         }
@@ -162,39 +157,39 @@ fun PrivacyCenterScreen() {
             }
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("📡 منابع دادهٔ اپ", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PrBlue)
+                Text("📡 منابع دادهٔ اپ", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Info)
                 dataProviders().forEach { (name, purpose) ->
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PrGray)
-                        Text(purpose, fontSize = 9.sp, color = PrGray)
+                        Text(name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Muted)
+                        Text(purpose, fontSize = 9.sp, color = PumpWatchPalette.Muted)
                     }
                 }
                 Text(
                     "هیچ‌کدام از این منابع دادهٔ هویتی شما را دریافت نمی‌کنند؛ فقط دادهٔ عمومی بازار.",
-                    fontSize = 9.sp, color = PrGold
+                    fontSize = 9.sp, color = PumpWatchPalette.Warning
                 )
             }
         }
 
         Button(
             onClick = { showMethodology = true },
-            colors = ButtonDefaults.buttonColors(containerColor = PrBlue.copy(alpha = 0.2f)),
+            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Info.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
-        ) { Text("📖 متدولوژی و ریسک: هر عدد از کجا می‌آید؟", fontSize = 11.sp) }
+        ) { Text("📖 متدولوژی و ریسک: هر عدد از کجا می‌آید؟", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
         Button(
             onClick = { showRiskDisclosure = true },
-            colors = ButtonDefaults.buttonColors(containerColor = PrGold.copy(alpha = 0.2f)),
+            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.fillMaxWidth()
-        ) { Text("📜 صداقت و محدودیت‌ها: چه نمی‌توانم بگویم", fontSize = 11.sp) }
+        ) { Text("📜 صداقت و محدودیت‌ها: چه نمی‌توانم بگویم", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
-        Card(colors = CardDefaults.cardColors(containerColor = PrCard), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+        GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("🎛️ کنترل داده‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PrBlue)
+                Text("🎛️ کنترل داده‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Info)
 
                 Button(
                     onClick = {
@@ -202,10 +197,10 @@ fun PrivacyCenterScreen() {
                         KlineCache.clear()
                         statusMsg = "✅ کش حافظه پاک شد (دادهٔ دیسک دست‌نخورده)"
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrBlue.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Info.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("🧹 پاک‌کردن کش حافظه", fontSize = 11.sp) }
+                ) { Text("🧹 پاک‌کردن کش حافظه", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
                 Button(
                     onClick = {
@@ -225,10 +220,10 @@ fun PrivacyCenterScreen() {
                             statusMsg = "📤 خروجی ساخته شد"
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrGold.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text(if (confirmExport) "مطمئنی؟ خروجی بگیر" else "📤 خروجی گرفتن از ledger", fontSize = 11.sp) }
+                ) { Text(if (confirmExport) "مطمئنی؟ خروجی بگیر" else "📤 خروجی گرفتن از ledger", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
                 Button(
                     onClick = {
@@ -249,21 +244,21 @@ fun PrivacyCenterScreen() {
                         )
                         statusMsg = "📤 فایل ${favorites.size} نهنگ آمادهٔ اشتراک‌گذاری است"
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrGreen.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Positive.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("📤 Export نهنگ‌ها (JSON)", fontSize = 11.sp) }
+                ) { Text("📤 Export نهنگ‌ها (JSON)", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
                 Button(
                     onClick = {
                         statusMsg = "📥 Import: پس از Export، فایل JSON را در Notes/Drive نگه دار. برای Import فعلاً باید فایل را در Privacy Center کپی/پیست کنی (فاز بعدی)."
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrGreen.copy(alpha = 0.2f)),
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Positive.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("📥 Import نهنگ‌ها (راهنما)", fontSize = 11.sp) }
+                ) { Text("📥 Import نهنگ‌ها (راهنما)", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
-                // 🚀 Commit 111: Wipe کامل همه store ها (بدون clearAll)
+                // 🚀 Commit 111: Wipe کامل همه store ها
                 Button(
                     onClick = {
                         if (!confirmWipe) {
@@ -272,14 +267,10 @@ fun PrivacyCenterScreen() {
                         } else {
                             TradeStore.clearAll(context)
                             SignalLogger.clear(context)
-                            // 🚀 Commit 111: AlertRulesStore متد clearAll ندارد → save لیست خالی
                             try { AlertRulesStore.save(context, emptyList()) } catch (_: Exception) { }
-                            // پاک کردن Paper State
                             prefs.edit().remove("paper_state").apply()
                             prefs.edit().remove("paper_alloc").apply()
-                            // پاک کردن SecureStorage
                             SecureStorage.wipeAll(context)
-                            // پاک کردن کش
                             ApiClient.clearMemoryCache()
                             KlineCache.clear()
                             confirmWipe = false
@@ -287,14 +278,15 @@ fun PrivacyCenterScreen() {
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (confirmWipe) PrRed else PrRed.copy(alpha = 0.2f)
+                        containerColor = if (confirmWipe) PumpWatchPalette.Negative else PumpWatchPalette.Negative.copy(alpha = 0.2f),
+                        contentColor = PumpWatchPalette.Text
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text(if (confirmWipe) "تأیید نهایی: پاک کن!" else "🗑️ حذف همهٔ داده‌ها", fontSize = 11.sp) }
+                ) { Text(if (confirmWipe) "تأیید نهایی: پاک کن!" else "🗑️ حذف همهٔ داده‌ها", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
 
                 if (statusMsg.isNotEmpty()) {
-                    Text(statusMsg, fontSize = 10.sp, color = PrGold, fontWeight = FontWeight.Bold)
+                    Text(statusMsg, fontSize = 10.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -302,7 +294,7 @@ fun PrivacyCenterScreen() {
         Spacer(Modifier.height(8.dp))
         Text(
             "💡 این صفحه خودش هیچ داده‌ای ارسال نمی‌کند؛ فقط وضعیت واقعی دستگاه را نشان می‌دهد.",
-            fontSize = 9.sp, color = PrGray
+            fontSize = 9.sp, color = PumpWatchPalette.Muted
         )
     }
 }
