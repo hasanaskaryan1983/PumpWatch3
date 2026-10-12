@@ -61,6 +61,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.work.BackoffPolicy
@@ -113,14 +114,12 @@ private val FreshYellow = ContractGold
 private val FreshRed = FuturesAccent
 private val FreshGray = TextSecondary
 
-// 🔧 لیست سیاه ارزهای نامعتبر (stablecoinها و توکن‌های مشکوک)
 private val COIN_BLACKLIST = setOf(
     "figr-heloc", "usd-coin", "tether", "binance-usd", "dai", "true-usd",
     "usdd", "frax", "pax-dollar", "gemini-dollar", "binance-peg-busd",
     "first-digital-usd", "ethena-usde", "paypal-usd", "usdb"
 )
 
-// 🔧 کانترکت‌های رسمیِ نسخهٔ پیچیده (Wrapped) برای ارزهای بومیِ اصلی
 private val WRAPPED_CONTRACTS = mapOf(
     "ethereum" to ("Ethereum" to "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     "binancecoin" to ("BSC" to "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
@@ -253,7 +252,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
 
     val accent = if (isFutures) FuturesModeAccent else SpotAccent
     CosmicBackdrop(accent = accent) {
-        // 🔧 سراسری: رنگ پیش‌فرض همهٔ متن‌ها روشن می‌شود (رفع متن‌های مشکی در فیوچرز و سایر تب‌ها)
         CompositionLocalProvider(LocalContentColor provides PumpWatchPalette.Text) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Surface(
@@ -274,7 +272,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         ) {
                             PumpDumpMark(accent)
                             Column {
-                                // 🔧 لوگو: یک Text واحد با دو رنگ تا ترتیب لاتین در RTL برعکس نشود
                                 Text(
                                     buildAnnotatedString {
                                         withStyle(SpanStyle(color = PumpWatchPalette.Positive, fontWeight = FontWeight.Black)) { append("Pump") }
@@ -378,7 +375,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
-// 🔧 ردیف کانترکت: همیشه نمایش داده می‌شود + همیشه یک دکمهٔ کپی دارد
 @Composable
 private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRef: ContractRef?) {
     val copied = remember { mutableStateOf(false) }
@@ -398,7 +394,6 @@ private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRe
         modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
     ) {
         when {
-            // حالت ۱: کانترکت واقعی از CoinGecko
             contractRef != null -> {
                 Text("${contractRef.chain}: ", fontSize = 9.sp, color = ContractGold, fontWeight = FontWeight.Bold)
                 Text(
@@ -412,7 +407,6 @@ private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRe
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                 ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) }
             }
-            // حالت ۲: ارز بومی با کانترکت رسمیِ Wrapped
             wrapped != null -> {
                 Text("${wrapped.first} · پیچیده: ", fontSize = 9.sp, color = ContractGold, fontWeight = FontWeight.Bold)
                 Text(
@@ -426,7 +420,6 @@ private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRe
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                 ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) }
             }
-            // حالت ۳: ارز بومی بدون هیچ کانترکت — کپیِ نماد
             else -> {
                 Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TextSecondary, modifier = Modifier.weight(1f))
                 Button(
@@ -513,7 +506,6 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 
     LaunchedEffect(Unit) { load() }
 
-    // 🔧 فیلتر ارزهای نامعتبر
     val filteredCoins = coins.filter { it.id.lowercase() !in COIN_BLACKLIST }
     val shown = if (query.isBlank()) filteredCoins
     else filteredCoins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
@@ -668,7 +660,6 @@ fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
                     MarketLink(coin, context)
                 }
             }
-            // 🔧 همیشه نمایش داده می‌شود
             ContractRow(context, coin.id, coin.symbol, contractRef)
         }
     }
@@ -701,7 +692,6 @@ private fun MarketLink(coin: CoinMarket, context: Context) {
     )
 }
 
-// 🔧 توابع کمکی فرمت قیمت و ارزش بازار
 private fun fmtPrice(p: Double): String = when {
     p >= 1000 -> String.format(Locale.US, "$%.2f", p)
     p >= 1 -> String.format(Locale.US, "$%.4f", p)
