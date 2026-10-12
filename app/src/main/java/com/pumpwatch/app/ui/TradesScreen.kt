@@ -57,9 +57,6 @@ import com.pumpwatch.app.engine.PositionSizer
 import com.pumpwatch.app.engine.ScoringEngine
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
-import com.pumpwatch.app.ui.EditorialPageHeader
-import com.pumpwatch.app.ui.PumpWatchPalette
-import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -74,6 +71,9 @@ import kotlin.math.abs
 import kotlin.math.min
 
 private val GSON = Gson()
+
+// 🔧 نگهبان: اگر کمتر از ۵ دقیقه از آخرین اسکن گذشته، با بازکردن تب دوباره اسکن نکن
+private var lastCycleMs = 0L
 
 data class PaperTrade(
     var symbol: String = "", var tier: String = "", var entry: Double = 0.0,
@@ -329,13 +329,16 @@ fun TradesScreen() {
                     openTrade(pk.symbol, tierName, pk.price, pk.total, pk.atr, size); openedNow++; consensusOpened++
                 }
                 save()
+                // 🔧 ثبت زمان آخرین اسکن موفق
+                lastCycleMs = System.currentTimeMillis()
                 val e = equity()
                 status = "✅ اسکن کامل | دارایی: ${usd(e)} | باز: ${openTrades().size} | بسته: $closedNow | باز شد: $openedNow | اجماع ≥۸۰: ${consensus.count { it.total >= 80 }}"
             } catch (t: Throwable) { status = "⚠️ خطا: ${t.message}" }
         }
     }
 
-    LaunchedEffect(Unit) { cycle() }
+    // 🔧 فقط اگر آخرین اسکن älتر از ۵ دقیقه است، اسکن اولیه انجام بده
+    LaunchedEffect(Unit) { if (System.currentTimeMillis() - lastCycleMs > 5 * 60_000L) cycle() }
     LaunchedEffect(botOn) { if (botOn) { while (true) { delay(5 * 60 * 1000); cycle() } } }
 
     val closed = state.trades.filter { it.status == "CLOSED" }
@@ -674,7 +677,6 @@ private fun EquityChart(curve: List<Double>) {
             val col = if (curve[i] >= curve[i - 1]) PumpWatchPalette.Positive else PumpWatchPalette.Negative
             drawLine(col, Offset(x1, y(curve[i - 1])), Offset(x2, y(curve[i])), strokeWidth = 3f)
         }
-        // 🔧 اصلاح: استفاده از مقدار Int مستقیم به‌جای toArgb()
         val paint = android.graphics.Paint().apply { textSize = 22f; color = 0xFFA6B7D2.toInt() }
         drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%.0f", maxV), 4f, y(maxV) + 14f, paint)
         drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%.0f", minV), 4f, y(minV) - 4f, paint)
