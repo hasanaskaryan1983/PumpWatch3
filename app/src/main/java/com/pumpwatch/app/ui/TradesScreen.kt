@@ -57,6 +57,7 @@ import com.pumpwatch.app.engine.PositionSizer
 import com.pumpwatch.app.engine.ScoringEngine
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
+import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -287,7 +288,7 @@ fun TradesScreen() {
                 for ((sym, w) in whaleMap) {
                     if (seen.contains(sym)) continue; if (coins.any { it.symbol.equals(sym, true) }) continue; seen.add(sym)
                     val px = dexInfo[sym]?.first ?: continue; var total = 50
-                    total += when { w.first >= 0.7 -> 25; w.first >= 0.6 -> 18; else -> 8 }
+    total += when { w.first >= 0.7 -> 25; w.first >= 0.6 -> 18; else -> 8 }
                     picks.add(ConsensusPick(sym, null, px, w.third, 50, w.first, w.second, 0.0, total.coerceIn(0, 100), true, 12.0))
                 }
                 consensus = picks.sortedByDescending { it.total }.take(10)
@@ -652,7 +653,7 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                     }
                 }
             }
-            Text("💡 تفسیر ژورنال: وین‌ریت ≥ ۵۰٪ + Profit Factor ≥ ۱.۵ + R میانگین ≥ ۰.۵ = استراتژی سودآور. Max DD < ۲۰٪ = ریسک کنترل‌شده. اگر هر کدام پایین‌تر است، تنظیمات ربات را بازبینی کن.", fontSize = 9.sp, color = PumpWatchPalette.Warning, lineHeight = 15.sp)
+            Text("💡 تفسیر ژورنال: وین‌ریت ≥ ۵۰٪ + Profit Factor ≥ ۱. + R میانگین ≥ ۰.۵ = استراتژی سودآور. Max DD < ۲۰٪ = ریسک کنترل‌شده. اگر هر کدام پایین‌تر است، تنظیمات ربات را بازبینی کن.", fontSize = 9.sp, color = PumpWatchPalette.Warning, lineHeight = 15.sp)
         }
     }
 }
