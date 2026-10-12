@@ -109,6 +109,13 @@ private val FreshYellow = ContractGold
 private val FreshRed = FuturesAccent
 private val FreshGray = TextSecondary
 
+// 🔧 لیست سیاه ارزهای نامعتبر (stablecoin‌ها و توکن‌های مشکوک)
+private val COIN_BLACKLIST = setOf(
+    "figr-heloc", "usd-coin", "tether", "binance-usd", "dai", "true-usd",
+    "usdd", "frax", "pax-dollar", "gemini-dollar", "binance-peg-busd",
+    "first-digital-usd", "ethena-usde", "paypal-usd", "usdb"
+)
+
 class MainActivity : ComponentActivity() {
 
     companion object {
@@ -347,39 +354,10 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
-// 🔧 اصلاح‌شده: نمایش هوشمند کانترکت برای همه ارزها
+// 🔧 ContractRow: فقط وقتی کانترکت وجود دارد نمایش داده شود + رنگ دکمه روشن
 @Composable
-private fun ContractRow(ctx: Context, coinId: String, contractRef: ContractRef?) {
-    // لیست گسترده ارزهای بومی لایه ۱
-    val nativeLayer1Coins = listOf(
-        "bitcoin", "ethereum", "cardano", "solana", "the-open-network", "toncoin",
-        "ripple", "polkadot", "avalanche-2", "tron", "sui", "aptos", "cosmos",
-        "near", "zcash", "monero", "litecoin", "bitcoin-cash", "stellar",
-        "hedera-hashgraph", "internet-computer", "filecoin", "ethereum-classic",
-        "vechain", "theta-token", "algorand", "elrond-erd-2", "flow",
-        "tezos", "eos", "hyperliquid", "figr-heloc"
-    )
-
-    if (contractRef == null) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
-        ) {
-            if (nativeLayer1Coins.contains(coinId.lowercase())) {
-                Text("⛓️ ارز بومی این شبکه است (لایه ۱) — بدون کانترکت", fontSize = 9.sp, color = TextSecondary)
-            } else {
-                Text("️ کانترکت یافت نشد", fontSize = 9.sp, color = FreshYellow)
-            }
-        }
-        return
-    }
-
-    // بررسی آدرس‌های غیر EVM (مثل Bech32)
-    val isUnusualAddress = contractRef.address.startsWith("scope") || 
-                          contractRef.address.startsWith("bc1") ||
-                          contractRef.address.startsWith("ltc1") ||
-                          contractRef.address.startsWith("cosmos") ||
-                          contractRef.address.length > 100
+private fun ContractRow(ctx: Context, contractRef: ContractRef?) {
+    if (contractRef == null) return  // 🔧 هیچ پیامی نمایش داده نمی‌شود
 
     val copied = remember { mutableStateOf(false) }
     Row(
@@ -393,35 +371,32 @@ private fun ContractRow(ctx: Context, coinId: String, contractRef: ContractRef?)
             fontWeight = FontWeight.Bold
         )
         Text(
-            if (isUnusualAddress) {
-                "آدرس ${contractRef.chain} (غیر EVM)"
-            } else if (contractRef.address.length > 24) {
+            if (contractRef.address.length > 24) {
                 "${contractRef.address.take(12)}...${contractRef.address.takeLast(8)}"
             } else {
                 contractRef.address
             },
             fontSize = 9.sp,
-            color = if (isUnusualAddress) FreshYellow else ContractBlue,
+            color = ContractBlue,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f)
         )
-        if (!isUnusualAddress) {
-            Button(
-                onClick = {
-                    try {
-                        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                            .setPrimaryClip(ClipData.newPlainText("contract", contractRef.address))
-                        copied.value = true
-                    } catch (_: Exception) { }
-                },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (copied.value) SpotAccent else ContractGold
-                ),
-                shape = RoundedCornerShape(6.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-            ) { 
-                Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) 
-            }
+        Button(
+            onClick = {
+                try {
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("contract", contractRef.address))
+                    copied.value = true
+                } catch (_: Exception) { }
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (copied.value) SpotAccent else ContractGold
+            ),
+            shape = RoundedCornerShape(6.dp),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+        ) { 
+            // 🔧 رنگ دکمه از Ink (تیره) به Text (روشن) تغییر کرد
+            Text(if (copied.value) "✅" else " کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) 
         }
     }
 }
@@ -432,7 +407,7 @@ private fun FreshnessBadge(meta: MarketMeta) {
         meta.observedAtMs <= 0L -> Triple("⚪", FreshGray, "نامشخص")
         meta.servedFrom == ServedFrom.DISK_CACHE -> Triple("🟠", FreshYellow, "آفلاین (${meta.ageSec() / 60}د)")
         meta.ageSec() <= 130 -> Triple("🟢", FreshGreen, "زنده")
-        meta.ageSec() <= 1800 -> Triple("🟡", FreshYellow, "کش (${meta.ageSec() / 60}د)")
+        meta.ageSec() <= 1800 -> Triple("", FreshYellow, "کش (${meta.ageSec() / 60}د)")
         else -> Triple("🔴", FreshRed, "مانده (${meta.ageSec() / 60}د)")
     }
     Surface(
@@ -499,8 +474,13 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 
     LaunchedEffect(Unit) { load() }
 
-    val shown = if (query.isBlank()) coins
-    else coins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
+    // 🔧 فیلتر کردن ارزهای نامعتبر
+    val filteredCoins = coins.filter { coin ->
+        coin.id.lowercase() !in COIN_BLACKLIST
+    }
+
+    val shown = if (query.isBlank()) filteredCoins
+    else filteredCoins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(DarkBackground),
@@ -547,7 +527,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("بازار تحت نظر", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("قیمت و جایگاه در بازهٔ ۲ ساعت", fontSize = 9.sp, color = TextSecondary)
+                    Text("قیمت و جایگاه در بازهٔ ۲۴ ساعت", fontSize = 9.sp, color = TextSecondary)
                 }
                 Spacer(Modifier.weight(1f))
                 Text("${shown.size} دارایی", fontSize = 9.sp, color = SpotAccent, fontWeight = FontWeight.Bold)
@@ -652,8 +632,8 @@ fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
                     MarketLink(coin, context)
                 }
             }
-            // 🔧 ارسال coin.id به ContractRow برای تشخیص هوشمند
-            ContractRow(context, coin.id, contractRef)
+            // 🔧 فقط وقتی کانترکت وجود دارد نمایش داده شود
+            if (contractRef != null) ContractRow(context, contractRef)
         }
     }
 }
