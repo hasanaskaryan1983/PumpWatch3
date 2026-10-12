@@ -111,14 +111,12 @@ private val FreshYellow = ContractGold
 private val FreshRed = FuturesAccent
 private val FreshGray = TextSecondary
 
-// 🔧 لیست سیاه ارزهای نامعتبر
 private val COIN_BLACKLIST = setOf(
     "figr-heloc", "usd-coin", "tether", "binance-usd", "dai", "true-usd",
     "usdd", "frax", "pax-dollar", "gemini-dollar", "binance-peg-busd",
     "first-digital-usd", "ethena-usde", "paypal-usd", "usdb"
 )
 
-// 🔧 کانترکت‌های رسمیِ نسخهٔ پیچیده (Wrapped) برای ارزهای بومیِ اصلی
 private val WRAPPED_CONTRACTS = mapOf(
     "ethereum" to ("Ethereum" to "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
     "binancecoin" to ("BSC" to "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
@@ -251,7 +249,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
 
     val accent = if (isFutures) FuturesModeAccent else SpotAccent
     CosmicBackdrop(accent = accent) {
-        // 🔧 اصلاح سراسری: رنگ پیش‌فرض همهٔ متن‌ها روشن می‌شود (رفع متن‌های مشکیِ فیوچرز و بقیهٔ تب‌ها)
         CompositionLocalProvider(LocalContentColor provides PumpWatchPalette.Text) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Surface(
@@ -272,7 +269,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
                         ) {
                             PumpDumpMark(accent)
                             Column {
-                                // 🔧 لوگو: Pump سبز + Dump قرمز
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("Pump", fontSize = 17.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Positive)
                                     Text("Dump", fontSize = 17.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Negative)
@@ -373,7 +369,6 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
-// 🔧 ردیف کانترکت: همیشه نمایش داده می‌شود + همیشه یک دکمهٔ کپی دارد
 @Composable
 private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRef: ContractRef?) {
     val copied = remember { mutableStateOf(false) }
@@ -393,7 +388,6 @@ private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRe
         modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
     ) {
         when {
-            // حالت ۱: کانترکت واقعی از CoinGecko
             contractRef != null -> {
                 Text("${contractRef.chain}: ", fontSize = 9.sp, color = ContractGold, fontWeight = FontWeight.Bold)
                 Text(
@@ -407,7 +401,6 @@ private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRe
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                 ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) }
             }
-            // حالت ۲: ارز بومی با کانترکت رسمیِ Wrapped
             wrapped != null -> {
                 Text("${wrapped.first} · پیچیده‌شده: ", fontSize = 9.sp, color = ContractGold, fontWeight = FontWeight.Bold)
                 Text(
@@ -421,7 +414,6 @@ private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRe
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                 ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) }
             }
-            // حالت ۳: ارز بومی بدون هیچ کانترکت — کپیِ نماد
             else -> {
                 Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TextSecondary, modifier = Modifier.weight(1f))
                 Button(
@@ -632,4 +624,79 @@ fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(fmtPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
-                    Surface(color =
+                    Surface(color = changeColor.copy(alpha = 0.11f), shape = RoundedCornerShape(8.dp)) {
+                        Text(changeText, color = changeColor, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp))
+                    }
+                }
+            }
+            if (hasRange) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("بازهٔ ۲۴ ساعت", color = TextSecondary, fontSize = 9.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("${fmtPrice(rangeLow!!)}  —  ${fmtPrice(rangeHigh!!)}", color = TextSecondary, fontSize = 9.sp)
+                    }
+                    MarketRangeBar(rangeLow!!, rangeHigh!!, coin.current_price, changeColor)
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("ارزش بازار", color = TextSecondary, fontSize = 9.sp)
+                    Spacer(Modifier.width(5.dp))
+                    Text(fmtMarketCap(coin.market_cap), color = TextPrimary, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    MarketLink(coin, context)
+                }
+            }
+            if (hasRange) {
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("ارزش بازار · ${fmtMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 9.sp)
+                    Spacer(Modifier.weight(1f))
+                    MarketLink(coin, context)
+                }
+            }
+            ContractRow(context, coin.id, coin.symbol, contractRef)
+        }
+    }
+}
+
+@Composable
+private fun MarketRangeBar(low: Double, high: Double, current: Double, color: Color) {
+    Canvas(modifier = Modifier.fillMaxWidth().height(8.dp)) {
+        val inset = 4.dp.toPx()
+        val y = size.height / 2f
+        val end = size.width - inset
+        val position = (inset + (end - inset) * ((current - low) / (high - low)).toFloat().coerceIn(0f, 1f))
+        drawLine(PumpWatchPalette.Border, Offset(inset, y), Offset(end, y), 3.dp.toPx(), cap = StrokeCap.Round)
+        drawLine(color.copy(alpha = 0.72f), Offset(inset, y), Offset(position, y), 3.dp.toPx(), cap = StrokeCap.Round)
+        drawCircle(TextPrimary, 3.dp.toPx(), Offset(position, y))
+    }
+}
+
+@Composable
+private fun MarketLink(coin: CoinMarket, context: Context) {
+    Text(
+        "↗",
+        color = ContractBlue,
+        fontSize = 16.sp,
+        modifier = Modifier.clickable {
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id))))
+            } catch (_: Exception) { }
+        }.padding(start = 8.dp, top = 1.dp, bottom = 1.dp)
+    )
+}
+
+// 🔧 توابع کمکی فرمت قیمت و ارزش بازار
+private fun fmtPrice(p: Double): String = when {
+    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
+    p >= 1 -> String.format(Locale.US, "$%.4f", p)
+    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
+    else -> String.format(Locale.US, "$%.6f", p)
+}
+
+private fun fmtMarketCap(cap: Double?): String = when {
+    cap == null -> "—"
+    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
+    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
+    else -> String.format(Locale.US, "$%.0f", cap)
+}
