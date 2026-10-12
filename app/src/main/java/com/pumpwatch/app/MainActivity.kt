@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,6 +43,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -109,11 +111,21 @@ private val FreshYellow = ContractGold
 private val FreshRed = FuturesAccent
 private val FreshGray = TextSecondary
 
-// 🔧 لیست سیاه ارزهای نامعتبر (stablecoin‌ها و توکن‌های مشکوک)
+// 🔧 لیست سیاه ارزهای نامعتبر
 private val COIN_BLACKLIST = setOf(
     "figr-heloc", "usd-coin", "tether", "binance-usd", "dai", "true-usd",
     "usdd", "frax", "pax-dollar", "gemini-dollar", "binance-peg-busd",
     "first-digital-usd", "ethena-usde", "paypal-usd", "usdb"
+)
+
+// 🔧 کانترکت‌های رسمیِ نسخهٔ پیچیده (Wrapped) برای ارزهای بومیِ اصلی
+private val WRAPPED_CONTRACTS = mapOf(
+    "ethereum" to ("Ethereum" to "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"),
+    "binancecoin" to ("BSC" to "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"),
+    "solana" to ("Solana" to "So11111111111111111111111111111111111111112"),
+    "avalanche-2" to ("Avalanche" to "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7"),
+    "matic-network" to ("Polygon" to "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"),
+    "polygon-ecosystem-token" to ("Polygon" to "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270")
 )
 
 class MainActivity : ComponentActivity() {
@@ -239,164 +251,186 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
 
     val accent = if (isFutures) FuturesModeAccent else SpotAccent
     CosmicBackdrop(accent = accent) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Surface(
-                color = DarkSurface.copy(alpha = 0.94f),
-                border = BorderStroke(1.dp, PumpWatchPalette.Border.copy(alpha = 0.45f)),
-                shadowElevation = 12.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        // 🔧 اصلاح سراسری: رنگ پیش‌فرض همهٔ متن‌ها روشن می‌شود (رفع متن‌های مشکیِ فیوچرز و بقیهٔ تب‌ها)
+        CompositionLocalProvider(LocalContentColor provides PumpWatchPalette.Text) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Surface(
+                    color = DarkSurface.copy(alpha = 0.94f),
+                    border = BorderStroke(1.dp, PumpWatchPalette.Border.copy(alpha = 0.45f)),
+                    shadowElevation = 12.dp,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        PumpDumpMark(accent)
-                        Column {
-                            Text("PumpDump", fontSize = 17.sp, fontWeight = FontWeight.Black, color = TextPrimary)
-                            Text(
-                                if (isFutures) "PERPETUALS · RISK FIRST" else "MARKET INTELLIGENCE",
-                                fontSize = 8.sp,
-                                letterSpacing = 1.sp,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Row(
                         modifier = Modifier
-                            .background(DarkBackground, RoundedCornerShape(14.dp))
-                            .border(1.dp, PumpWatchPalette.Border.copy(alpha = 0.48f), RoundedCornerShape(14.dp))
-                            .padding(3.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(
-                            onClick = {
-                                if (isFutures) {
-                                    isFutures = false
-                                    prefs.edit().putString("mode", "SPOT").apply()
-                                    onModeChanged()
-                                }
-                            },
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = if (!isFutures) SpotAccent else Color.Transparent,
-                                contentColor = if (!isFutures) PumpWatchPalette.Ink else TextSecondary
-                            ),
-                            modifier = Modifier.border(
-                                1.dp,
-                                if (!isFutures) SpotAccent.copy(alpha = 0.42f) else Color.Transparent,
-                                RoundedCornerShape(11.dp)
-                            ),
-                            shape = RoundedCornerShape(11.dp),
-                            contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(
-                                "اسپات",
-                                color = if (!isFutures) PumpWatchPalette.Ink else TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
+                            PumpDumpMark(accent)
+                            Column {
+                                // 🔧 لوگو: Pump سبز + Dump قرمز
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Pump", fontSize = 17.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Positive)
+                                    Text("Dump", fontSize = 17.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Negative)
+                                }
+                                Text(
+                                    if (isFutures) "PERPETUALS · RISK FIRST" else "MARKET INTELLIGENCE",
+                                    fontSize = 8.sp,
+                                    letterSpacing = 1.sp,
+                                    color = TextSecondary
+                                )
+                            }
                         }
-                        TextButton(
-                            onClick = {
-                                if (!isFutures) {
-                                    isFutures = true
-                                    prefs.edit().putString("mode", "FUTURES").apply()
-                                    onModeChanged()
-                                }
-                            },
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = if (isFutures) FuturesModeAccent else Color.Transparent,
-                                contentColor = if (isFutures) PumpWatchPalette.Ink else TextSecondary
-                            ),
-                            modifier = Modifier.border(
-                                1.dp,
-                                if (isFutures) FuturesModeAccent.copy(alpha = 0.46f) else Color.Transparent,
-                                RoundedCornerShape(11.dp)
-                            ),
-                            shape = RoundedCornerShape(11.dp),
-                            contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                        Spacer(Modifier.weight(1f))
+                        Row(
+                            modifier = Modifier
+                                .background(DarkBackground, RoundedCornerShape(14.dp))
+                                .border(1.dp, PumpWatchPalette.Border.copy(alpha = 0.48f), RoundedCornerShape(14.dp))
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Text(
-                                "فیوچرز",
-                                color = if (isFutures) PumpWatchPalette.Ink else TextSecondary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
+                            TextButton(
+                                onClick = {
+                                    if (isFutures) {
+                                        isFutures = false
+                                        prefs.edit().putString("mode", "SPOT").apply()
+                                        onModeChanged()
+                                    }
+                                },
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = if (!isFutures) SpotAccent else Color.Transparent,
+                                    contentColor = if (!isFutures) PumpWatchPalette.Ink else TextSecondary
+                                ),
+                                modifier = Modifier.border(
+                                    1.dp,
+                                    if (!isFutures) SpotAccent.copy(alpha = 0.42f) else Color.Transparent,
+                                    RoundedCornerShape(11.dp)
+                                ),
+                                shape = RoundedCornerShape(11.dp),
+                                contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    "اسپات",
+                                    color = if (!isFutures) PumpWatchPalette.Ink else TextSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    if (!isFutures) {
+                                        isFutures = true
+                                        prefs.edit().putString("mode", "FUTURES").apply()
+                                        onModeChanged()
+                                    }
+                                },
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = if (isFutures) FuturesModeAccent else Color.Transparent,
+                                    contentColor = if (isFutures) PumpWatchPalette.Ink else TextSecondary
+                                ),
+                                modifier = Modifier.border(
+                                    1.dp,
+                                    if (isFutures) FuturesModeAccent.copy(alpha = 0.46f) else Color.Transparent,
+                                    RoundedCornerShape(11.dp)
+                                ),
+                                shape = RoundedCornerShape(11.dp),
+                                contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    "فیوچرز",
+                                    color = if (isFutures) PumpWatchPalette.Ink else TextSecondary,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     }
                 }
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                if (isFutures) {
-                    FuturesWorkspace()
-                } else {
-                    SpotWorkspace(onCoinClick = { selectedCoin = it })
+                Box(modifier = Modifier.weight(1f)) {
+                    if (isFutures) {
+                        FuturesWorkspace()
+                    } else {
+                        SpotWorkspace(onCoinClick = { selectedCoin = it })
+                    }
                 }
             }
-        }
-        if (selectedCoin != null) {
-            Surface(
-                color = DarkBackground,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                CoinDetailScreen(
-                    coin = selectedCoin!!,
-                    onBack = { selectedCoin = null }
-                )
+            if (selectedCoin != null) {
+                Surface(
+                    color = DarkBackground,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    CoinDetailScreen(
+                        coin = selectedCoin!!,
+                        onBack = { selectedCoin = null }
+                    )
+                }
             }
         }
     }
 }
 
-// 🔧 ContractRow: فقط وقتی کانترکت وجود دارد نمایش داده شود + رنگ دکمه روشن
+// 🔧 ردیف کانترکت: همیشه نمایش داده می‌شود + همیشه یک دکمهٔ کپی دارد
 @Composable
-private fun ContractRow(ctx: Context, contractRef: ContractRef?) {
-    if (contractRef == null) return  // 🔧 هیچ پیامی نمایش داده نمی‌شود
-
+private fun ContractRow(ctx: Context, coinId: String, symbol: String, contractRef: ContractRef?) {
     val copied = remember { mutableStateOf(false) }
+
+    fun copy(label: String, value: String) {
+        try {
+            (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                .setPrimaryClip(ClipData.newPlainText(label, value))
+            copied.value = true
+        } catch (_: Exception) { }
+    }
+
+    val wrapped = WRAPPED_CONTRACTS[coinId.lowercase()]
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
     ) {
-        Text(
-            "${contractRef.chain}: ",
-            fontSize = 9.sp,
-            color = ContractGold,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            if (contractRef.address.length > 24) {
-                "${contractRef.address.take(12)}...${contractRef.address.takeLast(8)}"
-            } else {
-                contractRef.address
-            },
-            fontSize = 9.sp,
-            color = ContractBlue,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f)
-        )
-        Button(
-            onClick = {
-                try {
-                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                        .setPrimaryClip(ClipData.newPlainText("contract", contractRef.address))
-                    copied.value = true
-                } catch (_: Exception) { }
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = if (copied.value) SpotAccent else ContractGold
-            ),
-            shape = RoundedCornerShape(6.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-        ) { 
-            // 🔧 رنگ دکمه از Ink (تیره) به Text (روشن) تغییر کرد
-            Text(if (copied.value) "✅" else " کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) 
+        when {
+            // حالت ۱: کانترکت واقعی از CoinGecko
+            contractRef != null -> {
+                Text("${contractRef.chain}: ", fontSize = 9.sp, color = ContractGold, fontWeight = FontWeight.Bold)
+                Text(
+                    if (contractRef.address.length > 24) "${contractRef.address.take(12)}...${contractRef.address.takeLast(8)}" else contractRef.address,
+                    fontSize = 9.sp, color = ContractBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = { copy("contract", contractRef.address) },
+                    colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) SpotAccent else ContractGold),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) }
+            }
+            // حالت ۲: ارز بومی با کانترکت رسمیِ Wrapped
+            wrapped != null -> {
+                Text("${wrapped.first} · پیچیده‌شده: ", fontSize = 9.sp, color = ContractGold, fontWeight = FontWeight.Bold)
+                Text(
+                    if (wrapped.second.length > 24) "${wrapped.second.take(12)}...${wrapped.second.takeLast(8)}" else wrapped.second,
+                    fontSize = 9.sp, color = ContractBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = { copy("contract", wrapped.second) },
+                    colors = ButtonDefaults.buttonColors(containerColor = if (copied.value) SpotAccent else ContractGold),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) }
+            }
+            // حالت ۳: ارز بومی بدون هیچ کانترکت — کپیِ نماد
+            else -> {
+                Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TextSecondary, modifier = Modifier.weight(1f))
+                Button(
+                    onClick = { copy("symbol", symbol.uppercase(Locale.US)) },
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) { Text("📋 کپی نماد", fontSize = 9.sp, color = PumpWatchPalette.Text, fontWeight = FontWeight.Bold) }
+            }
         }
     }
 }
@@ -407,7 +441,7 @@ private fun FreshnessBadge(meta: MarketMeta) {
         meta.observedAtMs <= 0L -> Triple("⚪", FreshGray, "نامشخص")
         meta.servedFrom == ServedFrom.DISK_CACHE -> Triple("🟠", FreshYellow, "آفلاین (${meta.ageSec() / 60}د)")
         meta.ageSec() <= 130 -> Triple("🟢", FreshGreen, "زنده")
-        meta.ageSec() <= 1800 -> Triple("", FreshYellow, "کش (${meta.ageSec() / 60}د)")
+        meta.ageSec() <= 1800 -> Triple("🟡", FreshYellow, "کش (${meta.ageSec() / 60}د)")
         else -> Triple("🔴", FreshRed, "مانده (${meta.ageSec() / 60}د)")
     }
     Surface(
@@ -474,11 +508,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 
     LaunchedEffect(Unit) { load() }
 
-    // 🔧 فیلتر کردن ارزهای نامعتبر
-    val filteredCoins = coins.filter { coin ->
-        coin.id.lowercase() !in COIN_BLACKLIST
-    }
-
+    val filteredCoins = coins.filter { it.id.lowercase() !in COIN_BLACKLIST }
     val shown = if (query.isBlank()) filteredCoins
     else filteredCoins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
 
@@ -602,79 +632,4 @@ fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(fmtPrice(coin.current_price), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = TextPrimary)
-                    Surface(color = changeColor.copy(alpha = 0.11f), shape = RoundedCornerShape(8.dp)) {
-                        Text(changeText, color = changeColor, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp))
-                    }
-                }
-            }
-            if (hasRange) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("بازهٔ ۲۴ ساعت", color = TextSecondary, fontSize = 9.sp)
-                        Spacer(Modifier.weight(1f))
-                        Text("${fmtPrice(rangeLow!!)}  —  ${fmtPrice(rangeHigh!!)}", color = TextSecondary, fontSize = 9.sp)
-                    }
-                    MarketRangeBar(rangeLow!!, rangeHigh!!, coin.current_price, changeColor)
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("ارزش بازار", color = TextSecondary, fontSize = 9.sp)
-                    Spacer(Modifier.width(5.dp))
-                    Text(fmtMarketCap(coin.market_cap), color = TextPrimary, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.weight(1f))
-                    MarketLink(coin, context)
-                }
-            }
-            if (hasRange) {
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("ارزش بازار · ${fmtMarketCap(coin.market_cap)}", color = TextSecondary, fontSize = 9.sp)
-                    Spacer(Modifier.weight(1f))
-                    MarketLink(coin, context)
-                }
-            }
-            // 🔧 فقط وقتی کانترکت وجود دارد نمایش داده شود
-            if (contractRef != null) ContractRow(context, contractRef)
-        }
-    }
-}
-
-@Composable
-private fun MarketRangeBar(low: Double, high: Double, current: Double, color: Color) {
-    Canvas(modifier = Modifier.fillMaxWidth().height(8.dp)) {
-        val inset = 4.dp.toPx()
-        val y = size.height / 2f
-        val end = size.width - inset
-        val position = (inset + (end - inset) * ((current - low) / (high - low)).toFloat().coerceIn(0f, 1f))
-        drawLine(PumpWatchPalette.Border, Offset(inset, y), Offset(end, y), 3.dp.toPx(), cap = StrokeCap.Round)
-        drawLine(color.copy(alpha = 0.72f), Offset(inset, y), Offset(position, y), 3.dp.toPx(), cap = StrokeCap.Round)
-        drawCircle(TextPrimary, 3.dp.toPx(), Offset(position, y))
-    }
-}
-
-@Composable
-private fun MarketLink(coin: CoinMarket, context: Context) {
-    Text(
-        "↗",
-        color = ContractBlue,
-        fontSize = 16.sp,
-        modifier = Modifier.clickable {
-            try {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(cmcUrl(coin.id))))
-            } catch (_: Exception) { }
-        }.padding(start = 8.dp, top = 1.dp, bottom = 1.dp)
-    )
-}
-
-private fun fmtPrice(p: Double): String = when {
-    p >= 1000 -> String.format(Locale.US, "$%.2f", p)
-    p >= 1 -> String.format(Locale.US, "$%.4f", p)
-    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
-    else -> String.format(Locale.US, "$%.6f", p)
-}
-
-private fun fmtMarketCap(cap: Double?): String = when {
-    cap == null -> "—"
-    cap >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", cap / 1_000_000_000)
-    cap >= 1_000_000 -> String.format(Locale.US, "$%.1fM", cap / 1_000_000)
-    else -> String.format(Locale.US, "$%.0f", cap)
-}
+                    Surface(color =
