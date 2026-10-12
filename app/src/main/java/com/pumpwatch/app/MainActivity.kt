@@ -77,9 +77,9 @@ import com.pumpwatch.app.data.ServedFrom
 import com.pumpwatch.app.data.WatchlistMigration
 import com.pumpwatch.app.data.cmcUrl
 import com.pumpwatch.app.data.platformContractRef
-import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.CosmicBackdrop
 import com.pumpwatch.app.ui.EditorialPageHeader
+import com.pumpwatch.app.ui.FuturesWorkspace
 import com.pumpwatch.app.ui.MarketPulseHeader
 import com.pumpwatch.app.ui.OnboardingScreen
 import com.pumpwatch.app.ui.PumpDumpMark
@@ -347,17 +347,28 @@ fun MainApp(onModeChanged: () -> Unit = {}) {
     }
 }
 
+// 🔧 اصلاح‌شده: نمایش هوشمند برای ارزهای بومی لایه ۱
 @Composable
-private fun ContractRow(ctx: Context, contractRef: ContractRef?) {
+private fun ContractRow(ctx: Context, coinId: String, contractRef: ContractRef?) {
+    val nativeLayer1Coins = listOf(
+        "bitcoin", "ethereum", "cardano", "solana", "the-open-network",
+        "ripple", "polkadot", "avalanche-2", "tron", "toncoin", "sui", "aptos", "cosmos", "near"
+    )
+
     if (contractRef == null) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
         ) {
-            Text("⛓️ بومی — بدون کانترکت", fontSize = 9.sp, color = TextSecondary)
+            if (nativeLayer1Coins.contains(coinId.lowercase())) {
+                Text("⛓️ ارز بومی این شبکه است (لایه ۱) — بدون کانترکت", fontSize = 9.sp, color = TextSecondary)
+            } else {
+                Text("⚠️ کانترکت یافت نشد", fontSize = 9.sp, color = FreshYellow)
+            }
         }
         return
     }
+    
     val copied = remember { mutableStateOf(false) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -393,7 +404,9 @@ private fun ContractRow(ctx: Context, contractRef: ContractRef?) {
             ),
             shape = RoundedCornerShape(6.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-        ) { Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Ink) }
+        ) { 
+            Text(if (copied.value) "✅" else "📋 کپی", fontSize = 9.sp, color = PumpWatchPalette.Ink) 
+        }
     }
 }
 
@@ -518,7 +531,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("بازار تحت نظر", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("قیمت و جایگاه در بازهٔ ۴ ساعت", fontSize = 9.sp, color = TextSecondary)
+                    Text("قیمت و جایگاه در بازهٔ ۲۴ ساعت", fontSize = 9.sp, color = TextSecondary)
                 }
                 Spacer(Modifier.weight(1f))
                 Text("${shown.size} دارایی", fontSize = 9.sp, color = SpotAccent, fontWeight = FontWeight.Bold)
@@ -563,6 +576,7 @@ fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
     val rangeLow = coin.low24h
     val rangeHigh = coin.high24h
     val hasRange = rangeLow != null && rangeHigh != null && rangeHigh > rangeLow
+
     Surface(
         color = PumpWatchPalette.GlassDeep,
         shape = RoundedCornerShape(17.dp),
@@ -622,7 +636,8 @@ fun CoinCard(coin: CoinMarket, contractRef: ContractRef?, onClick: () -> Unit) {
                     MarketLink(coin, context)
                 }
             }
-            if (contractRef != null) ContractRow(context, contractRef)
+            // 🔧 اصلاح‌شده: ارسال coin.id به ContractRow برای تشخیص هوشمند ارزهای لایه ۱
+            ContractRow(context, coin.id, contractRef)
         }
     }
 }
