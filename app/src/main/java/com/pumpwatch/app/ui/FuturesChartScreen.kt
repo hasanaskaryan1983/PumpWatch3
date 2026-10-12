@@ -57,7 +57,7 @@ private val MTF_LIST = listOf("1d", "4h", "1h", "15m")
 
 private fun regimeEmoji(r: FuturesScannerEngine.Regime?): String = when (r) {
     FuturesScannerEngine.Regime.BULL -> "🟢"
-    FuturesScannerEngine.Regime.BEAR -> ""
+    FuturesScannerEngine.Regime.BEAR -> "🔴"
     FuturesScannerEngine.Regime.RANGE -> "⚪"
     null -> "❓"
 }
@@ -75,6 +75,7 @@ fun FuturesChartScreen() {
     var input by remember { mutableStateOf(FuturesHub.chartSymbol.removeSuffix("USDT")) }
     var loading by remember { mutableStateOf(FuturesHub.chartLoading && FuturesHub.chartCandles.isEmpty()) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
+    
     val candles = FuturesHub.chartCandles
     val regimes = FuturesHub.chartRegimes
     val symbol = FuturesHub.chartSymbol
@@ -195,7 +196,7 @@ fun FuturesChartScreen() {
                 CircularProgressIndicator(color = PumpWatchPalette.TabMarket)
             }
             errorMsg != null && candles.isEmpty() -> Text(errorMsg ?: "", color = PumpWatchPalette.Negative, modifier = Modifier.padding(24.dp))
-            candles.isEmpty() -> Text(" داده‌ای نیست", color = PumpWatchPalette.Muted, modifier = Modifier.padding(24.dp))
+            candles.isEmpty() -> Text("😴 داده‌ای نیست", color = PumpWatchPalette.Muted, modifier = Modifier.padding(24.dp))
             else -> {
                 val shown = candles.takeLast(60)
                 val closes = shown.map { it.close }
@@ -263,4 +264,4 @@ private fun FuturesCandleChart(candles: List<FuturesCandle>, e20: List<Double>, 
         drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%,.6f", minV), 4f, h - 6f, paint)
         drawContext.canvas.nativeCanvas.drawText(String.format(Locale.US, "$%,.6f", lastP), w - 220f, y(lastP) - 8f, paint)
     }
-}۸
+}
