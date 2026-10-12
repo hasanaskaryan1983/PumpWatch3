@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,7 +28,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.engine.FuturesScannerEngine
+import com.pumpwatch.app.ui.EditorialPageHeader
+import com.pumpwatch.app.ui.FuturesHub
+import com.pumpwatch.app.ui.HubRefreshRow
+import com.pumpwatch.app.ui.PumpWatchPalette
 import com.pumpwatch.app.ui.components.GlassCard
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
