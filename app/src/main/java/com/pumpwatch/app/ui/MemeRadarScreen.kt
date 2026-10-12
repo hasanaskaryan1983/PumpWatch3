@@ -32,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -61,7 +62,7 @@ private fun ageText(h: Double): String = when {
     h >= 9999 -> "—"; h < 1 -> "زیر ۱ ساعت"; h < 48 -> "${h.toInt()} ساعت"; else -> "${(h / 24).toInt()} روز"
 }
 
-private fun memeVerdict(ch1: Double, r1: Double): Pair<String, androidx.compose.ui.graphics.Color> = when {
+private fun memeVerdict(ch1: Double, r1: Double): Pair<String, Color> = when {
     ch1 <= -5 -> "🩸 دامپ شده — خروج قبل از بدتر شدن" to PumpWatchPalette.Negative
     ch1 >= 5 && r1 >= 0.6 -> "🚀 پامپ شروع شده — نهنگ‌ها می‌خرن" to PumpWatchPalette.Positive
     ch1 >= 2 && r1 >= 0.55 -> "⏳ قبل از پامپ — در حال جمع‌کردن" to PumpWatchPalette.Warning
@@ -69,9 +70,9 @@ private fun memeVerdict(ch1: Double, r1: Double): Pair<String, androidx.compose.
     else -> "😴 فعلاً حرکت خاصی نداره" to PumpWatchPalette.Muted
 }
 
-private fun exitFeasibility(liq: Double): Pair<String, androidx.compose.ui.graphics.Color> = when {
+private fun exitFeasibility(liq: Double): Pair<String, Color> = when {
     liq < 10_000 -> "🔴 تله نقدینگی (فروش > ۵۰$ = اسلیپیج شدید)" to PumpWatchPalette.Negative
-    liq < 50_000 -> "🟡 خروج با احتیاط (فروش > 1K$ تاثیرگذار است)" to PumpWatchPalette.Warning
+    liq < 50_000 -> "🟡 خروج با احتیاط (فروش > ۱K$ تاثیرگذار است)" to PumpWatchPalette.Warning
     else -> "🟢 خروج آسان (نقدینگی کافی برای فروش متوسط)" to PumpWatchPalette.Positive
 }
 
@@ -131,7 +132,6 @@ fun MemeRadarScreen() {
         }
     }
 
-    // فقط اگر هاب خالی است اسکن اولیه انجام بده
     LaunchedEffect(Unit) { if (MemeHub.signals.isEmpty()) scan(false) }
     val displayItems = items
 
