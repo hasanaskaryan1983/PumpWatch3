@@ -18,6 +18,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,31 +32,165 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.BinanceFutures
 import com.pumpwatch.app.engine.FutSignalForPaper
 import com.pumpwatch.app.engine.PaperTradingEngine
 import com.pumpwatch.app.store.TradeStore
 import com.pumpwatch.app.ui.components.GlassCard
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.abs
+
+// 🚀 Commit 105: FutSignal با coinId برای اتصال به Paper
+private data class FutSignal(
+    val coinId: String,
+    val rank: Int,
+    val symbol: String,
+    val base: String,
+    val direction: String,
+    val score: Int,
+    val entry: Double,
+    val stopLoss: Double,
+    val target: Double,
+    val change24h: Double,
+    val fundingPct: Double?,
+    val volumeUsd: Double,
+    val reasons: List<String>
+)
+
+private fun fmtPrice(p: Double): String = when {
+    p >= 1000 -> String.format(Locale.US, "$%,.2f", p)
+    p >= 1 -> String.format(Locale.US, "$%.4f", p)
+    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
+    else -> String.format(Locale.US, "$%.6f", p)
+}
+
+private fun fmtVol(v: Double): String = when {
+    v >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", v / 1_000_000_000)
+    v >= 1_000_000 -> String.format(Locale.US, "$%.1fM", v / 1_000_000)
+    v >= 1_000 -> String.format(Locale.US, "$%.0fK", v / 1_000)
+    else -> String.format(Locale.US, "$%.0f", v)
+}
+
+private fun buildSignal(
+    coinId: String,
+    rank: Int,
+    symbol: String,
+    base: String,
+    price: Double,
+    change24h: Double,
+    fundingPct: Double?,
+    volumeUsd: Double
+): FutSignal? {
+    val absChange = abs(change24h)
+    if (absChange < 5.0) return null
+
+    val direction = if (change24h > 0) "LONG" else "SHORT"
+    val reasons = mutableListOf<String>()
+
+    var score = (absChange * 3.0).toInt().coerceAtMost(60)
+    reasons.add("شتاب ۲۴س: ${String.format(Locale.US, "%+.1f%%", change24h)}")
+
+    if (fundingPct != null && abs(fundingPct) >= 0.03) {
+        score += 20
+        reasons.add("فاندینگ شدید: ${String.format(Locale.US, "%+.4f%%", fundingPct)}")
+    }
+
+    if (volumeUsd >= 50_000_000) {
+        score += 15
+        reasons.add("نقدشوندگی بالا: ${fmtVol(volumeUsd)}")
+    }
+
+    val slDistance = price * 0.02
+    val tpDistance = price * 0.04
+    val stopLoss = if (direction == "LONG") price - slDistance else price + slDistance
+    val target = if (direction == "LONG") price + tpDistance else price - tpDistance
+
+    return FutSignal(
+        coinId = coinId,
+        rank = rank,
+        symbol = symbol,
+        base = base,
+        direction = direction,
+        score = score.coerceAtMost(100),
+        entry = price,
+        stopLoss = stopLoss,
+        target = target,
+        change24h = change24h,
+        fundingPct = fundingPct,
+        volumeUsd = volumeUsd,
+        reasons = reasons
+    )
+}
 
 @Composable
 fun FuturesDashboardScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    
-    // 🔗 اتصال به هاب: بازگشت به تب = نمایش آنی
-    var signals by remember { mutableStateOf(FuturesHub.dashboardSignals) }
-    var loading by remember { mutableStateOf(FuturesHub.dashboardLoading && FuturesHub.dashboardSignals.isEmpty()) }
+    var signals by remember { mutableStateOf<List<FutSignal>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
-    var lastUpdate by remember { mutableStateOf(FuturesHub.dashboardLastMs) }
+    var lastUpdate by remember { mutableStateOf("") }
+    var statsText by remember { mutableStateOf("") }
 
-    fun scan(force: Boolean) {
+    fun scan() {
         scope.launch {
             loading = true
             errorMsg = null
+            signals = emptyList()
             try {
-                signals = FuturesHub.scanDashboard(force)
-                lastUpdate = FuturesHub.dashboardLastMs
+                val coins = ApiClient.getTop100Coins()
+
+                val (tickerMap, premMap) = withContext(Dispatchers.IO) {
+                    val t = try {
+                        BinanceFutures.api.ticker24h().associateBy { it.symbol }
+                    } catch (_: Exception) { emptyMap() }
+                    val p = try {
+                        BinanceFutures.api.premiumIndexAll().associateBy { it.symbol }
+                    } catch (_: Exception) { emptyMap() }
+                    t to p
+                }
+
+                val allSignals = mutableListOf<FutSignal>()
+                var perpCount = 0
+
+                for ((idx, c) in coins.withIndex()) {
+                    val fsym = c.symbol.uppercase(Locale.US) + "USDT"
+                    val t = tickerMap[fsym]
+                    if (t == null) continue
+                    perpCount++
+
+                    val prem = premMap[fsym]
+                    val price = t.lastPrice?.toDoubleOrNull() ?: c.current_price
+                    val change24h = t.priceChangePercent?.toDoubleOrNull()
+                        ?: (c.price_change_percentage_24h ?: 0.0)
+                    val fundingPct = prem?.lastFundingRate?.toDoubleOrNull()?.times(100.0)
+                    val volumeUsd = t.quoteVolume?.toDoubleOrNull() ?: c.total_volume
+
+                    val sig = buildSignal(
+                        coinId = c.id,
+                        rank = c.market_cap_rank ?: (idx + 1),
+                        symbol = fsym,
+                        base = c.symbol.uppercase(Locale.US),
+                        price = price,
+                        change24h = change24h,
+                        fundingPct = fundingPct,
+                        volumeUsd = volumeUsd
+                    )
+                    if (sig != null) allSignals.add(sig)
+                }
+
+                signals = allSignals.sortedByDescending { it.score }.take(20)
+                statsText = "${signals.size} مورد از $perpCount ارز perp در ۱۰۰ برتر"
+
+                val now = System.currentTimeMillis()
+                lastUpdate = String.format(
+                    Locale.US, "%02d:%02d:%02d",
+                    (now / 3600000) % 24, (now / 60000) % 60, (now / 1000) % 60
+                )
             } catch (e: Exception) {
                 errorMsg = "⚠️ خطا در دریافت داده: ${e.message?.take(80) ?: "نامشخص"}"
             }
@@ -63,50 +198,60 @@ fun FuturesDashboardScreen() {
         }
     }
 
-    LaunchedEffect(Unit) { if (FuturesHub.dashboardSignals.isEmpty()) scan(false) }
+    LaunchedEffect(Unit) { scan() }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // 🚀 P0 Product Honesty: تغییر ادبیات به خنثی و پژوهشی
             EditorialPageHeader(
-                eyebrow = "FUTURES · SIGNALS",
-                title = "تابلوی سیگنال فیوچرز",
-                subtitle = "شتاب ۲۴س + فاندینگ + نقدشوندگی",
+                eyebrow = "FUTURES · RESEARCH",
+                title = "فیلتر مومنتوم ۲۴ساعته پژوهشی",
+                subtitle = "شناسایی حرکات غیرعادی بر اساس حجم و تغییر قیمت. این خروجی پژوهشی است و توصیه مالی یا تضمین سود نیست.",
                 accent = PumpWatchPalette.TabMarket
             )
+            
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.weight(1f))
-                HubRefreshRow(lastUpdate, loading, PumpWatchPalette.TabMarket) { scan(true) }
+                TextButton(onClick = { scan() }, enabled = !loading) {
+                    Text(if (loading) "در حال اسکن..." else "بروزرسانی 🔄")
+                }
             }
         }
 
-        Text(
-            "🎯 ورود/SL/TP با ریسک/پاداش ۲:۱ • برای تمرین، دکمهٔ «📝 تمرین» را بزن",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            fontSize = 9.sp, color = PumpWatchPalette.Muted, lineHeight = 15.sp
-        )
-
-        if (loading && signals.isEmpty()) {
-            Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(color = PumpWatchPalette.TabMarket)
+        if (loading) {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) { 
+                CircularProgressIndicator(color = PumpWatchPalette.TabMarket) 
             }
-        } else if (errorMsg != null && signals.isEmpty()) {
+        } else if (errorMsg != null) {
             Text(errorMsg ?: "", color = PumpWatchPalette.Negative, modifier = Modifier.padding(24.dp))
         } else if (signals.isEmpty()) {
             Text(
-                "😴 هیچ سیگنالی فعال نیست — بازار در حالت عادی است.",
+                "😴 هیچ موردی با این معیارها یافت نشد — بازار در حالت عادی است. آرامش هم یک وضعیت بازار است.",
                 color = PumpWatchPalette.Muted, modifier = Modifier.padding(24.dp), fontSize = 12.sp
             )
         } else {
+            Text(
+                statsText,
+                fontSize = 11.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+            Text(
+                "بروزرسانی: $lastUpdate",
+                fontSize = 9.sp, color = PumpWatchPalette.Muted,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+
             LazyColumn(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                item {
-                    Text(
-                        "${signals.size} سیگنال فعال",
-                        fontSize = 11.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold
-                    )
-                }
                 items(signals) { sig -> SignalCard(sig) }
             }
         }
@@ -114,14 +259,14 @@ fun FuturesDashboardScreen() {
 }
 
 @Composable
-private fun SignalCard(sig: FuturesHub.FutSignal) {
+private fun SignalCard(sig: FutSignal) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val dirColor = if (sig.direction == "LONG") PumpWatchPalette.Positive else PumpWatchPalette.Negative
     val dirEmoji = if (sig.direction == "LONG") "🚀" else "🩸"
 
     GlassCard(accent = PumpWatchPalette.TabMarket, modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(dirEmoji, fontSize = 18.sp)
                 Spacer(Modifier.width(6.dp))
@@ -148,7 +293,7 @@ private fun SignalCard(sig: FuturesHub.FutSignal) {
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "شتاب: ${String.format(Locale.US, "%+.1f%%", sig.change24h)}",
+                    "شتاب ۲۴س: ${String.format(Locale.US, "%+.1f%%", sig.change24h)}",
                     fontSize = 10.sp, fontWeight = FontWeight.Bold, color = dirColor
                 )
                 Spacer(Modifier.weight(1f))
@@ -181,22 +326,37 @@ private fun SignalCard(sig: FuturesHub.FutSignal) {
             }
 
             Text(sig.reasons.joinToString(" • "), fontSize = 9.sp, color = PumpWatchPalette.Muted, lineHeight = 14.sp)
-            Text("💧 حجم: ${fmtVol(sig.volumeUsd)}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+            Text("💧 حجم ۲۴س: ${fmtVol(sig.volumeUsd)}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
 
+            // 🚀 Commit 105: دکمه تمرین
             Button(
                 onClick = {
                     scope.launch {
                         if (!TradeStore.isEnabled(context)) {
-                            Toast.makeText(context, "⚠️ اول از تب «Paper فیوچرز» قابلیت را فعال کن", Toast.LENGTH_LONG).show()
+                            Toast.makeText(
+                                context,
+                                "⚠️ اول از تب «Paper فیوچرز» قابلیت را فعال کن",
+                                Toast.LENGTH_LONG
+                            ).show()
                             return@launch
                         }
                         val futSig = FutSignalForPaper(
-                            coinId = sig.coinId, symbol = sig.symbol, base = sig.base,
-                            direction = sig.direction, entry = sig.entry, stopLoss = sig.stopLoss,
-                            target = sig.target, score = sig.score
+                            coinId = sig.coinId,
+                            symbol = sig.symbol,
+                            base = sig.base,
+                            direction = sig.direction,
+                            entry = sig.entry,
+                            stopLoss = sig.stopLoss,
+                            target = sig.target,
+                            score = sig.score
                         )
                         val success = PaperTradingEngine.openFromFutSignal(context, futSig)
-                        Toast.makeText(context, if (success) "✅ ترید FUT برای ${sig.base} باز شد" else "⚠️ این ترید قبلاً باز است", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            if (success) "✅ ترید FUT برای ${sig.base} باز شد — در تب Paper ببین"
+                            else "⚠️ این ترید قبلاً باز است",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Positive.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
@@ -207,18 +367,4 @@ private fun SignalCard(sig: FuturesHub.FutSignal) {
             }
         }
     }
-}
-
-private fun fmtPrice(p: Double): String = when {
-    p >= 1000 -> String.format(Locale.US, "$%,.2f", p)
-    p >= 1 -> String.format(Locale.US, "$%.4f", p)
-    p >= 0.01 -> String.format(Locale.US, "$%.5f", p)
-    else -> String.format(Locale.US, "$%.6f", p)
-}
-
-private fun fmtVol(v: Double): String = when {
-    v >= 1_000_000_000 -> String.format(Locale.US, "$%.2fB", v / 1_000_000_000)
-    v >= 1_000_000 -> String.format(Locale.US, "$%.1fM", v / 1_000_000)
-    v >= 1_000 -> String.format(Locale.US, "$%.0fK", v / 1_000)
-    else -> String.format(Locale.US, "$%.0f", v)
 }
