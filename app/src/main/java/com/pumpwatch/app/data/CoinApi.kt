@@ -41,7 +41,10 @@ data class CoinMarket(
     val ath_change_percentage: Double?,
     val atl_change_percentage: Double?,
     @SerializedName("high_24h") val high24h: Double?,
-    @SerializedName("low_24h") val low24h: Double?
+    @SerializedName("low_24h") val low24h: Double?,
+    
+    // 🚀 P0 Shared: هویت استاندارد دارایی (اختیاری برای حفظ سازگاری با Gson و کدهای قدیمی)
+    val assetIdentity: AssetIdentity? = null
 )
 
 data class CoinListItem(
@@ -587,4 +590,44 @@ fun platformContractRef(
     }
     val first = platforms.entries.firstOrNull { !it.value.isNullOrBlank() } ?: return null
     return ContractRef(display(first.key), first.value!!)
+}
+
+// ============================================================
+// 🚀 P0 Shared: تابع کمکی برای تبدیل CoinMarket به AssetIdentity
+// ============================================================
+fun CoinMarket.toAssetIdentity(platformMap: Map<String, Map<String, String>>? = null): AssetIdentity {
+    val isNative = this.id in NATIVE_COIN_IDS
+    var chain: String? = null
+    var contractAddress: String? = null
+    
+    if (!isNative && platformMap != null) {
+        val contractRef = platformContractRef(platformMap, this.id)
+        if (contractRef != null) {
+            chain = when (contractRef.chain) {
+                "Ethereum" -> "ethereum"
+                "BSC" -> "binance-smart-chain"
+                "Base" -> "base"
+                "Arbitrum" -> "arbitrum-one"
+                "Optimism" -> "optimistic-ethereum"
+                "Polygon" -> "polygon-pos"
+                "Avalanche" -> "avalanche"
+                "Solana" -> "solana"
+                "TON" -> "the-open-network"
+                "SUI" -> "sui"
+                else -> contractRef.chain.lowercase()
+            }
+            contractAddress = contractRef.address
+        }
+    }
+
+    return AssetIdentity(
+        providerId = this.id,
+        symbol = this.symbol.uppercase(),
+        name = this.name,
+        chain = chain,
+        contractAddress = contractAddress,
+        venue = "coingecko",
+        marketType = MarketType.SPOT,
+        rank = this.market_cap_rank
+    )
 }
