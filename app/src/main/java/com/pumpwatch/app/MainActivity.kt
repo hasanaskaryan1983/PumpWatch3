@@ -74,6 +74,8 @@ import androidx.work.WorkManager
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.ContractRef
+import com.pumpwatch.app.data.DataEnvelope
+import com.pumpwatch.app.data.DataStatus
 import com.pumpwatch.app.data.HistoricalUniverseRepository
 import com.pumpwatch.app.data.MarketMeta
 import com.pumpwatch.app.data.NetErr
@@ -440,7 +442,7 @@ private fun FreshnessBadge(meta: MarketMeta) {
         meta.servedFrom == ServedFrom.DISK_CACHE -> Triple("🟠", FreshYellow, "آفلاین (${meta.ageSec() / 60}د)")
         meta.ageSec() <= 130 -> Triple("🟢", FreshGreen, "زنده")
         meta.ageSec() <= 1800 -> Triple("🟡", FreshYellow, "کش (${meta.ageSec() / 60}د)")
-        else -> Triple("🔴", FreshRed, "مانده (${meta.ageSec() / 60}د)")
+        else -> Triple("", FreshRed, "مانده (${meta.ageSec() / 60}د)")
     }
     Surface(
         shape = RoundedCornerShape(8.dp),
@@ -456,13 +458,17 @@ private fun FreshnessBadge(meta: MarketMeta) {
     }
 }
 
+// ============================================================
+// 🚀 P0 Shared + Tab 01: MarketScreen با Sealed Outcomes
+// ============================================================
 @Composable
 fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("pumpwatch_prefs", 0) }
-    var coins by remember { mutableStateOf<List<CoinMarket>>(emptyList()) }
+    
+    //  P0: جایگزینی coins/errorMsg/loading با DataEnvelope
+    var envelope by remember { mutableStateOf<DataEnvelope<List<CoinMarket>>?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
     var meta by remember { mutableStateOf(MarketMeta(0L, ServedFrom.UNKNOWN, 0)) }
@@ -471,41 +477,64 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
     fun load() {
         scope.launch {
             loading = true
-            errorMsg = null
             try {
                 val mode = prefs.getString("mode", "SPOT")
+                var fetchedCoins: List<CoinMarket> = emptyList()
+                var partialData = false
+
                 if (mode == "FUTURES") {
-                    coins = ApiClient.getTop100Coins()
+                    fetchedCoins = ApiClient.getTop100Coins()
                 } else {
-                    coins = ApiClient.getQuickCoins()
-                    loading = false
+                    fetchedCoins = ApiClient.getQuickCoins()
                     try {
                         val full = ApiClient.getTop1000Coins()
-                        if (full.size > coins.size) coins = full
+                        if (full.size > fetchedCoins.size) fetchedCoins = full
                     } catch (e: Exception) {
+                        partialData = true // 🚀 P0: ثبت داده ناقص
                         NetErr.log("MarketScreen", "coingecko/coins/markets?page=1..4", null, e)
                     }
                 }
+
                 meta = ApiClient.marketMeta()
                 platformMap = try { ApiClient.getPlatformMap() } catch (_: Exception) { emptyMap() }
-                if (coins.size > 100) {
-                    HistoricalUniverseRepository.recordSnapshot(context, coins)
+                
+                if (fetchedCoins.size > 100) {
+                    HistoricalUniverseRepository.recordSnapshot(context, fetchedCoins)
                 }
+
+                // 🚀 P0 Sealed Outcomes: تعیین وضعیت دقیق
+                val status = when {
+                    fetchedCoins.isEmpty() -> DataStatus.EMPTY_VALID
+                    partialData -> DataStatus.PARTIAL
+                    else -> DataStatus.SUCCESS
+                }
+                
+                envelope = DataEnvelope(
+                    data = fetchedCoins,
+                    source = "coingecko",
+                    observedAtMs = meta.observedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                    receivedAtMs = System.currentTimeMillis(),
+                    servedFrom = meta.servedFrom,
+                    status = status
+                )
             } catch (e: Exception) {
                 NetErr.log("MarketScreen", "coingecko/coins/markets", null, e)
-                errorMsg = NetErr.msg(e)
+                // 🚀 P0: ثبت خطا به جای errorMsg ساده
+                envelope = DataEnvelope(
+                    data = null,
+                    source = "coingecko",
+                    observedAtMs = System.currentTimeMillis(),
+                    status = DataStatus.FAILURE
+                )
             } finally {
                 loading = false
-            }
-            if (errorMsg == null && coins.isEmpty()) {
-                NetErr.logEmpty("MarketScreen", "coingecko/coins/markets", null)
-                errorMsg = NetErr.msg(NetError.EmptyData)
             }
         }
     }
 
     LaunchedEffect(Unit) { load() }
 
+    val coins = envelope?.data ?: emptyList()
     val filteredCoins = coins.filter { it.id.lowercase() !in COIN_BLACKLIST }
     val shown = if (query.isBlank()) filteredCoins
     else filteredCoins.filter { it.symbol.contains(query, true) || it.name.contains(query, true) }
@@ -519,7 +548,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
             EditorialPageHeader(
                 eyebrow = "MARKET LETTER  /  GLOBAL",
                 title = "بازار، بی‌واسطه",
-                subtitle = "ریتم امروز دارایی‌های دیجیتال",
+                subtitle = "نمایش داده‌های عمومی بازار. این اطلاعات پژوهشی است و توصیهٔ مالی یا تضمین سود نیست.", // 🚀 P0: صداقت محصول
                 accent = SpotAccent,
                 trailing = {
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -551,16 +580,8 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                 )
             )
         }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("بازار تحت نظر", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("قیمت و جایگاه در بازهٔ ۲۴ ساعت", fontSize = 9.sp, color = TextSecondary)
-                }
-                Spacer(Modifier.weight(1f))
-                Text("${shown.size} دارایی", fontSize = 9.sp, color = SpotAccent, fontWeight = FontWeight.Bold)
-            }
-        }
+        
+        // 🚀 P0 Sealed Outcomes: نمایش وضعیت دقیق داده
         when {
             loading && coins.isEmpty() -> item {
                 Box(
@@ -568,17 +589,81 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                     contentAlignment = Alignment.Center
                 ) { CircularProgressIndicator(color = SpotAccent) }
             }
-            errorMsg != null && coins.isEmpty() -> item {
+            
+            envelope?.status == DataStatus.FAILURE -> item {
+                Surface(color = DarkSurface, shape = RoundedCornerShape(18.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "⚠️ خطا در دریافت داده",
+                            color = FuturesAccent,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            "اتصال به CoinGecko برقرار نشد. لطفاً اینترنت خود را بررسی کنید و دوباره تلاش کنید.",
+                            color = TextSecondary,
+                            fontSize = 10.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = { load() },
+                            colors = ButtonDefaults.buttonColors(containerColor = FuturesAccent.copy(alpha = 0.2f), contentColor = TextPrimary),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("تلاش مجدد", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            
+            envelope?.status == DataStatus.EMPTY_VALID -> item {
                 Surface(color = DarkSurface, shape = RoundedCornerShape(18.dp)) {
                     Text(
-                        errorMsg ?: "",
-                        color = FuturesAccent,
+                        "😴 هیچ دارایی‌ای یافت نشد — ممکن است فیلتر جست‌وجو خیلی خاص باشد یا بازار در حالت غیرعادی است.",
+                        color = TextSecondary,
                         modifier = Modifier.fillMaxWidth().padding(18.dp),
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        fontSize = 11.sp
                     )
                 }
             }
-            else -> items(shown) { coin ->
+            
+            envelope?.status == DataStatus.PARTIAL -> item {
+                Surface(
+                    color = FreshYellow.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "⚠️ داده‌های ناقص: برخی صفحات از CoinGecko دریافت نشدند. نتایج زیر فقط بر اساس داده‌های موجود است.",
+                        color = FreshYellow,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+        }
+        
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("بازار تحت نظر", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("قیمت و جایگاه در بازه ۲۴ ساعت", fontSize = 9.sp, color = TextSecondary)
+                }
+                Spacer(Modifier.weight(1f))
+                Text("${shown.size} دارایی", fontSize = 9.sp, color = SpotAccent, fontWeight = FontWeight.Bold)
+            }
+        }
+        
+        // 🚀 P0: نمایش لیست فقط در صورت SUCCESS یا PARTIAL
+        if (envelope?.status == DataStatus.SUCCESS || envelope?.status == DataStatus.PARTIAL) {
+            items(shown) { coin ->
                 val contractRef = platformContractRef(platformMap, coin.id)
                 CoinCard(coin = coin, contractRef = contractRef, onClick = { onCoinClick(coin) })
             }
