@@ -34,6 +34,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceFutures
+import com.pumpwatch.app.data.DataEnvelope
+import com.pumpwatch.app.data.DataStatus
+import com.pumpwatch.app.data.StaleDataException
+import com.pumpwatch.app.data.NoDataException
 import com.pumpwatch.app.engine.FutSignalForPaper
 import com.pumpwatch.app.engine.PaperTradingEngine
 import com.pumpwatch.app.store.TradeStore
@@ -130,17 +134,15 @@ private fun buildSignal(
 fun FuturesDashboardScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var signals by remember { mutableStateOf<List<FutSignal>>(emptyList()) }
+    
+    // 🚀 P0 Sealed Outcomes: استفاده از DataEnvelope به جای List خالی
+    var envelope by remember { mutableStateOf<DataEnvelope<List<FutSignal>>?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
     var lastUpdate by remember { mutableStateOf("") }
-    var statsText by remember { mutableStateOf("") }
 
     fun scan() {
         scope.launch {
             loading = true
-            errorMsg = null
-            signals = emptyList()
             try {
                 val coins = ApiClient.getTop100Coins()
 
@@ -156,11 +158,15 @@ fun FuturesDashboardScreen() {
 
                 val allSignals = mutableListOf<FutSignal>()
                 var perpCount = 0
+                var partialData = false
 
                 for ((idx, c) in coins.withIndex()) {
                     val fsym = c.symbol.uppercase(Locale.US) + "USDT"
                     val t = tickerMap[fsym]
-                    if (t == null) continue
+                    if (t == null) {
+                        partialData = true // 🚀 P0: ثبت اینکه بخشی از داده‌ها نبود
+                        continue
+                    }
                     perpCount++
 
                     val prem = premMap[fsym]
@@ -183,16 +189,45 @@ fun FuturesDashboardScreen() {
                     if (sig != null) allSignals.add(sig)
                 }
 
-                signals = allSignals.sortedByDescending { it.score }.take(20)
-                statsText = "${signals.size} مورد از $perpCount ارز perp در ۱۰۰ برتر"
+                val signals = allSignals.sortedByDescending { it.score }.take(20)
+                
+                // 🚀 P0 Sealed Outcomes: تعیین وضعیت دقیق داده
+                val status = when {
+                    signals.isEmpty() && partialData -> DataStatus.PARTIAL
+                    signals.isEmpty() -> DataStatus.EMPTY_VALID
+                    else -> DataStatus.SUCCESS
+                }
+                
+                envelope = DataEnvelope(
+                    data = signals,
+                    source = "coingecko+binance",
+                    observedAtMs = System.currentTimeMillis(),
+                    receivedAtMs = System.currentTimeMillis(),
+                    servedFrom = com.pumpwatch.app.data.ServedFrom.NETWORK,
+                    status = status
+                )
 
                 val now = System.currentTimeMillis()
                 lastUpdate = String.format(
                     Locale.US, "%02d:%02d:%02d",
                     (now / 3600000) % 24, (now / 60000) % 60, (now / 1000) % 60
                 )
+            } catch (e: StaleDataException) {
+                // 🚀 P0: داده کهنه - نباید سیگنال تولید شود
+                envelope = DataEnvelope(
+                    data = null,
+                    source = "coingecko+binance",
+                    observedAtMs = System.currentTimeMillis(),
+                    status = DataStatus.STALE
+                )
             } catch (e: Exception) {
-                errorMsg = "⚠️ خطا در دریافت داده: ${e.message?.take(80) ?: "نامشخص"}"
+                // 🚀 P0: خطا در دریافت داده
+                envelope = DataEnvelope(
+                    data = null,
+                    source = "coingecko+binance",
+                    observedAtMs = System.currentTimeMillis(),
+                    status = DataStatus.FAILURE
+                )
             }
             loading = false
         }
@@ -205,7 +240,6 @@ fun FuturesDashboardScreen() {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // 🚀 P0 Product Honesty: تغییر ادبیات به خنثی و پژوهشی
             EditorialPageHeader(
                 eyebrow = "FUTURES · RESEARCH",
                 title = "فیلتر مومنتوم ۲۴ساعته پژوهشی",
@@ -221,39 +255,125 @@ fun FuturesDashboardScreen() {
             }
         }
 
-        if (loading) {
-            Column(
+        // 🚀 P0 Sealed Outcomes: نمایش وضعیت دقیق داده به کاربر
+        when {
+            loading -> Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) { 
                 CircularProgressIndicator(color = PumpWatchPalette.TabMarket) 
             }
-        } else if (errorMsg != null) {
-            Text(errorMsg ?: "", color = PumpWatchPalette.Negative, modifier = Modifier.padding(24.dp))
-        } else if (signals.isEmpty()) {
-            Text(
+            
+            envelope == null -> Text(
+                "⚠️ وضعیت نامشخص",
+                color = PumpWatchPalette.Negative, 
+                modifier = Modifier.padding(24.dp)
+            )
+            
+            envelope?.status == DataStatus.FAILURE -> GlassCard(
+                accent = PumpWatchPalette.Negative, 
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("⚠️ خطا در دریافت داده", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
+                    Text(
+                        "اتصال به منابع داده (CoinGecko/Binance) برقرار نشد. لطفاً اینترنت خود را بررسی کنید و دوباره تلاش کنید.",
+                        fontSize = 11.sp, color = PumpWatchPalette.Muted
+                    )
+                    Button(
+                        onClick = { scan() },
+                        colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Negative.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("تلاش مجدد", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            
+            envelope?.status == DataStatus.STALE -> GlassCard(
+                accent = PumpWatchPalette.Warning, 
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("⏰ داده کهنه", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
+                    Text(
+                        "داده‌های موجود بیش از ۵ دقیقه عمر دارند و ممکن است دقیق نباشند. برای دریافت داده تازه، دکمه بروزرسانی را بزنید.",
+                        fontSize = 11.sp, color = PumpWatchPalette.Muted
+                    )
+                    Button(
+                        onClick = { scan() },
+                        colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("بروزرسانی فوری", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            
+            envelope?.status == DataStatus.PARTIAL -> {
+                // داده‌ها آمدند اما ناقص بودند - نمایش با هشدار
+                val signals = envelope?.data ?: emptyList()
+                Column {
+                    GlassCard(
+                        accent = PumpWatchPalette.Warning, 
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "⚠️ داده‌های ناقص: برخی ارزها اطلاعات کامل نداشتند. نتایج زیر فقط بر اساس داده‌های موجود است.",
+                            fontSize = 10.sp, color = PumpWatchPalette.Warning,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    if (signals.isEmpty()) {
+                        Text(
+                            "😴 هیچ موردی با این معیارها یافت نشد — بازار در حالت عادی است.",
+                            color = PumpWatchPalette.Muted, modifier = Modifier.padding(24.dp), fontSize = 12.sp
+                        )
+                    } else {
+                        SignalList(signals, lastUpdate)
+                    }
+                }
+            }
+            
+            envelope?.status == DataStatus.EMPTY_VALID -> Text(
                 "😴 هیچ موردی با این معیارها یافت نشد — بازار در حالت عادی است. آرامش هم یک وضعیت بازار است.",
                 color = PumpWatchPalette.Muted, modifier = Modifier.padding(24.dp), fontSize = 12.sp
             )
-        } else {
-            Text(
-                statsText,
-                fontSize = 11.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-            )
-            Text(
-                "بروزرسانی: $lastUpdate",
-                fontSize = 9.sp, color = PumpWatchPalette.Muted,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
-            )
-
-            LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(signals) { sig -> SignalCard(sig) }
+            
+            envelope?.status == DataStatus.SUCCESS -> {
+                val signals = envelope?.data ?: emptyList()
+                SignalList(signals, lastUpdate)
             }
+            
+            else -> Text(
+                "وضعیت نامشخص",
+                color = PumpWatchPalette.Muted, 
+                modifier = Modifier.padding(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SignalList(signals: List<FutSignal>, lastUpdate: String) {
+    Column {
+        Text(
+            "${signals.size} مورد یافت شد",
+            fontSize = 11.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        )
+        Text(
+            "بروزرسانی: $lastUpdate",
+            fontSize = 9.sp, color = PumpWatchPalette.Muted,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+        )
+
+        LazyColumn(
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(signals) { sig -> SignalCard(sig) }
         }
     }
 }
@@ -328,7 +448,6 @@ private fun SignalCard(sig: FutSignal) {
             Text(sig.reasons.joinToString(" • "), fontSize = 9.sp, color = PumpWatchPalette.Muted, lineHeight = 14.sp)
             Text("💧 حجم ۲۴س: ${fmtVol(sig.volumeUsd)}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
 
-            // 🚀 Commit 105: دکمه تمرین
             Button(
                 onClick = {
                     scope.launch {
@@ -354,7 +473,7 @@ private fun SignalCard(sig: FutSignal) {
                         Toast.makeText(
                             context,
                             if (success) "✅ ترید FUT برای ${sig.base} باز شد — در تب Paper ببین"
-                            else "⚠️ این ترید قبلاً باز است",
+                            else "️ این ترید قبلاً باز است",
                             Toast.LENGTH_SHORT
                         ).show()
                     }
