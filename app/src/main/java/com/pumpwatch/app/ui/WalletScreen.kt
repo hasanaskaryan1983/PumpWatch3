@@ -3,6 +3,7 @@ package com.pumpwatch.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -122,9 +123,8 @@ fun WalletScreen() {
             )
             
             // نوار تب‌های فرعی
-            androidx.compose.foundation.horizontalScroll(rememberScrollState())
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 FilterChip(
@@ -199,8 +199,10 @@ fun WalletScreen() {
                     modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    androidx.compose.foundation.horizontalScroll(rememberScrollState())
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         CHAINS.forEach { c ->
                             FilterChip(
                                 selected = viewModel.chain.key == c.key,
@@ -249,7 +251,7 @@ fun WalletScreen() {
 
                     if (viewModel.error != null) Text(viewModel.error ?: "", fontSize = 10.sp, color = PumpWatchPalette.Negative)
 
-                    // بخش‌های اصلی اسکن
+                    // فراخوانی توابع اصلی که در فایل‌های دیگر تعریف شده‌اند
                     HoldingsSection(
                         holdings = viewModel.holdings, total = viewModel.total,
                         onCopyContract = { c -> copyToClipboard("contract", c, "📋 کانترکت کپی شد") },
@@ -266,7 +268,7 @@ fun WalletScreen() {
                     Text("⚠️ داده‌های عمومی آن‌چین — توصیه مالی نیست.", fontSize = 9.sp, color = PumpWatchPalette.Warning)
                 }
             } else {
-                // نمایش تب‌های فرعی
+                // نمایش تب‌های فرعی (که در فایل‌های FavCenter.kt, WalletForensics.kt و ... تعریف شده‌اند)
                 when (subTab) {
                     1 -> FavoritesPage()
                     2 -> AlertsPage()
@@ -275,100 +277,6 @@ fun WalletScreen() {
                     5 -> ApprovalsTab(address = viewModel.address, chain = viewModel.chain, onInfo = { m -> infoText = m })
                 }
             }
-        }
-    }
-}
-
-// ====================================================================
-// ⚠️ توابع پایه و زیباسازی‌شده (Placeholder)
-// این توابع برای جلوگیری از خطای "Unresolved reference" اضافه شده‌اند
-// تا اپ بدون مشکل کامپایل شود و ظاهر Nebula حفظ گردد.
-// شما می‌توانید بعداً منطق داخلی آن‌ها را با داده‌های واقعی خود جایگزین کنید.
-// ====================================================================
-
-@Composable
-fun HoldingsSection(holdings: List<*>, total: Double, onCopyContract: (String) -> Unit, onInfo: (String) -> Unit) {
-    GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("💼 دارایی‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
-            Text("مجموع ارزش: ${String.format(Locale.US, "$%,.2f", total)}", fontSize = 11.sp, color = PumpWatchPalette.Positive)
-            if (holdings.isEmpty()) {
-                Text("هنوز دارایی‌ای یافت نشد.", fontSize = 10.sp, color = PumpWatchPalette.MutedDim)
-            } else {
-                Text("${holdings.size} توکن یافت شد.", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-            }
-        }
-    }
-}
-
-@Composable
-fun TxHistorySection(txs: List<*>) {
-    GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("📜 تاریخچه تراکنش‌ها", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
-            if (txs.isEmpty()) {
-                Text("تراکنشی ثبت نشده است.", fontSize = 10.sp, color = PumpWatchPalette.MutedDim)
-            } else {
-                Text("${txs.size} تراکنش اخیر.", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-            }
-        }
-    }
-}
-
-@Composable
-fun WalletHistorySection() {
-    GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("📊 تاریخچه کلی کیف پول", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
-        }
-    }
-}
-
-@Composable
-fun ChainForensicsSection(onCopy: (String) -> Unit, onInspect: (String) -> Unit, onStar: (String, String, Int, String, Double, Double, Double, Int) -> Unit) {
-    GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("🔬 بررسی زنجیره (Forensics)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
-        }
-    }
-}
-
-@Composable
-fun FavoritesPage() {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        EditorialPageHeader(eyebrow = "WALLET · FAVORITES", title = "مورد پسند", subtitle = "نهنگ‌ها و آدرس‌های ذخیره‌شده شما", accent = PumpWatchPalette.TabWallet)
-        GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-            Text("❤️ لیست موردپسندها در اینجا نمایش داده می‌شود.", modifier = Modifier.padding(16.dp), fontSize = 11.sp, color = PumpWatchPalette.Muted)
-        }
-    }
-}
-
-@Composable
-fun AlertsPage() {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        EditorialPageHeader(eyebrow = "WALLET · ALERTS", title = "هشدارهای کیف پول", subtitle = "اعلان‌های تنظیم‌شده برای آدرس‌ها", accent = PumpWatchPalette.TabWallet)
-        GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-            Text("⚡️ لیست هشدارها در اینجا نمایش داده می‌شود.", modifier = Modifier.padding(16.dp), fontSize = 11.sp, color = PumpWatchPalette.Muted)
-        }
-    }
-}
-
-@Composable
-fun TrashPage() {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        EditorialPageHeader(eyebrow = "WALLET · TRASH", title = "سطل زباله", subtitle = "آدرس‌های حذف‌شده", accent = PumpWatchPalette.TabWallet)
-        GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-            Text("♻️ آیتم‌های حذف‌شده در اینجا نمایش داده می‌شوند.", modifier = Modifier.padding(16.dp), fontSize = 11.sp, color = PumpWatchPalette.Muted)
-        }
-    }
-}
-
-@Composable
-fun ApprovalsTab(address: String, chain: Any, onInfo: (String) -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        EditorialPageHeader(eyebrow = "WALLET · APPROVALS", title = "مدیریت دسترسی‌ها", subtitle = "توکن‌هایی که به قراردادها دسترسی دارند", accent = PumpWatchPalette.TabWallet)
-        GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth()) {
-            Text("🔐 لیست Approvals و دسترسی‌ها در اینجا نمایش داده می‌شود.", modifier = Modifier.padding(16.dp), fontSize = 11.sp, color = PumpWatchPalette.Muted)
         }
     }
 }
