@@ -17,18 +17,6 @@ enum class DataStatus {
 }
 
 /**
- * منشأ ارائه داده
- * 
- * طبق پیشنهاد P0 مشترک: freshness و provenance
- */
-enum class ServedFrom {
-    NETWORK,          // داده مستقیماً از شبکه دریافت شد
-    DISK_CACHE,       // داده از کش دیسک خوانده شد
-    MEMORY_CACHE,     // داده از کش حافظه خوانده شد
-    UNKNOWN           // منشأ نامشخص
-}
-
-/**
  * پوشش استاندارد برای بسته‌بندی داده‌ها همراه با متادیتای تازگی و منشأ
  * 
  * T: نوع داده اصلی (مثلاً List<CoinMarket>)
@@ -56,7 +44,7 @@ data class DataEnvelope<T>(
     /**
      * بررسی اینکه آیا داده کهنه (stale) است یا خیر
      * 
-     * @param maxAgeSec حداکثر سن مجاز به ثانیه (پیش‌فرض ۵ دقیقه = ۳۰ ثانیه)
+     * @param maxAgeSec حداکثر سن مجاز به ثانیه (پیش‌فرض ۵ دقیقه = ۳۰۰ ثانیه)
      * @return true اگر داده کهنه باشد
      */
     fun isStale(maxAgeSec: Long = 300L): Boolean {
@@ -85,9 +73,6 @@ data class DataEnvelope<T>(
     
     /**
      * ایجاد یک کپی از Envelope با وضعیت STALE
-     * 
-     * وقتی داده از کش خوانده می‌شود و سن آن از حد مجاز گذشته،
-     * این متد برای علامت‌گذاری داده به عنوان stale استفاده می‌شود.
      */
     fun markAsStale(): DataEnvelope<T> {
         return this.copy(status = DataStatus.STALE)
@@ -95,8 +80,6 @@ data class DataEnvelope<T>(
     
     /**
      * بررسی وضعیت داده برای نمایش در UI
-     * 
-     * @return متن توضیحی وضعیت داده برای نمایش به کاربر
      */
     fun statusDescription(): String {
         return when (status) {
@@ -112,21 +95,7 @@ data class DataEnvelope<T>(
 
 // استثناهای اختصاصی برای مدیریت خطاهای داده
 
-/**
- * استثنا برای داده کهنه
- * 
- * وقتی داده از حداکثر سن مجاز گذشته باشد، این استثنا پرتاب می‌شود
- * تا سیستم بداند نباید بر اساس این داده تصمیم بگیرد.
- */
 class StaleDataException(message: String) : Exception(message)
-
-/**
- * استثنا برای داده مفقود
- * 
- * وقتی داده null باشد، این استثنا پرتاب می‌شود.
- * این با EMPTY_VALID متفاوت است: EMPTY_VALID یعنی "جستجو کردیم، چیزی نبود" (معتبر)،
- * اما NoDataException یعنی "داده باید وجود می‌داشت ولی نیست" (خطا).
- */
 class NoDataException(message: String) : Exception(message)
 
 /**
@@ -134,9 +103,6 @@ class NoDataException(message: String) : Exception(message)
  */
 object DataEnvelopeFactory {
     
-    /**
-     * ساخت Envelope موفق از داده شبکه
-     */
     fun <T> success(
         data: T,
         source: String,
@@ -152,9 +118,6 @@ object DataEnvelopeFactory {
         )
     }
     
-    /**
-     * ساخت Envelope از کش حافظه
-     */
     fun <T> fromMemoryCache(
         data: T,
         source: String,
@@ -165,14 +128,11 @@ object DataEnvelopeFactory {
             source = source,
             observedAtMs = observedAtMs,
             receivedAtMs = System.currentTimeMillis(),
-            servedFrom = ServedFrom.MEMORY_CACHE,
+            servedFrom = ServedFrom.MEM_CACHE, // هماهنگ با CoinApi.kt
             status = DataStatus.SUCCESS
         )
     }
     
-    /**
-     * ساخت Envelope از کش دیسک
-     */
     fun <T> fromDiskCache(
         data: T,
         source: String,
@@ -188,12 +148,7 @@ object DataEnvelopeFactory {
         )
     }
     
-    /**
-     * ساخت Envelope برای داده خالی معتبر
-     */
-    fun <T> emptyValid(
-        source: String
-    ): DataEnvelope<T> {
+    fun <T> emptyValid(source: String): DataEnvelope<T> {
         return DataEnvelope(
             data = null,
             source = source,
@@ -204,9 +159,6 @@ object DataEnvelopeFactory {
         )
     }
     
-    /**
-     * ساخت Envelope برای خطا
-     */
     fun <T> failure(
         source: String,
         observedAtMs: Long = System.currentTimeMillis()
