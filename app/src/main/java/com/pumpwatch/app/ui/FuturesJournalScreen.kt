@@ -105,6 +105,29 @@ object FuturesJournalCalculator {
     }
 }
 
+// 🚀 P0 Tab 15: تغییر از private به internal برای رفع خطای visibility در API کلاس
+internal data class FutJournalStats(
+    val total: Int, 
+    val wins: Int, 
+    val losses: Int, 
+    val winRate: Double, 
+    val totalPnl: Double, 
+    val avgPnl: Double, 
+    val avgWin: Double, 
+    val avgLoss: Double, 
+    val profitFactor: Double, 
+    val expectancy: Double, 
+    // maxDrawdown حذف شد
+    val longs: Int, 
+    val shorts: Int, 
+    val stopExits: Int, 
+    val targetExits: Int, 
+    val trailExits: Int, 
+    val timeExits: Int, 
+    val volSpikeExits: Int, 
+    val momentumExits: Int
+)
+
 @Composable
 fun FuturesJournalScreen() {
     val context = LocalContext.current
@@ -268,26 +291,3 @@ private fun JournalTradeRow(t: Trade) {
         }
     }
 }
-
-// 🚀 P0 Tab 15: حذف maxDrawdown از ساختار داده تا زمان فراهم شدن ledger واقعی
-private data class FutJournalStats(
-    val total: Int, 
-    val wins: Int, 
-    val losses: Int, 
-    val winRate: Double, 
-    val totalPnl: Double, 
-    val avgPnl: Double, 
-    val avgWin: Double, 
-    val avgLoss: Double, 
-    val profitFactor: Double, 
-    val expectancy: Double, 
-    // maxDrawdown حذف شد
-    val longs: Int, 
-    val shorts: Int, 
-    val stopExits: Int, 
-    val targetExits: Int, 
-    val trailExits: Int, 
-    val timeExits: Int, 
-    val volSpikeExits: Int, 
-    val momentumExits: Int
-)
