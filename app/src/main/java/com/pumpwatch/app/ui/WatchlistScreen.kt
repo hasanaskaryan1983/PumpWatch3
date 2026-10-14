@@ -57,7 +57,6 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
-    // 🚀 P0 Tab 09: ۵ دسته واچ‌لیست
     var selectedCategory by remember { mutableStateOf(0) }
     val categories = remember {
         mutableStateOf(
@@ -83,7 +82,6 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
             accent = PumpWatchPalette.TabWatchlist
         )
 
-        // 🚀 P0 Tab 09: تب‌های دسته‌بندی (۵ تب)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -111,7 +109,7 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
             }
         }
 
-        // 🚀 P0 Tab 09: لیست ارزها در دسته انتخاب‌شده
+        // 🚀 اصلاح خطای Unresolved reference: تعریف currentCategory در داخل Column
         val currentCategory = categories.value[selectedCategory]
         
         if (currentCategory.coins.isEmpty()) {
@@ -140,7 +138,6 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
                     )
                 }
                 
-                // دکمه افزودن ارز (فقط اگر کمتر از ۱۰ ارز وجود دارد)
                 if (currentCategory.coins.size < 10) {
                     item {
                         Button(
@@ -168,19 +165,17 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
         }
     }
 
-    // دیالوگ افزودن ارز
     if (showAddCoinDialog) {
         AddCoinDialog(
             onDismiss = { showAddCoinDialog = false },
             onCoinSelected = { coinId, symbol, name ->
                 val newCoin = WatchlistCoin(coinId, symbol, name)
-                currentCategory.coins.add(newCoin)
+                categories.value[selectedCategory].coins.add(newCoin)
                 showAddCoinDialog = false
             }
         )
     }
 
-    // دیالوگ مدیریت هشدارها
     if (showAlertDialog && selectedCoinForAlert != null) {
         ManageAlertDialog(
             coin = selectedCoinForAlert!!,
@@ -209,31 +204,21 @@ private fun WatchlistCoinRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text(
-                        coin.symbol,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = PumpWatchPalette.Text
-                    )
-                    Text(
-                        coin.name,
-                        fontSize = 10.sp,
-                        color = PumpWatchPalette.Muted
-                    )
+                    Text(coin.symbol, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                    Text(coin.name, fontSize = 10.sp, color = PumpWatchPalette.Muted)
                 }
                 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(onClick = onAlertClick) {
                         Icon(
-                            imageVector = Icons.Default.Notifications, // ✅ اصلاح شد
+                            imageVector = Icons.Default.Notifications,
                             contentDescription = "هشدار",
                             tint = if (coin.alerts.isNotEmpty()) PumpWatchPalette.Warning else PumpWatchPalette.Muted
                         )
                     }
-                    
                     IconButton(onClick = onRemoveClick) {
                         Icon(
-                            imageVector = Icons.Default.Delete, // ✅ اصلاح شد
+                            imageVector = Icons.Default.Delete,
                             contentDescription = "حذف",
                             tint = PumpWatchPalette.Negative
                         )
@@ -250,7 +235,6 @@ private fun WatchlistCoinRow(
                         color = PumpWatchPalette.Warning,
                         fontWeight = FontWeight.Bold
                     )
-                    
                     coin.alerts.take(3).forEach { alert ->
                         val conditionText = when (alert.condition) {
                             AlertCondition.ABOVE -> "⬆️ > ${alert.price}"
@@ -288,7 +272,6 @@ private fun AddCoinDialog(
                     placeholder = { Text("جستجوی نماد (مثلاً BTC)...") },
                     modifier = Modifier.fillMaxWidth()
                 )
-                
                 Spacer(Modifier.height(16.dp))
                 
                 val sampleCoins = listOf(
@@ -316,9 +299,7 @@ private fun AddCoinDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("بستن")
-            }
+            TextButton(onClick = onDismiss) { Text("بستن") }
         }
     )
 }
@@ -348,9 +329,7 @@ private fun ManageAlertDialog(
                     
                     coin.alerts.forEach { alert ->
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -360,15 +339,11 @@ private fun ManageAlertDialog(
                                 AlertCondition.CHANGE_UP -> "افزایش"
                                 AlertCondition.CHANGE_DOWN -> "کاهش"
                             }
-                            // ✅ اصلاح خطای if/else در اینجا:
                             val suffix = if (alert.condition == AlertCondition.ABOVE || alert.condition == AlertCondition.BELOW) "" else "%"
-                            Text(
-                                "$conditionText ${alert.price}$suffix",
-                                fontSize = 10.sp
-                            )
+                            Text("$conditionText ${alert.price}$suffix", fontSize = 10.sp)
                             IconButton(onClick = { onAlertRemoved(alert.id) }) {
                                 Icon(
-                                    imageVector = Icons.Default.Close, // ✅ اصلاح شد
+                                    imageVector = Icons.Default.Close,
                                     contentDescription = "حذف",
                                     tint = PumpWatchPalette.Negative,
                                     modifier = Modifier.size(16.dp)
@@ -376,17 +351,13 @@ private fun ManageAlertDialog(
                             }
                         }
                     }
-                    
                     HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 }
                 
                 Text("افزودن هشدار جدید:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
                 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AlertCondition.values().forEach { condition ->
                         FilterChip(
                             selected = selectedCondition == condition,
@@ -443,9 +414,7 @@ private fun ManageAlertDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("بستن")
-            }
+            TextButton(onClick = onDismiss) { Text("بستن") }
         }
     )
 }
