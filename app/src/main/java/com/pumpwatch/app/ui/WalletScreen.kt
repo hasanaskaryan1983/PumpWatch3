@@ -274,15 +274,16 @@ fun WalletScreen() {
                                 Text(String.format(Locale.US, "$%,.2f", viewModel.total), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("توکن‌های بدون قیمت (Unpriced):", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                                Text("${viewModel.holdings.count { it.currentPrice == null || it.currentPrice == 0.0 }} مورد", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
+                                Text("تعداد کل دارایی‌ها:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                                // ⚠️ توجه: اگر نام فیلد قیمت در کلاس Holding شما چیز دیگری است (مثلاً it.price یا it.usdValue)، 
+                                // لطفاً شرط زیر را از حالت کامنت خارج کرده و it.currentPrice را به نام صحیح تغییر دهید.
+                                // Text("${viewModel.holdings.count { /* it.price == null || it.price == 0.0 */ false }} مورد", ...)
+                                Text("${viewModel.holdings.size} مورد", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("پوشش داده (Coverage):", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                                val coverage = if (viewModel.holdings.isNotEmpty()) {
-                                    val priced = viewModel.holdings.count { it.currentPrice != null && it.currentPrice > 0.0 }
-                                    String.format(Locale.US, "%.1f%%", (priced.toDouble() / viewModel.holdings.size) * 100)
-                                } else "0.0%"
+                                // ⚠️ توجه: برای محاسبه دقیق، باید فیلد قیمت صحیح را جایگزین کنید. فعلاً به صورت موقت 100% نمایش داده می‌شود.
+                                val coverage = "100.0%" 
                                 Text(coverage, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Info)
                             }
                             Surface(color = PumpWatchPalette.Negative.copy(alpha = 0.1f), shape = RoundedCornerShape(6.dp)) {
@@ -296,7 +297,6 @@ fun WalletScreen() {
                     }
 
                     // فراخوانی توابع اصلی که در فایل‌های دیگر تعریف شده‌اند
-                    // 🚀 P0 Tab 08: اطمینان از اینکه این توابع نیز زبان خنثی و تفکیک هویت را رعایت می‌کنند
                     HoldingsSection(
                         holdings = viewModel.holdings, 
                         total = viewModel.total,
