@@ -57,6 +57,10 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
+    // 🚀 P0 Tab 09: خواندن وضعیت fail-closed از SharedPreferences
+    val prefs = context.getSharedPreferences("pumpwatch_prefs", 0)
+    val isStorageInsecure = prefs.getBoolean("secure_storage_fell_back", false)
+    
     var selectedCategory by remember { mutableStateOf(0) }
     val categories = remember {
         mutableStateOf(
@@ -82,13 +86,36 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
             accent = PumpWatchPalette.TabWatchlist
         )
 
-        // 🚀 P0 Tab 09: Eval Status & Keystore Banner (برای پاس شدن تست‌های موجود)
-        GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        // 🚀 P0 Tab 09: بنر هشدار امنیتی fail-closed (فقط وقتی insecure است)
+        if (isStorageInsecure) {
+            GlassCard(accent = PumpWatchPalette.Negative, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(12.dp)) {
+                    Text("⚠️", fontSize = 20.sp, modifier = Modifier.padding(end = 12.dp))
+                    Column {
+                        Text(
+                            "ذخیره‌سازی امن در دسترس نیست",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = PumpWatchPalette.Negative
+                        )
+                        Text(
+                            "Keystore دستگاه فعال نیست. تغییرات شما در این نشست موقتی‌اند.",
+                            fontSize = 10.sp,
+                            color = PumpWatchPalette.Muted,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 🚀 P0 Tab 09: کارت وضعیت ارزیابی (همیشه نمایش داده شود)
+        GlassCard(accent = PumpWatchPalette.Info, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
-                Text("⚠️", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
+                Text("ℹ️", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
                 Column {
-                    Text("وضعیت ارزیابی (Eval Status)", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text("مخزن کلید (Keystore) در دسترس نیست. هشدارها ممکن است به‌درستی ذخیره نشوند.", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                    Text("ارزیابی توسط MonitorWorker", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("هشدارها در پس‌زمینه بررسی و اجرا می‌شوند.", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                 }
             }
         }
