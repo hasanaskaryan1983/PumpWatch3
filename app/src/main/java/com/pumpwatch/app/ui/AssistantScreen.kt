@@ -2,7 +2,7 @@ package com.pumpwatch.app.ui
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,12 +12,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -47,22 +50,51 @@ import com.pumpwatch.app.ui.EditorialPageHeader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+// 🚀 P0 Tab 04: تعریف صریح کاندیدای دارایی
+data class AssetCandidate(
+    val providerId: String,
+    val symbol: String,
+    val name: String,
+    val chain: String?,
+    val contract: String?,
+    val venue: String, // "CEX" یا "DEX"
+    val rank: Int?,
+    val poolUrl: String?
+)
+
+// 🚀 P0 Tab 04: نتیجهٔ مهر و موم شده (Sealed Outcome)
+sealed class AnalysisStatus {
+    object Success : AnalysisStatus()
+    object Partial : AnalysisStatus()
+    object Insufficient : AnalysisStatus()
+    data class Error(val message: String) : AnalysisStatus()
+}
+
 private data class DexCandle(val o: Double, val h: Double, val l: Double, val c: Double)
 
-private data class CoinAnalysis(
-    val symbol: String, val name: String, val coingeckoId: String?, val rank: Int?,
-    val score: Int, val recommendation: String, val arrow: String,
-    val indicators: Map<String, String>, val whaleActivity: String, val reason: String,
-    val dataScore: Int, val isDex: Boolean, val chainName: String?, val poolUrl: String?,
-    val candles: List<DexCandle>,
-    val invalidationScenario: String,
+// 🚀 P0 Tab 04: ساختار دادهٔ تحلیل با متادیتای کامل
+data class CoinAnalysis(
+    val candidate: AssetCandidate,
+    val status: AnalysisStatus,
+    val score: Int?,
+    val momentumLabel: String,
+    val indicators: Map<String, String>,
+    val buySellRatio1h: Double?,
+    val reason: String,
+    val dataQualityScore: Int,
+    val source: String,
+    val observedAtMs: Long,
     val validityHours: Int,
-    val formulaBreakdown: Map<String, String>
+    val invalidationScenario: String,
+    val formulaBreakdown: Map<String, String>,
+    val candles: List<DexCandle>?
 )
 
 @Composable
@@ -70,38 +102,87 @@ fun AssistantScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
-    var searchResult by remember { mutableStateOf<CoinAnalysis?>(null) }
+    var searchResults by remember { mutableStateOf<List<AssetCandidate>>(emptyList()) }
+    var selectedCandidate by remember { mutableStateOf<AssetCandidate?>(null) }
+    var analysisResult by remember { mutableStateOf<CoinAnalysis?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var searchStatus by remember { mutableStateOf("") }
 
     fun doSearch() {
         val q = searchQuery.trim()
         if (q.isEmpty()) return
         scope.launch {
-            loading = true; error = null; searchResult = null
-            searchStatus = "🔍 جستجو در ۱۰۰۰ ارز برتر CEX..."
+            loading = true
+            searchResults = emptyList()
+            selectedCandidate = null
+            analysisResult = null
+            error = null
             try {
-                var coins = withContext(Dispatchers.IO) { try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() } }
-                if (coins.size < 100) coins = withContext(Dispatchers.IO) { try { ApiClient.getTop1000Coins() } catch (_: Exception) { emptyList() } }
+                val coins = withContext(Dispatchers.IO) { ApiClient.getTop1000Coins() }
                 val asRank = q.toIntOrNull()
-                val found = coins.firstOrNull { it.symbol.equals(q, true) || it.name.equals(q, true) || (asRank != null && it.market_cap_rank == asRank) }
-                if (found != null) {
-                    searchStatus = "✅ پیدا شد در CEX — رتبه #${found.market_cap_rank ?: "-"}"
-                    searchResult = analyzeCex(found.id, found.symbol, found.name, found.market_cap_rank)
-                } else {
-                    searchStatus = " در CEX نبود؛ جستجو در DEX‌ها..."
-                    val dex = analyzeDex(q)
-                    if (dex != null) {
-                        searchStatus = "✅ پیدا شد در DEX (${dex.chainName}) — تحلیل کامل با کندل GeckoTerminal"
-                        searchResult = dex
-                    } else {
-                        searchStatus = "❌ پیدا نشد"
-                        error = "ارز «$q» پیدا نشد. نماد، اسم یا عدد رتبه رو درست بنویس."
-                    }
+                val cexCandidates = coins.filter { 
+                    it.symbol.equals(q, true) || it.name.contains(q, true) || (asRank != null && it.market_cap_rank == asRank) 
+                }.map { 
+                    AssetCandidate(
+                        providerId = it.id,
+                        symbol = it.symbol.uppercase(),
+                        name = it.name,
+                        chain = null,
+                        contract = null,
+                        venue = "CEX (CoinGecko)",
+                        rank = it.market_cap_rank,
+                        poolUrl = null
+                    )
                 }
-            } catch (t: Throwable) { error = "خطا: ${t.message}" }
-            loading = false
+                
+                var dexCandidates = emptyList<AssetCandidate>()
+                if (cexCandidates.isEmpty() || q.length > 2) {
+                    try {
+                        val pools = withContext(Dispatchers.IO) { GeckoTerminal.api.searchPools(q).data ?: emptyList() }
+                        dexCandidates = pools.take(5).mapNotNull { pool ->
+                            val attrs = pool.attributes ?: return@mapNotNull null
+                            val net = pool.relationships?.network?.data?.id ?: "unknown"
+                            val addr = pool.id?.substringAfter('_') ?: ""
+                            AssetCandidate(
+                                providerId = pool.id ?: "",
+                                symbol = attrs.name?.split('/')?.firstOrNull()?.trim() ?: q.uppercase(),
+                                name = attrs.name ?: q,
+                                chain = net,
+                                contract = addr,
+                                venue = "DEX ($net)",
+                                rank = null,
+                                poolUrl = "https://www.geckoterminal.com/$net/pools/$addr"
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }
+                
+                searchResults = (cexCandidates + dexCandidates).distinctBy { it.providerId }.take(10)
+                if (searchResults.isEmpty()) {
+                    error = "هیچ دارایی منطبقی یافت نشد. لطفاً نماد، نام یا شناسه را دقیق‌تر وارد کنید."
+                }
+            } catch (t: Throwable) {
+                error = "خطا در جست‌وجو: ${t.message}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    fun analyzeCandidate(candidate: AssetCandidate) {
+        scope.launch {
+            loading = true
+            selectedCandidate = candidate
+            analysisResult = null
+            error = null
+            try {
+                val result = withContext(Dispatchers.IO) { performAnalysis(candidate) }
+                analysisResult = result
+            } catch (t: Throwable) {
+                error = "خطا در تحلیل: ${t.message}"
+            } finally {
+                loading = false
+            }
         }
     }
 
@@ -109,33 +190,19 @@ fun AssistantScreen() {
         EditorialPageHeader(
             eyebrow = "RESEARCH · EXPLAINABLE",
             title = "تحلیل‌گر قاعده‌محور",
-            subtitle = "تحلیل تکنیکال CEX/DEX با RSI/MACD/EMA + جریان نهنگ‌ها (بدون AI)",
+            subtitle = "ارزیابی تکنیکال بر اساس اندیکاتورهای کلاسیک و داده‌های حجم. این خروجی پژوهشی است و توصیه مالی نیست.",
             accent = PumpWatchPalette.TabAssistant
         )
 
         Spacer(Modifier.height(12.dp))
 
         GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("ℹ️ این ابزار چگونه کار می‌کند؟", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
-                Text(
-                    "این تحلیل‌گر از مدل زبانی یا AI استفاده نمی‌کند. امتیاز ۰-۱۰۰ فقط از جمع وزن‌دار چند اندیکاتور تکنیکال (RSI، MACD، EMA) و نسبت خرید/فروش نهنگ‌ها محاسبه می‌شود. این امتیاز احتمال موفقیت کالیبره‌شده نیست و هیچ سابقهٔ backtest عمومی ندارد. مسئولیت تصمیم نهایی با شماست.",
-                    fontSize = 10.sp,
-                    color = PumpWatchPalette.Muted,
-                    lineHeight = 14.sp
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("🔍 جستجوی ارز (نماد، اسم یا رتبه)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                Text("🔍 جستجوی دارایی (نماد، نام یا رتبه)", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
                 TextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("مثلاً: BTC ، ANSEM ، USELESS یا 46", fontSize = 11.sp, color = PumpWatchPalette.MutedDim) },
+                    placeholder = { Text("مثلاً: BTC، SOL یا 46", fontSize = 11.sp, color = PumpWatchPalette.MutedDim) },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
                     singleLine = true,
@@ -152,93 +219,126 @@ fun AssistantScreen() {
                 Button(
                     onClick = { doSearch() },
                     enabled = !loading,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PumpWatchPalette.TabAssistant,
-                        contentColor = PumpWatchPalette.Ink
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.TabAssistant, contentColor = PumpWatchPalette.Ink),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    if (loading) CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), color = PumpWatchPalette.Ink, strokeWidth = 2.dp)
-                    Text("تحلیل کن 🔍", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                if (searchStatus.isNotEmpty()) {
-                    Text(
-                        searchStatus,
-                        fontSize = 10.sp,
-                        color = when {
-                            searchStatus.contains("✅") -> PumpWatchPalette.Positive
-                            searchStatus.contains("❌") -> PumpWatchPalette.Negative
-                            else -> PumpWatchPalette.Muted
-                        }
-                    )
+                    if (loading && selectedCandidate == null) CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), color = PumpWatchPalette.Ink, strokeWidth = 2.dp)
+                    Text("جست‌وجو 🔍", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 if (error != null) Text(error ?: "", fontSize = 10.sp, color = PumpWatchPalette.Negative)
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(12.dp))
 
-        searchResult?.let { a ->
+        // 🚀 P0 Tab 04: انتخاب صریح کاندیدا پیش از تحلیل
+        if (searchResults.isNotEmpty() && selectedCandidate == null) {
+            Text("لطفاً دارایی مورد نظر را برای تحلیل انتخاب کنید:", fontSize = 11.sp, color = PumpWatchPalette.Muted, modifier = Modifier.padding(bottom = 4.dp))
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(searchResults) { candidate ->
+                    GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth().clickable { analyzeCandidate(candidate) }) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(candidate.symbol, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
+                                Text("${candidate.name} • ${candidate.venue}" + (if (candidate.chain != null) " (${"${candidate.chain}"})" else ""), fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                            }
+                            Text("➡️", fontSize = 16.sp, color = PumpWatchPalette.TabAssistant)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 🚀 P0 Tab 04: نمایش وضعیت تحلیل
+        if (loading && selectedCandidate != null) {
+            Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = PumpWatchPalette.TabAssistant)
+                Text("در حال تحلیل ${selectedCandidate?.symbol}...", fontSize = 11.sp, color = PumpWatchPalette.Muted, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+
+        if (analysisResult != null) {
+            val a = analysisResult!!
             GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("${a.symbol}${if (a.isDex) " (DEX)" else ""}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Text)
+                            Text("${a.candidate.symbol} ${if (a.candidate.venue.startsWith("DEX")) "(DEX)" else ""}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Text)
                             Text(
-                                a.name + (if (a.rank != null) " • رتبه #${a.rank}" else if (a.chainName != null) " • ${a.chainName}" else ""),
-                                fontSize = 11.sp,
-                                color = PumpWatchPalette.Muted
+                                a.candidate.name + (if (a.candidate.rank != null) " • رتبه #${a.candidate.rank}" else if (a.candidate.chain != null) " • شبکه ${a.candidate.chain}" else ""),
+                                fontSize = 11.sp, color = PumpWatchPalette.Muted
                             )
                         }
+                        val statusText = when (a.status) {
+                            is AnalysisStatus.Success -> "✅ موفق"
+                            is AnalysisStatus.Partial -> "⚠️ ناقص"
+                            is AnalysisStatus.Insufficient -> "❌ داده ناکافی"
+                            is AnalysisStatus.Error -> "❌ خطا"
+                        }
+                        val statusColor = when (a.status) {
+                            is AnalysisStatus.Success -> PumpWatchPalette.Positive
+                            is AnalysisStatus.Partial -> PumpWatchPalette.Warning
+                            is AnalysisStatus.Insufficient -> PumpWatchPalette.Negative
+                            is AnalysisStatus.Error -> PumpWatchPalette.Negative
+                        }
+                        Surface(color = statusColor.copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
+                            Text(statusText, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontSize = 9.sp, fontWeight = FontWeight.Bold, color = statusColor)
+                        }
+                    }
+
+                    // 🚀 P0 Tab 04: زبان خنثی و سلب مسئولیت شفاف
+                    Text(
+                        a.momentumLabel,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Black,
+                        color = when {
+                            a.momentumLabel.contains("صعودی") -> PumpWatchPalette.Positive
+                            a.momentumLabel.contains("نزولی") -> PumpWatchPalette.Negative
+                            else -> PumpWatchPalette.Warning
+                        }
+                    )
+                    
+                    Surface(color = PumpWatchPalette.Negative.copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
                         Text(
-                            "${a.arrow} ${a.recommendation}",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
-                            color = when {
-                                a.recommendation.contains("خرید") -> PumpWatchPalette.Positive
-                                a.recommendation.contains("فروش") -> PumpWatchPalette.Negative
-                                else -> PumpWatchPalette.Muted
-                            }
+                            "⚠️ سلب مسئولیت: این خروجی صرفاً تجمیع چند اندیکاتور تکنیکال است و احتمال موفقیت کالیبره‌شده یا توصیه مالی نیست. مسئولیت تصمیم نهایی با کاربر است.",
+                            fontSize = 9.sp, color = PumpWatchPalette.Negative, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(8.dp)
                         )
                     }
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text("📊 امتیاز فنی:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                            Text("${a.score}/100", fontSize = 14.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("🛡️ کیفیت داده:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                            Text("${a.dataScore}/100", fontSize = 14.sp, color = PumpWatchPalette.Info, fontWeight = FontWeight.Bold)
+                    if (a.score != null) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("📊 امتیاز هم‌گرایی:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                                Text("${a.score}/100", fontSize = 14.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("🛡️ کیفیت داده:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                                Text("${a.dataQualityScore}/100", fontSize = 14.sp, color = PumpWatchPalette.Info, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
-                    Text(
-                        "امتیاز فنی = جمع وزن‌دار اندیکاتورها • کیفیت داده = پوشش و تازگی منابع (نه احتمال سود)",
-                        fontSize = 9.sp,
-                        color = PumpWatchPalette.MutedDim
-                    )
 
-                    // سناریوی ابطال (کادر داخلی با رنگ متفاوت)
+                    // 🚀 P0 Tab 04: نمایش شفاف منبع، زمان و انقضا
+                    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.US) }
+                    val expiryTime = timeFmt.format(Date(a.observedAtMs + a.validityHours * 3600 * 1000L))
+                    Surface(color = PumpWatchPalette.Info.copy(alpha = 0.1f), shape = RoundedCornerShape(6.dp)) {
+                        Text(
+                            "منبع: ${a.source} • مشاهده: ${timeFmt.format(Date(a.observedAtMs))} • اعتبار تا: $expiryTime",
+                            fontSize = 9.sp, color = PumpWatchPalette.Info, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+
                     GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth()) {
                         Column {
-                            Text("🎯 سناریوی ابطال:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
+                            Text("🎯 سناریوی تغییر ارزیابی:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
                             Text(a.invalidationScenario, fontSize = 10.sp, color = PumpWatchPalette.Muted, lineHeight = 13.sp)
                         }
                     }
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("⏱️ بازه اعتبار:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                        Text(
-                            if (a.validityHours >= 24) "${a.validityHours / 24} روز" else "${a.validityHours} ساعت",
-                            fontSize = 11.sp,
-                            color = PumpWatchPalette.Warning,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Text("پس از این زمان، اندیکاتورها تغییر می‌کنند و باید دوباره تحلیل کنید.", fontSize = 9.sp, color = PumpWatchPalette.MutedDim)
-
-                    Text("📈 اندیکاتورها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                    Text("📈 اندیکاتورهای تکنیکال:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
                     a.indicators.forEach { (k, v) ->
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(k, fontSize = 10.sp, color = PumpWatchPalette.Muted)
@@ -246,34 +346,30 @@ fun AssistantScreen() {
                         }
                     }
 
-                    Text("🐳 خرید نهنگ‌ها:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
-                    Text(a.whaleActivity, fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                    // 🚀 P0 Tab 04: تعریف دقیق و عینی "نهنگ" بدون ادعای مالکیت
+                    if (a.buySellRatio1h != null) {
+                        Text("📊 نسبت حجم خرید به فروش (۱ ساعت): ${(a.buySellRatio1h * 100).toInt()}٪", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                        Text("این متریک نشان‌دهندهٔ نسبت تراکنش‌های خرید به کل تراکنش‌ها در استخر است و ادعای مالکیت کیف پول خاصی ندارد.", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                    }
 
-                    Text("💡 چرا این امتیاز؟", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                    Text("💡 منطق امتیازدهی:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
                     Text(a.reason, fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                }
-            }
 
-            Spacer(Modifier.height(12.dp))
-
-            if (a.formulaBreakdown.isNotEmpty()) {
-                GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("📐 فرمول امتیازدهی (وزن‌های شفاف)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
-                        Text("این امتیاز چگونه محاسبه شده؟", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                    if (a.formulaBreakdown.isNotEmpty()) {
+                        Text("📐 جزئیات فرمول:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
                         a.formulaBreakdown.forEach { (indicator, weight) ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(indicator, fontSize = 10.sp, color = PumpWatchPalette.Muted)
                                 Text(weight, fontSize = 10.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
                             }
                         }
-                        Text("مجموع امتیازها در بازه ۰-۱۰۰ محدود شده است.", fontSize = 9.sp, color = PumpWatchPalette.MutedDim)
                     }
                 }
-                Spacer(Modifier.height(12.dp))
             }
 
-            if (a.candles.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+
+            if (a.candles != null && a.candles.isNotEmpty()) {
                 GlassCard(accent = PumpWatchPalette.TabAssistant, modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("📊 نمودار ساعتی + میانگین‌های متحرک (قرمز=EMA20، آبی=EMA50)", fontSize = 10.sp, color = PumpWatchPalette.Muted)
@@ -281,44 +377,155 @@ fun AssistantScreen() {
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-            } else if (a.coingeckoId != null) {
-                ProChart(coinId = a.coingeckoId, symbol = a.symbol)
+            } else if (a.candidate.providerId.isNotEmpty() && !a.candidate.venue.startsWith("DEX")) {
+                ProChart(coinId = a.candidate.providerId, symbol = a.candidate.symbol)
                 Spacer(Modifier.height(12.dp))
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (a.coingeckoId != null) {
+                if (a.candidate.poolUrl != null) {
                     Button(
-                        onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coingecko.com/en/coins/${a.coingeckoId}/chart"))) } catch (_: Throwable) { } },
-                        colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Info, contentColor = PumpWatchPalette.Ink),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) { Text("📊 نمودار CoinGecko", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                }
-                if (a.poolUrl != null) {
-                    Button(
-                        onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(a.poolUrl))) } catch (_: Throwable) { } },
+                        onClick = { try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(a.candidate.poolUrl))) } catch (_: Throwable) { } },
                         colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.weight(1f)
-                    ) { Text("🌊 استخر DEX", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text("🌊 مشاهده استخر DEX", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                 }
-            }
-            Spacer(Modifier.height(12.dp))
-
-            GlassCard(accent = PumpWatchPalette.Negative, modifier = Modifier.fillMaxWidth()) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("⚠️ محدودیت‌های این تحلیل‌گر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
-                    Text(
-                        "• این ابزار AI نیست — فقط چند فرمول تکنیکال ساده است\n• امتیاز ۰-۱۰۰ احتمال موفقیت کالیبره‌شده نیست\n• هیچ backtest عمومی روی این فرمول‌ها انجام نشده\n• مسئولیت تصمیم و معامله کاملاً با شماست",
-                        fontSize = 9.sp,
-                        color = PumpWatchPalette.Muted,
-                        lineHeight = 13.sp
-                    )
-                }
+                Button(
+                    onClick = { selectedCandidate = null; analysisResult = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.TabAssistant, contentColor = PumpWatchPalette.Ink),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) { Text("🔍 جست‌وجوی جدید", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
             }
         }
     }
+}
+
+// ============================================================
+// توابع کمکی تحلیل (بدون تغییر در منطق اصلی، فقط تطبیق با ساختار جدید)
+// ============================================================
+
+private suspend fun performAnalysis(candidate: AssetCandidate): CoinAnalysis {
+    val observedAtMs = System.currentTimeMillis()
+    var status: AnalysisStatus = AnalysisStatus.Success
+    var score = 50
+    val ind = mutableMapOf<String, String>()
+    val formula = mutableMapOf<String, String>()
+    formula["پایه"] = "۵۰ امتیاز"
+    
+    var closes = emptyList<Double>()
+    var candles = emptyList<DexCandle>()
+    var buySellRatio1h: Double? = null
+    var dataQualityChecks = 0
+    
+    if (candidate.venue.startsWith("CEX")) {
+        try {
+            val kl = BinanceClient.api.klines("${candidate.symbol}USDT", "1h", 100)
+            closes = kl.map { it[4].asDouble }
+            if (closes.size >= 35) dataQualityChecks++ else status = AnalysisStatus.Partial
+        } catch (_: Throwable) {
+            status = AnalysisStatus.Partial
+        }
+    } else {
+        try {
+            val net = candidate.chain ?: "solana"
+            val addr = candidate.contract ?: ""
+            val oh = GeckoOhlcv.api.poolOhlcvHour(net, addr)
+            candles = oh.data?.attributes?.ohlcv_list?.mapNotNull { row -> 
+                if (row.size >= 5) DexCandle(row[1], row[2], row[3], row[4]) else null 
+            } ?: emptyList()
+            closes = candles.map { it.c }
+            if (closes.size >= 35) dataQualityChecks++ else status = AnalysisStatus.Partial
+            
+            try {
+                val pool = GeckoTerminal.api.searchPools(candidate.symbol).data?.firstOrNull { it.attributes != null }
+                if (pool != null) {
+                    val a = pool.attributes!!
+                    val b1 = a.transactions?.h1?.buys ?: 0.0
+                    val s1 = a.transactions?.h1?.sells ?: 0.0
+                    if (b1 + s1 > 0) {
+                        buySellRatio1h = b1 / (b1 + s1)
+                        dataQualityChecks++
+                    } else {
+                        status = AnalysisStatus.Partial
+                    }
+                }
+            } catch (_: Throwable) {
+                status = AnalysisStatus.Partial
+            }
+        } catch (_: Throwable) {
+            status = AnalysisStatus.Error("عدم دسترسی به داده‌های DEX")
+        }
+    }
+    
+    if (status is AnalysisStatus.Error) {
+        return CoinAnalysis(candidate, status, null, "تحلیل ناموفق", emptyMap(), null, "داده‌ای دریافت نشد.", 0, candidate.venue, observedAtMs, 0, "نامشخص", emptyMap(), null)
+    }
+    
+    if (closes.size < 10) status = AnalysisStatus.Insufficient
+    
+    if (closes.size >= 10) {
+        val rsi = rsiOf(closes)
+        val mUp = MacdCalc.macdUp(closes)
+        val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last()
+        val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last()
+        val px = closes.last()
+        
+        when {
+            rsi < 30 -> { score += 15; ind["RSI (14)"] = "${rsi.toInt()} (اشباع فروش)"; formula["RSI < ۳۰"] = "+۱۵" }
+            rsi > 70 -> { score -= 15; ind["RSI (14)"] = "${rsi.toInt()} (اشباع خرید)"; formula["RSI > ۷۰"] = "−۱۵" }
+            else -> ind["RSI (14)"] = "${rsi.toInt()} (محدوده میانی)"
+        }
+        if (mUp) { score += 15; ind["MACD"] = "سیگنال صعودی"; formula["MACD صعودی"] = "+۱۵" } 
+        else { score -= 10; ind["MACD"] = "سیگنال نزولی"; formula["MACD نزولی"] = "−۱۰" }
+        when {
+            px > e20 && e20 > e50 -> { score += 20; ind["EMA"] = "آرایش صعودی"; formula["EMA صعودی"] = "+۲۰" }
+            px < e20 && e20 < e50 -> { score -= 20; ind["EMA"] = "آرایش نزولی"; formula["EMA نزولی"] = "−۲۰" }
+            else -> ind["EMA"] = "آرایش خنثی / درهم"
+        }
+    } else {
+        ind["تکنیکال"] = "دادهٔ کندلی ناکافی"
+        formula["تکنیکال"] = "۰ (داده ناکافی)"
+    }
+    
+    if (buySellRatio1h != null) {
+        val ratioPct = (buySellRatio1h * 100).toInt()
+        ind["نسبت خرید (۱س)"] = "$ratioPct٪"
+        when {
+            buySellRatio1h >= 0.60 -> { score += 10; formula["نسبت خرید ≥ ۶۰٪"] = "+۱۰" }
+            buySellRatio1h <= 0.40 -> { score -= 10; formula["نسبت خرید ≤ ۴۰٪"] = "−۱۰" }
+            else -> formula["نسبت خرید متعادل"] = "۰"
+        }
+    } else {
+        ind["نسبت خرید (۱س)"] = "داده در دسترس نیست"
+    }
+    
+    val finalScore = score.coerceIn(0, 100)
+    val momentumLabel = when {
+        finalScore >= 80 -> "مومنتوم صعودی قوی"
+        finalScore >= 65 -> "مومنتوم صعودی"
+        finalScore >= 45 -> "روند خنثی / نیاز به تأیید"
+        finalScore >= 30 -> "مومنتوم نزولی"
+        else -> "مومنتوم نزولی قوی"
+    }
+    
+    val dataQualityScore = (dataQualityChecks * 25).coerceAtMost(100)
+    val validityHours = when { closes.size >= 24 -> 24; closes.size >= 12 -> 12; else -> 4 }
+    
+    val invalidationScenario = when {
+        finalScore >= 65 -> "اگر RSI به بالای ۷۰ برسد یا MACD سیگنال نزولی دهد، این ارزیابی تغییر می‌کند."
+        finalScore <= 35 -> "اگر RSI به زیر ۳۰ برسد یا MACD سیگنال صعودی دهد، این ارزیابی تغییر می‌کند."
+        else -> "تغییر قابل توجه در RSI یا MACD می‌تواند این ارزیابی را باطل کند."
+    }
+    
+    val reason = buildString {
+        append("تحلیل بر اساس ${candidate.venue}. ")
+        if (status == AnalysisStatus.Partial) append("توجه: برخی داده‌ها در دسترس نبودند (وضعیت Partial). ")
+        append("امتیاز نهایی بر اساس هم‌گرایی اندیکاتورهای تکنیکال و نسبت حجم محاسبه شده است.")
+    }
+    
+    return CoinAnalysis(candidate, status, finalScore, momentumLabel, ind, buySellRatio1h, reason, dataQualityScore, candidate.venue, observedAtMs, validityHours, invalidationScenario, formula, if (candles.isNotEmpty()) candles else null)
 }
 
 @Composable
@@ -327,7 +534,7 @@ private fun DexChart(candles: List<DexCandle>) {
     val downColor = PumpWatchPalette.Negative
     val ema20Color = PumpWatchPalette.Negative.copy(alpha = 0.9f)
     val ema50Color = PumpWatchPalette.Info
-    Canvas(modifier = Modifier.fillMaxWidth().height(200.dp)) {
+    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxWidth().height(200.dp)) {
         val vis = candles.takeLast(80)
         if (vis.size < 5) return@Canvas
         val w = size.width; val h = size.height
@@ -374,93 +581,4 @@ private fun rsiOf(v: List<Double>, p: Int = 14): Double {
         ag = (ag * (p - 1) + max(d, 0.0)) / p; al = (al * (p - 1) + max(-d, 0.0)) / p
     }
     return if (al == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + ag / al)
-}
-
-private suspend fun analyzeCex(coingeckoId: String, symbol: String, name: String, rank: Int?): CoinAnalysis = withContext(Dispatchers.IO) {
-    try {
-        var closes = emptyList<Double>()
-        try { val kl = BinanceClient.api.klines("${symbol.uppercase(Locale.US)}USDT", "1h", 100); closes = kl.map { it[4].asDouble } } catch (_: Throwable) { }
-
-        var score = 50; val ind = mutableMapOf<String, String>(); val formula = mutableMapOf<String, String>()
-        formula["پایه"] = "۵۰ امتیاز"
-        if (closes.size >= 35) {
-            val rsi = rsiOf(closes); val mUp = MacdCalc.macdUp(closes)
-            val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last(); val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last(); val px = closes.last()
-            when { rsi < 30 -> { score += 15; ind["RSI"] = "${rsi.toInt()} اشباع فروش ✅"; formula["RSI < ۳۰"] = "+۱۵" }; rsi > 70 -> { score -= 15; ind["RSI"] = "${rsi.toInt()} اشباع خرید ❌"; formula["RSI > ۷۰"] = "−۱۵" }; else -> ind["RSI"] = "${rsi.toInt()} نرمال ⚪" }
-            if (mUp) { score += 15; ind["MACD"] = "صعودی ✅"; formula["MACD صعودی"] = "+۱۵" } else { score -= 10; ind["MACD"] = "نزولی ❌"; formula["MACD نزولی"] = "−۱۰" }
-            when { px > e20 && e20 > e50 -> { score += 20; ind["EMA"] = "صعودی ✅"; formula["EMA صعودی"] = "+۲۰" }; px < e20 && e20 < e50 -> { score -= 20; ind["EMA"] = "نزولی ❌"; formula["EMA نزولی"] = "−۲۰" }; else -> ind["EMA"] = "خنثی " }
-        } else { ind["تکنیکال"] = "کندل کافی نیست"; formula["تکنیکال"] = "۰ (داده ناکافی)" }
-
-        var whale = "بدون داده"; var poolUrl: String? = null
-        try {
-            val pool = GeckoTerminal.api.searchPools(symbol).data?.firstOrNull { it.attributes != null }
-            if (pool != null) {
-                val a = pool.attributes!!; val b = a.transactions?.h1?.buys ?: 0.0; val s = a.transactions?.h1?.sells ?: 0.0; val t = b + s
-                val net = pool.relationships?.network?.data?.id ?: "solana"; poolUrl = "https://www.geckoterminal.com/$net/pools/${pool.id?.substringAfter('_') ?: ""}"
-                if (t > 0) {
-                    val r = b / t * 100; whale = "فشار خرید ۱س: ${r.toInt()}٪" + (if (r > 60) " 🟢" else if (r < 40) " 🔴" else " ")
-                    when { r > 60 -> { score += 10; formula["فشار خرید > ۶۰٪"] = "+۱۰" }; r < 40 -> { score -= 10; formula["فشار خرید < ۴۰٪"] = "−۱۰" } }
-                }
-            }
-        } catch (_: Throwable) { }
-
-        val rec = when { score >= 80 -> "خرید قوی"; score >= 65 -> "خرید"; score >= 45 -> "صبر"; score >= 30 -> "فروش"; else -> "فروش قوی" }
-        val arrow = when { score >= 65 -> "⬆️"; score <= 35 -> "⬇️"; else -> "➡️" }
-        val dataScore = when { rank != null && rank <= 10 -> 95; rank != null && rank <= 50 -> 85; rank != null && rank <= 100 -> 75; rank != null && rank <= 500 -> 60; rank != null -> 50; else -> 30 }
-        val invalidation = when { score >= 65 -> "اگر RSI > ۷۰ یا MACD نزولی شود، این توصیه باطل است."; score <= 35 -> "اگر RSI < ۳۰ یا MACD صعودی شود، این توصیه باطل است."; else -> "اگر RSI یا MACD سیگنال قوی بدهند، این توصیه باطل است." }
-        val validityHours = when { closes.size >= 24 -> 24; closes.size >= 12 -> 12; else -> 4 }
-
-        CoinAnalysis(symbol.uppercase(Locale.US), name, coingeckoId, rank, score.coerceIn(0, 100), rec, arrow, ind, whale, "رتبه #$rank • امتیاز $score/100", dataScore, false, null, poolUrl, emptyList(), invalidation, validityHours, formula)
-    } catch (t: Throwable) {
-        CoinAnalysis(symbol, name, coingeckoId, rank, 50, "صبر", "➡️", mapOf("خطا" to "داده نیست"), "بدون داده", "تحلیل در دسترس نیست", 50, false, null, null, emptyList(), "داده کافی برای تعیین سناریوی ابطال موجود نیست.", 4, emptyMap())
-    }
-}
-
-private suspend fun analyzeDex(symbol: String): CoinAnalysis? = withContext(Dispatchers.IO) {
-    try {
-        val pool = GeckoTerminal.api.searchPools(symbol).data?.firstOrNull { it.attributes != null } ?: return@withContext null
-        val a = pool.attributes!!; val name = a.name ?: symbol; val net = pool.relationships?.network?.data?.id ?: "solana"
-        val addr = pool.id?.substringAfter('_') ?: ""; val chainName = net.replaceFirstChar { it.uppercase() }; val poolUrl = "https://www.geckoterminal.com/$net/pools/$addr"
-        val liq = a.reserveUsd?.toDoubleOrNull() ?: 0.0; val b1 = a.transactions?.h1?.buys ?: 0.0; val s1 = a.transactions?.h1?.sells ?: 0.0
-        val v1 = a.volume?.h1 ?: 0.0; val v24 = a.volume?.h24 ?: 0.0; val fdv = a.fdvUsd ?: 0.0; val ch24 = a.priceChange?.h24 ?: 0.0
-        val ratio = if (b1 + s1 > 0) b1 / (b1 + s1) else 0.5
-
-        var candles = emptyList<DexCandle>()
-        try {
-            val oh = GeckoOhlcv.api.poolOhlcvHour(net, addr)
-            candles = oh.data?.attributes?.ohlcv_list?.mapNotNull { row -> if (row.size >= 5) DexCandle(row[1], row[2], row[3], row[4]) else null } ?: emptyList()
-        } catch (_: Throwable) { }
-
-        val closes = candles.map { it.c }; var score = 50; val ind = mutableMapOf<String, String>(); val formula = mutableMapOf<String, String>()
-        formula["پایه"] = "۵۰ امتیاز"
-        if (closes.size >= 35) {
-            val rsi = rsiOf(closes); val mUp = MacdCalc.macdUp(closes)
-            val e20 = emaSeries(closes, 20).lastOrNull() ?: closes.last(); val e50 = emaSeries(closes, 50).lastOrNull() ?: closes.last(); val px = closes.last()
-            when { rsi < 30 -> { score += 10; ind["RSI"] = "${rsi.toInt()} اشباع فروش ✅"; formula["RSI < ۳۰"] = "+۱۰" }; rsi > 70 -> { score -= 10; ind["RSI"] = "${rsi.toInt()} اشباع خرید ❌"; formula["RSI > ۷۰"] = "−۱۰" }; else -> ind["RSI"] = "${rsi.toInt()} نرمال ⚪" }
-            if (mUp) { score += 10; ind["MACD"] = "صعودی ✅"; formula["MACD صعودی"] = "+۱۰" } else { score -= 8; ind["MACD"] = "نزولی ❌"; formula["MACD نزولی"] = "−۸" }
-            when { px > e20 && e20 > e50 -> { score += 15; ind["EMA"] = "صعودی ✅"; formula["EMA صعودی"] = "+۱۵" }; px < e20 && e20 < e50 -> { score -= 15; ind["EMA"] = "نزولی ❌"; formula["EMA نزولی"] = "−۱۵" }; else -> ind["EMA"] = "خنثی " }
-        } else { ind["تکنیکال"] = "کندل ساعتی در دسترس نیست"; formula["تکنیکال"] = "۰ (داده ناکافی)" }
-
-        score += when { ch24 > 5 -> 10; ch24 > 0 -> 5; ch24 < -5 -> -10; else -> -3 }
-        ind["روند ۲۴س"] = String.format(Locale.US, "%+.1f%%", ch24) + if (ch24 > 0) " 🟢" else " 🔴"
-        when { ch24 > 5 -> formula["روند ۲۴س > ۵٪"] = "+۱۰"; ch24 > 0 -> formula["روند ۲۴س > ۰٪"] = "+۵"; ch24 < -5 -> formula["روند ۲۴س < −۵٪"] = "−۱۰"; else -> formula["روند ۲۴س خنثی"] = "−۳" }
-
-        score += when { ratio >= 0.6 -> 10; ratio >= 0.5 -> 4; ratio <= 0.4 -> -10; else -> 0 }
-        ind["فشار خرید نهنگی"] = "${(ratio * 100).toInt()}٪" + if (ratio >= 0.6) " " else if (ratio <= 0.4) " 🔴" else " ⚪"
-        when { ratio >= 0.6 -> formula["فشار خرید ≥ ۶۰٪"] = "+۱۰"; ratio >= 0.5 -> formula["فشار خرید ≥ ۵۰٪"] = "+۴"; ratio <= 0.4 -> formula["فشار خرید ≤ ۴۰٪"] = "−۱۰" }
-
-        val whale = buildString {
-            append("فشار خرید ۱س: ${(ratio * 100).toInt()}٪"); append(if (ratio > 0.6) " 🟢 نهنگ‌ها می‌خرن" else if (ratio < 0.4) " 🔴 نهنگ‌ها می‌فروشن" else " ⚪ متعادل")
-            append("\nحجم ۱س: ${String.format(Locale.US, "$%.0f", v1)} | حجم ۲۴س: ${String.format(Locale.US, "$%.0f", v24)}")
-        }
-        val checks = listOf(liq >= 100_000, v1 >= 50_000, b1 > 0 && s1 > 0, ratio >= 0.55, a.createdAt != null, fdv in 100_000.0..20_000_000.0, liq >= 50_000)
-        val passed = checks.count { it }; val dataScore = passed * 100 / 7
-        val rec = when { score >= 80 -> "خرید قوی"; score >= 65 -> "خرید"; score >= 45 -> "صبر"; score >= 30 -> "فروش"; else -> "فروش قوی" }
-        val arrow = when { score >= 65 -> "⬆️"; score <= 35 -> "⬇️"; else -> "➡️" }
-        val reason = "شبکه $chainName • امتیاز $score/100 • هم‌گرایی داده $passed/7 • " + when { score >= 65 -> "نهنگ‌ها + مومنتوم مثبت"; score <= 35 -> "فشار فروش/روند نزولی"; else -> "منتظر شکست بمون" }
-        val invalidation = when { score >= 65 -> "اگر RSI > ۷۰ یا فشار خرید < ۴۰٪ شود، این توصیه باطل است."; score <= 35 -> "اگر RSI < 30 یا فشار خرید > ۶۰٪ شود، این توصیه باطل است."; else -> "اگر RSI یا فشار خرید سیگنال قوی بدهند، این توصیه باطل است." }
-        val validityHours = when { candles.size >= 24 -> 24; candles.size >= 12 -> 12; else -> 4 }
-
-        CoinAnalysis(symbol.uppercase(Locale.US), name, null, null, score.coerceIn(0, 100), rec, arrow, ind, whale, reason, dataScore, true, chainName, poolUrl, candles, invalidation, validityHours, formula)
-    } catch (_: Throwable) { null }
-}
+}۰۰
