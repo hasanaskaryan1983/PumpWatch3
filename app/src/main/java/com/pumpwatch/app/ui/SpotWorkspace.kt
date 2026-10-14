@@ -69,7 +69,10 @@ fun SpotWorkspace(onCoinClick: (CoinMarket) -> Unit) {
                 SpotTab.MEME -> MemeRadarScreen()
                 SpotTab.TRADES -> TradesScreen()
                 SpotTab.WALLETS -> WalletScreen()
-                SpotTab.WATCHLIST -> WatchlistScreen()
+                
+                // 🚀 اصلاح شد: پارامتر onCoinClick به WatchlistScreen پاس داده شد
+                SpotTab.WATCHLIST -> WatchlistScreen(onCoinClick = onCoinClick)
+                
                 SpotTab.TRADERS -> TraderLeaderboardScreen()
             }
         }
