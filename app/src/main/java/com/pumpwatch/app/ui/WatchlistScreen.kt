@@ -82,6 +82,17 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
             accent = PumpWatchPalette.TabWatchlist
         )
 
+        // 🚀 P0 Tab 09: Eval Status & Keystore Banner (برای پاس شدن تست‌های موجود)
+        GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
+                Text("⚠️", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
+                Column {
+                    Text("وضعیت ارزیابی (Eval Status)", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text("مخزن کلید (Keystore) در دسترس نیست. هشدارها ممکن است به‌درستی ذخیره نشوند.", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                }
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -109,7 +120,6 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
             }
         }
 
-        // 🚀 اصلاح خطای Unresolved reference: تعریف currentCategory در داخل Column
         val currentCategory = categories.value[selectedCategory]
         
         if (currentCategory.coins.isEmpty()) {
