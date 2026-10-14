@@ -1,19 +1,14 @@
 package com.pumpwatch.app.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,7 +19,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -48,7 +42,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.CoinMarket
-import com.pumpwatch.app.data.ContractRef
 import com.pumpwatch.app.data.platformContractRef
 import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
@@ -71,7 +64,7 @@ private data class AlertEval(
     val reasons: List<String>
 )
 
-private fun eval(c: CoinMarket): AlertEval? {
+private fun evalCoin(c: CoinMarket): AlertEval? {
     val c1 = c.change1h ?: 0.0
     val c24 = c.price_change_percentage_24h ?: 0.0
     val c7 = c.change7d ?: 0.0
@@ -106,9 +99,6 @@ private fun eval(c: CoinMarket): AlertEval? {
     return AlertEval(c, side, score, early, if (pump >= dump) pr else dr)
 }
 
-private fun shortAddr(a: String): String =
-    if (a.length > 16) "${a.take(6)}…${a.takeLast(4)}" else a
-
 @Composable
 fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     val scope = rememberCoroutineScope()
@@ -121,9 +111,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var loadTimeMs by remember { mutableStateOf(MarketHub.lastUpdateMs) }
     var platformMap by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
 
-    // 🚀 فشرده‌سازی: فقط یکی از پنل‌ها آن هم با ضربه باز می‌شود
-    var openPanel by remember { mutableStateOf<String?>(null) } // "ACCURACY" | "RULES" | null
-    var accuracyResetKey by remember { mutableStateOf(0) }
+    var openPanel by remember { mutableStateOf<String?>(null) }
     var resetMsg by remember { mutableStateOf<String?>(null) }
 
     var rules by remember { mutableStateOf<List<AlertRule>>(emptyList()) }
@@ -132,13 +120,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var ruleThreshold by remember { mutableStateOf("") }
     var ruleMsg by remember { mutableStateOf("") }
     var conditionDialogOpen by remember { mutableStateOf(false) }
-
-    fun copyText(label: String, value: String) {
-        try {
-            (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                .setPrimaryClip(ClipData.newPlainText(label, value))
-        } catch (_: Exception) { }
-    }
 
     fun load(force: Boolean = false) {
         scope.launch {
@@ -164,25 +145,23 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         reloadRules()
     }
 
-    // 🚀 P0: Stale Gate
     val dataAgeSec = (System.currentTimeMillis() - loadTimeMs) / 1000L
     val isDataStale = dataAgeSec > 300
 
     val alerts = if (isDataStale) emptyList() else coins
-        .mapNotNull { eval(it) }
-        .filter { a ->
-            val severity = when { a.score >= 70 -> 3; a.score >= 50 -> 2; else -> 1 }
+        .mapNotNull { evalCoin(it) }
+        .filter { ev ->
+            val severity = when { ev.score >= 70 -> 3; ev.score >= 50 -> 2; else -> 1 }
             when (filter) {
                 "HOT" -> severity == 3
                 "MID" -> severity == 2
-                "EARLY" -> a.early
+                "EARLY" -> ev.early
                 else -> true
             }
         }
         .sortedByDescending { it.score }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 🚀 هدر فشرده: بروزرسانی و سن داده داخل trailing هدر
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             EditorialPageHeader(
                 eyebrow = "RULES · EARLY WARNING",
@@ -199,33 +178,23 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             )
 
-            if (resetMsg != null) {
-                Text(resetMsg ?: "", fontSize = 9.sp, color = PumpWatchPalette.Positive, fontWeight = FontWeight.Bold)
-            }
+            if (resetMsg != null) Text(resetMsg ?: "", fontSize = 9.sp, color = PumpWatchPalette.Positive, fontWeight = FontWeight.Bold)
 
-            // 🚀 نوار فشردهٔ کارنامه/قوانین (به‌جای دو کارت بزرگ)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(
                     selected = openPanel == "ACCURACY",
                     onClick = { openPanel = if (openPanel == "ACCURACY") null else "ACCURACY" },
                     label = { Text("📊 کارنامه", fontSize = 10.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink,
-                        containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted
-                    )
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
                 )
                 FilterChip(
                     selected = openPanel == "RULES",
                     onClick = { openPanel = if (openPanel == "RULES") null else "RULES" },
                     label = { Text("🔔 قوانین (${rules.size})", fontSize = 10.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink,
-                        containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted
-                    )
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
                 )
             }
 
-            // پنل کارنامه (فقط وقتی باز است)
             AnimatedVisibility(visible = openPanel == "ACCURACY") {
                 GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -236,7 +205,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                     scope.launch {
                                         try {
                                             SignalLogger.clear(ctx)
-                                            accuracyResetKey++
                                             resetMsg = "✅ آمار پاک شد"
                                             delay(2000); resetMsg = null
                                         } catch (_: Exception) { }
@@ -252,12 +220,11 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             }
 
-            // پنل قوانین (فقط وقتی باز است)
             AnimatedVisibility(visible = openPanel == "RULES") {
                 GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (rules.isEmpty()) {
-                            Text("هنوز قانونی تعریف نشده. مثال: BTC بالای ۷۰۰۰۰", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                            Text("هنوز قانونی تعریف نشده. مثال: BTC بالای ۷۰۰۰", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                         } else {
                             rules.take(4).forEach { r ->
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -268,10 +235,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                     Switch(
                                         checked = r.enabled,
                                         onCheckedChange = { AlertRulesStore.toggle(ctx, r.id); reloadRules() },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = PumpWatchPalette.Ink, checkedTrackColor = PumpWatchPalette.TabAlerts,
-                                            uncheckedThumbColor = PumpWatchPalette.Muted, uncheckedTrackColor = PumpWatchPalette.Glass
-                                        )
+                                        colors = SwitchDefaults.colors(checkedThumbColor = PumpWatchPalette.Ink, checkedTrackColor = PumpWatchPalette.TabAlerts, uncheckedThumbColor = PumpWatchPalette.Muted, uncheckedTrackColor = PumpWatchPalette.Glass)
                                     )
                                     TextButton(onClick = { AlertRulesStore.delete(ctx, r.id); reloadRules() }) { Text("🗑", fontSize = 10.sp) }
                                 }
@@ -284,11 +248,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 value = ruleSymbol, onValueChange = { ruleSymbol = it },
                                 placeholder = { Text("نماد یا *", fontSize = 9.sp) },
                                 modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true,
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = PumpWatchPalette.GlassDeep, unfocusedContainerColor = PumpWatchPalette.GlassDeep,
-                                    focusedTextColor = PumpWatchPalette.Text, unfocusedTextColor = PumpWatchPalette.Text,
-                                    cursorColor = PumpWatchPalette.TabAlerts, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
-                                )
+                                colors = TextFieldDefaults.colors(focusedContainerColor = PumpWatchPalette.GlassDeep, unfocusedContainerColor = PumpWatchPalette.GlassDeep, focusedTextColor = PumpWatchPalette.Text, unfocusedTextColor = PumpWatchPalette.Text, cursorColor = PumpWatchPalette.TabAlerts, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
                             )
                             Button(onClick = { conditionDialogOpen = true }, colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text), shape = RoundedCornerShape(8.dp)) {
                                 Text(ruleCondition.label, fontSize = 8.sp, fontWeight = FontWeight.Bold)
@@ -299,11 +259,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 value = ruleThreshold, onValueChange = { ruleThreshold = it },
                                 placeholder = { Text("آستانه (عدد)", fontSize = 9.sp) },
                                 modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true,
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = PumpWatchPalette.GlassDeep, unfocusedContainerColor = PumpWatchPalette.GlassDeep,
-                                    focusedTextColor = PumpWatchPalette.Text, unfocusedTextColor = PumpWatchPalette.Text,
-                                    cursorColor = PumpWatchPalette.TabAlerts, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
-                                )
+                                colors = TextFieldDefaults.colors(focusedContainerColor = PumpWatchPalette.GlassDeep, unfocusedContainerColor = PumpWatchPalette.GlassDeep, focusedTextColor = PumpWatchPalette.Text, unfocusedTextColor = PumpWatchPalette.Text, cursorColor = PumpWatchPalette.TabAlerts, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
                             )
                             Button(
                                 onClick = {
@@ -323,7 +279,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             }
 
-            // فیلترها (همان نام‌های آشنا)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = filter == "ALL", onClick = { filter = "ALL" }, label = { Text("همه ${alerts.size}", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
@@ -336,7 +291,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             }
         }
 
-        // 🚀 P0: Stale Gate
         when {
             isDataStale -> Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
                 GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth()) {
@@ -361,16 +315,62 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(alerts, key = { it.coin.id }) { a ->
-                    val isPump = a.side == "PUMP"
-                    val severity = when { a.score >= 70 -> 3; a.score >= 50 -> 2; else -> 1 }
+                items(alerts, key = { it.coin.id }) { ev ->
+                    val isPump = ev.side == "PUMP"
+                    val severity = when { ev.score >= 70 -> 3; ev.score >= 50 -> 2; else -> 1 }
                     val title = if (isPump) {
-                        if (a.early) "رشد قیمت در بازه کوتاه" else "افزایش قابل توجه قیمت"
+                        if (ev.early) "رشد قیمت در بازه کوتاه" else "افزایش قابل توجه قیمت"
                     } else {
-                        if (a.early) "کاهش قیمت در بازه کوتاه" else "کاهش قابل توجه قیمت"
+                        if (ev.early) "کاهش قیمت در بازه کوتاه" else "کاهش قابل توجه قیمت"
                     }
-                    val contractRef = platformContractRef(platformMap, a.coin.id)
+                    val ref = platformContractRef(platformMap, ev.coin.id)
 
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         AlertCard(
-                            a = AlertView
+                            a = AlertView(
+                                symbol = ev.coin.symbol.uppercase(Locale.US),
+                                type = if (isPump) "PUMP" else "DUMP",
+                                severity = severity,
+                                title = title,
+                                detail = ev.reasons.joinToString(" • "),
+                                rank = ev.coin.market_cap_rank,
+                                emoji = if (isPump) "📈" else "📉",
+                                source = "Rule Engine",
+                                ageSec = dataAgeSec,
+                                contractChain = ref?.chain ?: "ارز بومی / بدون قرارداد هوشمند",
+                                contractAddr = ref?.address
+                            ),
+                            tabKey = "alerts"
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(ev.coin.name, fontSize = 8.sp, color = PumpWatchPalette.Muted, modifier = Modifier.weight(1f), maxLines = 1)
+                            TextButton(onClick = { onCoinClick(ev.coin) }, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                                Text("جزئیات ↗", fontSize = 8.sp, color = PumpWatchPalette.TabAlerts, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (conditionDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { conditionDialogOpen = false },
+            title = { Text("شرط قانون", fontSize = 13.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    RuleCondition.values().forEach { c ->
+                        Button(onClick = { ruleCondition = c; conditionDialogOpen = false }, colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text), modifier = Modifier.fillMaxWidth()) {
+                            Text(c.label, fontSize = 10.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = { Button(onClick = { conditionDialogOpen = false }) { Text("بستن", fontSize = 10.sp) } }
+        )
+    }
+}
