@@ -581,4 +581,4 @@ private fun rsiOf(v: List<Double>, p: Int = 14): Double {
         ag = (ag * (p - 1) + max(d, 0.0)) / p; al = (al * (p - 1) + max(-d, 0.0)) / p
     }
     return if (al == 0.0) 100.0 else 100.0 - 100.0 / (1.0 + ag / al)
-}۰۰
+}
