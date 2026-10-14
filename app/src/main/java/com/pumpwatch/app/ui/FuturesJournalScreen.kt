@@ -47,7 +47,7 @@ internal sealed class JournalLoadState {
 }
 
 // 🚀 P0 Tab 15: محاسبه‌گر مشترک با تعریف شفاف واحدها و محدودیت‌ها
-object FuturesJournalCalculator {
+internal object FuturesJournalCalculator {
     /**
      * محاسبه آمار ژورنال فیوچرز
      * ⚠️ توجه: تمامی مقادیر PnL در اینجا به صورت "تغییر قیمت ناخالص" (Gross Price Change) بر حسب درصد محاسبه می‌شوند.
@@ -105,8 +105,8 @@ object FuturesJournalCalculator {
     }
 }
 
-// 🚀 P0 Tab 15: تغییر از private به internal برای رفع خطای visibility در API کلاس
-internal data class FutJournalStats(
+// 🚀 P0 Tab 15: حذف هرگونه modifier دسترسی (public پیش‌فرض) برای جلوگیری از خطای visibility
+data class FutJournalStats(
     val total: Int, 
     val wins: Int, 
     val losses: Int, 
@@ -136,7 +136,6 @@ fun FuturesJournalScreen() {
     fun loadTrades() {
         loadState = JournalLoadState.Loading
         try {
-            // 🚀 P0 Tab 15: شبیه‌سازی خواندن تایپ‌شده با مدیریت خطا
             val trades = TradeStore.load(context).filter { it.mode == "FUT" }
             loadState = JournalLoadState.Loaded(trades)
         } catch (e: Exception) {
@@ -148,7 +147,6 @@ fun FuturesJournalScreen() {
         loadTrades()
     }
 
-    // 🚀 P0 Tab 15: اسکرول یکپارچه (Single Scroll)
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -206,7 +204,6 @@ fun FuturesJournalScreen() {
                             Text("امید ریاضی: ${String.format(Locale.US, "%+.2f%%", stats.expectancy)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (stats.expectancy > 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative)
                             Text("Profit Factor: ${if (stats.profitFactor.isInfinite()) "∞" else String.format(Locale.US, "%.2f", stats.profitFactor)}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (stats.profitFactor >= 1.5) PumpWatchPalette.Positive else if (stats.profitFactor >= 1.0) PumpWatchPalette.Warning else PumpWatchPalette.Negative)
                             
-                            // 🚀 P0 Tab 15: سلب مسئولیت شفاف درباره Drawdown و Net PnL
                             Surface(color = PumpWatchPalette.Warning.copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
                                 Text(
                                     "⚠️ توجه: این آمار فقط تغییر قیمت ناخالص است. کارمزد، اسلیپیج و Funding محاسبه نشده (Net PnL = NotComputed). Drawdown واقعی تا زمان فراهم شدن دفترکل سرمایه، Unavailable است.",
@@ -229,7 +226,6 @@ fun FuturesJournalScreen() {
                     
                     Text("📜 تاریخچه معاملات (نمایش ۵۰ مورد اخیر):", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PumpWatchPalette.Info)
                     
-                    // 🚀 P0 Tab 15: محدودیت شفاف نگهداری داده و LazyColumn برای عملکرد بهتر
                     LazyColumn(
                         modifier = Modifier.heightIn(max = 400.dp), 
                         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -254,7 +250,7 @@ fun FuturesJournalScreen() {
 private fun Stat(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.semantics { contentDescription = "$label: $value" } // 🚀 P0 Tab 15: دسترس‌پذیری
+        modifier = Modifier.semantics { contentDescription = "$label: $value" }
     ) {
         Text(label, fontSize = 9.sp, color = color)
         Text(value, fontSize = 12.sp, fontWeight = FontWeight.Black, color = color)
