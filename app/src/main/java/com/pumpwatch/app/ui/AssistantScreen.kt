@@ -57,8 +57,11 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+// 🚀 P0 Tab 04: تغییر از private به internal برای رفع خطای visibility در API کلاس CoinAnalysis
+internal data class DexCandle(val o: Double, val h: Double, val l: Double, val c: Double)
+
 // 🚀 P0 Tab 04: تعریف صریح کاندیدای دارایی
-data class AssetCandidate(
+internal data class AssetCandidate(
     val providerId: String,
     val symbol: String,
     val name: String,
@@ -70,17 +73,15 @@ data class AssetCandidate(
 )
 
 // 🚀 P0 Tab 04: نتیجهٔ مهر و موم شده (Sealed Outcome)
-sealed class AnalysisStatus {
+internal sealed class AnalysisStatus {
     object Success : AnalysisStatus()
     object Partial : AnalysisStatus()
     object Insufficient : AnalysisStatus()
     data class Error(val message: String) : AnalysisStatus()
 }
 
-private data class DexCandle(val o: Double, val h: Double, val l: Double, val c: Double)
-
 // 🚀 P0 Tab 04: ساختار دادهٔ تحلیل با متادیتای کامل
-data class CoinAnalysis(
+internal data class CoinAnalysis(
     val candidate: AssetCandidate,
     val status: AnalysisStatus,
     val score: Int?,
