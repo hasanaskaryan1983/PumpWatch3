@@ -37,13 +37,17 @@ object StorageGuard {
         steps: Map<Int, (String) -> String> = emptyMap()
     ): String? {
         if (raw.isNullOrEmpty()) return raw
+        
+        // 🚀 اصلاح: تبدیل صریح به String غیرقابل‌تهی پس از بررسی isNullOrEmpty
         var v = schemaVersion(ctx, prefsName, storeKey)
-        var data = raw
+        var data: String = raw 
+        
         while (v < currentSchema) {
             val step = steps[v] ?: break
             data = try { step(data) } catch (_: Exception) { data }
             v++
         }
+        
         val stored = schemaVersion(ctx, prefsName, storeKey)
         when {
             v != stored -> {
