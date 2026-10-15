@@ -2,8 +2,6 @@ package com.pumpwatch.app.store
 
 import android.content.Context
 
-// ---------- کش آفلاین (ذخیره روی گوشی) ----------
-
 object OfflineCache {
 
     private const val PREFS = "pumpdump_offline"
@@ -18,7 +16,11 @@ object OfflineCache {
 
     fun load(ctx: Context?, key: String): String? {
         val c = ctx ?: return null
-        return c.getSharedPreferences(PREFS, 0).getString("d_$key", null)
+        val raw = c.getSharedPreferences(PREFS, 0).getString("d_$key", null) ?: return null
+        
+        // 🚀 P1-2b: مهاجرت نسخه‌دار + قرنطینه
+        val migrated = StorageGuard.migrateRaw(c, PREFS, "d_$key", raw)
+        return migrated
     }
 
     fun time(ctx: Context?, key: String): Long {
