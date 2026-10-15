@@ -17,6 +17,7 @@ import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.BatchScanner
 import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.NotificationGuard
 import com.pumpwatch.app.engine.ParamsStore
 import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
@@ -25,14 +26,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-/**
- * MonitorWorker — نسخهٔ یکپارچه (کامیت ۱۱۰ + ۱۱۱ + ۱۱۴)
- *
- * 🚀 Commit 114: هشدارهای واچ‌لیست هم اینجا ارزیابی می‌شوند (evaluator یگانه).
- * 🚀 Commit 111: buildCandidates از Pair به‌جای copy استفاده می‌کند.
- * 🚀 Commit 110: A5 (ارزیابی background سیگنال‌ها) + A3 (کل بازار) +
- *    F14 (markTriggered فقط بعد از notify) + F10 (فاندینگ واقعی).
- */
 class MonitorWorker(
     context: Context,
     params: WorkerParameters
@@ -44,6 +37,8 @@ class MonitorWorker(
         private const val MIN_SCORE = 70
         private const val MAX_RULE_ALERTS_PER_RUN = 3
         private const val TAG = "MonitorWorker"
+        // 🚀 Commit 8: پنجرهٔ dedup یک‌ساعته (لایهٔ دوم روی dedup سیگنال/قانون)
+        private const val DEDUP_WINDOW_MS = 3_600_000L
 
         const val KEY_MODE = "mode"
 
@@ -84,7 +79,6 @@ class MonitorWorker(
         return try {
             KlineCache.prune()
 
-            // 🚀 Commit 110 (A5): ارزیابی background سیگنال‌های باز
             try {
                 val currentLogs = SignalLogger.load(applicationContext)
                 val hasOpen = currentLogs.any { it.status == "OPEN" || it.status == "EXP" }
@@ -120,26 +114,32 @@ class MonitorWorker(
                 )
 
                 if (logged) {
-                    val ok = showNotification(
-                        id = 1000 + i,
-                        title = "${if (r.side == "PUMP") "🚀 پامپ" else "🩸 دامپ"} ${r.symbol} — ${r.score}/100 ${if (r.golden) "🏅" else ""} 📡",
-                        text = String.format(
-                            Locale.US, "ورود: %.6f | استاپ: %.6f | هدف: %.6f",
-                            r.entry, r.stopLoss, r.target1
+                    // 🚀 Commit 8: لایهٔ دوم dedup در سطح تحویل
+                    val key = "mon_${mode}_${r.symbol}_${logSide}_${signalTs}"
+                    if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                        val ok = showNotification(
+                            id = 1000 + i,
+                            title = "${if (r.side == "PUMP") "🚀 پامپ" else "🩸 دامپ"} ${r.symbol} — ${r.score}/100 ${if (r.golden) "🏅" else ""} 📡",
+                            text = String.format(
+                                Locale.US, "ورود: %.6f | استاپ: %.6f | هدف: %.6f",
+                                r.entry, r.stopLoss, r.target1
+                            )
                         )
-                    )
-                    if (!ok) Log.w(TAG, "Notification delivery failed for ${r.symbol}")
+                        if (ok) {
+                            NotificationGuard.recordDelivered(applicationContext, key)
+                        } else {
+                            Log.w(TAG, "Notification delivery failed for ${r.symbol}")
+                        }
+                    }
                 }
             }
 
-            // 🚀 Commit 110 (A3 + F10): ارزیابی قوانین روی کل بازار
             try {
                 evaluateRulesOnFullMarket(mode)
             } catch (e: Exception) {
                 Log.w(TAG, "evaluateRulesOnFullMarket failed (non-critical)", e)
             }
 
-            // 🚀 Commit 114: evaluator یگانه — هشدارهای واچ‌لیست هم اینجا ارزیابی می‌شوند
             try {
                 val fired = com.pumpwatch.app.store.WatchlistStore.checkAndFire(applicationContext)
                 if (fired > 0) Log.i(TAG, "Watchlist alerts fired: $fired")
@@ -164,9 +164,6 @@ class MonitorWorker(
         }
     }
 
-    /**
-     * 🚀 Commit 111: استفاده از Pair به‌جای copy (SignalResult ممکن است data class نباشد)
-     */
     private suspend fun evaluateRulesOnFullMarket(mode: String) {
         val rules = AlertRulesStore.load(applicationContext)
         if (rules.isEmpty()) return
@@ -185,10 +182,14 @@ class MonitorWorker(
                 if (AlertRulesStore.inCooldown(rule, now)) continue
                 if (!AlertRulesStore.matches(rule, r.price, r.score, funding, r.rsi, r.volumeRatio)) continue
 
-                // 🚀 Commit 110 (F14): markTriggered فقط پس از موفقیت notify
+                // 🚀 Commit 8: لایهٔ دوم dedup برای قوانین
+                val key = "rule_${rule.id}_${r.symbol}"
+                if (!NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) continue
+
                 val ok = showRuleNotification(rule, r, funding)
                 if (ok) {
                     AlertRulesStore.markTriggered(applicationContext, rule.id, now)
+                    NotificationGuard.recordDelivered(applicationContext, key)
                     ruleAlerts++
                 }
             }
