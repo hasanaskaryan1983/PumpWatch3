@@ -43,8 +43,6 @@ data class CoinMarket(
     val atl_change_percentage: Double?,
     @SerializedName("high_24h") val high24h: Double?,
     @SerializedName("low_24h") val low24h: Double?,
-    
-    // 🚀 P0 Shared: هویت استاندارد دارایی (اختیاری برای حفظ سازگاری با Gson و کدهای قدیمی)
     val assetIdentity: AssetIdentity? = null
 )
 
@@ -86,9 +84,6 @@ interface CoinGeckoApi {
     ): List<CoinListItem>
 }
 
-/**
- * 🚀 Commit 88 (A1): محدودکنندهٔ نرخ به‌ازای هاست.
- */
 class HostLimiter(
     private val minIntervalMs: Map<String, Long>,
     private val defaultIntervalMs: Long = 1000L
@@ -115,9 +110,6 @@ class HostLimiter(
     }
 }
 
-/**
- * 🚀 Commit 88 (A1): HostLimiter سراسری با تنظیمات بهینه برای هر هاست.
- */
 val GlobalHostLimiter = HostLimiter(
     minIntervalMs = mapOf(
         "api.binance.com" to 100L,
@@ -135,9 +127,6 @@ val GlobalHostLimiter = HostLimiter(
     defaultIntervalMs = 1000L
 )
 
-/**
- * 🚀 Commit 88 (A1): ThrottledHttp با HostLimiter به‌ازای هاست.
- */
 object ThrottledHttp {
 
     private const val MAX_RETRIES = 5
@@ -179,14 +168,8 @@ object ThrottledHttp {
 
 class RateLimitedException(message: String) : IOException(message)
 
-/**
- * 🚀 P0 Shared (معماری State و هم‌زمانی): Single-Flight
- * اگر یک درخواست در حال پرواز (in-flight) باشد، فراخوانی‌های هم‌زمانِ بعدی
- * به‌جای ارسال درخواست شبکهٔ موازی، همان نتیجه را await می‌کنند.
- * - بدون تغییر در هیچ امضایی → همهٔ ۱۹ فراخوانی‌کننده دست‌نخورده می‌مانند
- * - خطاها هم به همهٔ منتظرها منتشر می‌شوند (completeExceptionally)
- */
-private class SingleFlight<T> {
+// 🚀 P1-4: تغییر از private به internal برای امکان تست واحد هم‌زمانی
+internal class SingleFlight<T> {
     private val inFlight = AtomicReference<CompletableDeferred<T>?>(null)
 
     suspend fun joinOrRun(block: suspend () -> T): T {
@@ -231,18 +214,18 @@ object ApiClient {
 
     private val cache1000Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache1000TimeRef = AtomicLong(0L)
-    private val cache1000ElapsedRef = AtomicLong(0L) // 🚀 Commit 102: Monotonic time tracking
+    private val cache1000ElapsedRef = AtomicLong(0L)
 
     private val cache100Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache100TimeRef = AtomicLong(0L)
-    private val cache100ElapsedRef = AtomicLong(0L) // 🚀 Commit 102: Monotonic time tracking
+    private val cache100ElapsedRef = AtomicLong(0L)
 
     private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
     private val platformsTimeRef = AtomicLong(0L)
 
     private val marketMetaRef = AtomicReference(MarketMeta(0L, ServedFrom.UNKNOWN, 0))
 
-    // 🚀 P0 Shared:Slotهای Single-Flight به‌ازای هر endpoint
+    // 🚀 P0 Shared: Slotهای SingleFlight به‌ازای هر endpoint
     private val flight1000 = SingleFlight<List<CoinMarket>>()
     private val flight100 = SingleFlight<List<CoinMarket>>()
     private val flightPlatforms = SingleFlight<Map<String, Map<String, String>>>()
@@ -264,7 +247,6 @@ object ApiClient {
     }
 
     suspend fun getQuickCoins(): List<CoinMarket> {
-        // 1. Memory cache with TTL check
         val memCache = cache1000Ref.get()
         val memTime = cache1000TimeRef.get()
         if (memCache.isNotEmpty() && System.currentTimeMillis() - memTime < MEM_CACHE_TTL) {
@@ -273,19 +255,17 @@ object ApiClient {
             return memCache
         }
 
-        // 2. Disk cache with TTL check
         val diskTime = OfflineCache.time(app, "m250")
         if (diskTime > 0 && System.currentTimeMillis() - diskTime < DISK_FRESH_MS) {
             loadList("m250")?.let { disk ->
                 cache1000Ref.set(disk)
                 cache1000TimeRef.set(diskTime)
-                cache1000ElapsedRef.set(0L) // Elapsed time is lost across reboots
+                cache1000ElapsedRef.set(0L)
                 setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 return disk
             }
         }
 
-        // 3. Network fetch
         GlobalHostLimiter.acquire("api.coingecko.com")
         val p1 = api.getMarkets(perPage = 250, page = 1)
         val nowMs = System.currentTimeMillis()
@@ -326,7 +306,6 @@ object ApiClient {
             }
         }
 
-        // 🚀 P0 Shared: Single-Flight — درخواست‌های هم‌زمان فقط یک بار به شبکه می‌روند
         return flight1000.joinOrRun {
             try {
                 val results = mutableListOf<CoinMarket>()
@@ -391,7 +370,6 @@ object ApiClient {
             }
         }
 
-        // 🚀 P0 Shared: Single-Flight
         return flight100.joinOrRun {
             try {
                 GlobalHostLimiter.acquire("api.coingecko.com")
@@ -430,7 +408,6 @@ object ApiClient {
                 return gson.fromJson(cachedJson, MarketChart::class.java)
             } catch (_: Exception) { }
         }
-        // 🚀 P0 Shared: Single-Flight به‌ازای کلید نمودار (coin + days)
         val flight = flightCharts.getOrPut(key) { SingleFlight() }
         return flight.joinOrRun {
             try {
@@ -471,7 +448,6 @@ object ApiClient {
             }
         }
 
-        // 🚀 P0 Shared: Single-Flight
         return flightPlatforms.joinOrRun {
             try {
                 GlobalHostLimiter.acquire("api.coingecko.com")
@@ -577,20 +553,8 @@ fun platformContractOf(
     return platforms.values.firstOrNull { !it.isNullOrBlank() }
 }
 
-// ============================================================
-// 🚀 Commit 103 (M4): هویت کامل دارایی — chain + address
-// ============================================================
-
-/**
- * هویت نمایشی یک کانترکت: نام خوانای شبکه + آدرس.
- * درس P0: دو توکن هم‌تیکر روی دو شبکه، دو دارایی متفاوت‌اند.
- */
 data class ContractRef(val chain: String, val address: String)
 
-/**
- * 🚀 Commit 103: نسخهٔ دارای chain از platformContractOf.
- * UI با این تابع نام شبکه را کنار آدرس نشان می‌دهد (مثلاً «BSC: 0x1234…»).
- */
 fun platformContractRef(
     map: Map<String, Map<String, String>>,
     coinId: String,
@@ -643,9 +607,6 @@ fun platformContractRef(
     return ContractRef(display(first.key), first.value!!)
 }
 
-// ============================================================
-// 🚀 P0 Shared: تابع کمکی برای تبدیل CoinMarket به AssetIdentity
-// ============================================================
 fun CoinMarket.toAssetIdentity(platformMap: Map<String, Map<String, String>>? = null): AssetIdentity {
     val isNative = this.id in NATIVE_COIN_IDS
     var chain: String? = null
