@@ -9,22 +9,19 @@ import com.pumpwatch.app.data.GeckoTerminal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// ---------- کلاس سیگنال (با Trailing Stop و هدف شناور) ----------
-// 🟢 P0-6 / 🚀 Sprint 3: فیلد `time` = زمان بسته شدن کندلِ مولد سیگنال (candleCloseTs)،
-// نه زمان اسکن. همهٔ فراخوان‌ها به‌تدریج در Sprint 3 به این معنا مهاجرت می‌کنند.
 data class LoggedSignal(
     val symbol: String,
-    val side: String, // "BUY" or "SELL"
+    val side: String,
     val entry: Double,
     val stop: Double,
     val target: Double,
     val status: String = "OPEN",
     val exitPrice: Double? = null,
-    val mode: String = "SPOT", // "SPOT" or "FUT"
+    val mode: String = "SPOT",
     val score: Int = 0,
     val time: Long = 0L,
     val currentPrice: Double? = null,
-    val highestPrice: Double = 0.0,   // برای BUY = سقف • برای SELL = کف
+    val highestPrice: Double = 0.0,
     val trailingStop: Double = 0.0,
     val currentTarget: Double = 0.0
 ) {
@@ -55,18 +52,16 @@ data class LoggedSignal(
     }
 }
 
-// 🚀 Sprint 15 (فاز ۴ / Commit 21): کارنامهٔ دقت سیگنال‌ها
 data class SignalAccuracyStats(
     val total: Int,
     val wins: Int,
     val losses: Int,
     val expired: Int,
     val open: Int,
-    val winRate: Double,       // wins / (wins + losses) * 100
+    val winRate: Double,
     val totalDecided: Int
 )
 
-// ---------- موتور لاگ + آپدیت زنده ----------
 object SignalLogger {
     private const val KEY = "signal_logs"
     private val GSON = Gson()
@@ -82,7 +77,6 @@ object SignalLogger {
             .putString(KEY, GSON.toJson(logs)).apply()
     }
 
-    // 🚀 Commit 96: پاک‌سازی کامل لاگ سیگنال‌ها (برای دکمه ریست در SmartAlertsScreen)
     fun clear(ctx: Context) {
         ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
             .remove(KEY)
@@ -95,28 +89,27 @@ object SignalLogger {
         save(ctx, list.take(200))
     }
 
-    // ✅ ثبت سیگنال — برگشت Boolean (true = ثبت شد، false = تکراری بود)
-    // QuickScanner و CoinDetailScreen این رو داخل if(...) استفاده می‌کنن
-    //
-    // 🚀 Sprint 3 (P2-1): سه لایهٔ dedup:
-    //  ۱) سیگنال OPEN هم‌نماد و هم‌جهت → تکراری (جلوگیری از انباشت پوزیشن موازی)
-    //  ۲) همان کندل (time برابر): هرگز دوباره ثبت نمی‌شود، حتی اگر ساعت‌ها گذشته باشد
-    //     → این لایه باگ «اسکن اول >۱ ساعت بعد از close کندل» را می‌بندد:
-    //       قبلاً فقط پنجرهٔ ۱ ساعته بود و سیگنالِ دیر-ثبت‌شده توسط Worker دوباره ثبت می‌شد
-    //  ۳) پنجرهٔ لغزندهٔ ۱ ساعته روی time → تکراری (حالت عمومی)
-    fun log(ctx: Context, s: LoggedSignal): Boolean {
+    /**
+     * 🚀 Commit 9: پارامتر [nowMs] با پیش‌فرض ساعت واقعی →
+     * کدهای فعلی بدون تغییر می‌مانند، تست‌ها ساعت جعلی تزریق می‌کنند.
+     */
+    fun log(ctx: Context, s: LoggedSignal, nowMs: Long = System.currentTimeMillis()): Boolean {
         val list = load(ctx).toMutableList()
-        val now = System.currentTimeMillis()
-        val dup = list.any { it.symbol == s.symbol && it.side == s.side && it.status == "OPEN" } ||
-                (s.time > 0 && list.any { it.symbol == s.symbol && it.side == s.side && it.time == s.time }) ||
-                list.any { it.symbol == s.symbol && it.side == s.side && it.time > 0 && now - it.time < 3_600_000L }
-        if (dup) return false
+        if (isDuplicate(list, s, nowMs)) return false
         list.add(0, s)
         save(ctx, list.take(200))
         return true
     }
 
-    // قیمت لحظه‌ای: اول Binance → بعد CoinGecko → بعد DEX
+    /**
+     * 🚀 Commit 9: تصمیم ded به‌صورت pure (بدون Context) → قابل تست واحد با FakeClock.
+     * سه لایه: ۱) OPEN هم‌نماد/هم‌جهت ۲) کندل تکراری ۳) پنجرهٔ لغزندهٔ ۱ ساعته
+     */
+    fun isDuplicate(existing: List<LoggedSignal>, s: LoggedSignal, now: Long): Boolean =
+        existing.any { it.symbol == s.symbol && it.side == s.side && it.status == "OPEN" } ||
+                (s.time > 0 && existing.any { it.symbol == s.symbol && it.side == s.side && it.time == s.time }) ||
+                existing.any { it.symbol == s.symbol && it.side == s.side && it.time > 0 && now - it.time < 3_600_000L }
+
     suspend fun livePrice(symbol: String): Double? = withContext(Dispatchers.IO) {
         try {
             val kl = BinanceClient.api.klines("${symbol.uppercase()}USDT", "1h", 2)
@@ -133,18 +126,14 @@ object SignalLogger {
         null
     }
 
-    // بررسی انقضا (۲۴ ساعت بدون نتیجه)
-    // 🚀 Sprint 3: چون time = زمان بسته شدن کندل است، انقضا یعنی
-    // «۲۴ ساعت از بسته شدن کندلِ مولد سیگنال گذشته و هنوز نتیجه‌ای نداشته»
-    suspend fun evaluate(ctx: Context, logs: List<LoggedSignal>): List<LoggedSignal> = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
+    /** 🚀 Commit 9: پارامتر [nowMs] برای تست انقضا با ساعت جعلی */
+    suspend fun evaluate(ctx: Context, logs: List<LoggedSignal>, nowMs: Long = System.currentTimeMillis()): List<LoggedSignal> = withContext(Dispatchers.IO) {
         logs.map { s ->
-            if (s.status == "OPEN" && s.time > 0 && now - s.time > 24 * 3600_000L) s.copy(status = "EXP")
+            if (s.status == "OPEN" && s.time > 0 && nowMs - s.time > 24 * 3600_000L) s.copy(status = "EXP")
             else s
         }
     }
 
-    // 🔄 آپدیت زنده: قیمت بگیر → تریلینگ استاپ و هدف شناور رو اعمال کن → اگه استاپ خورد ببند
     suspend fun updateOpenSignals(ctx: Context, logs: List<LoggedSignal>): List<LoggedSignal> = withContext(Dispatchers.IO) {
         val out = logs.toMutableList()
         var changed = false
@@ -166,7 +155,6 @@ object SignalLogger {
         out
     }
 
-    // 🚀 Sprint 15 (فاز ۴ / Commit 21): محاسبهٔ دقت سیگنال‌ها (pure)
     fun accuracyStats(logs: List<LoggedSignal>): SignalAccuracyStats {
         val open = logs.count { it.status == "OPEN" }
         val wins = logs.count { it.status == "WIN" }
@@ -185,11 +173,9 @@ object SignalLogger {
         )
     }
 
-    // 🚀 Sprint 15 (Commit 21): دقت به تفکیک mode (SPOT / FUT)
     fun accuracyByMode(logs: List<LoggedSignal>): Map<String, SignalAccuracyStats> =
         logs.groupBy { it.mode }.mapValues { (_, list) -> accuracyStats(list) }
 
-    // 🚀 Sprint 15 (Commit 21): دقت به تفکیک side (BUY / SELL)
     fun accuracyBySide(logs: List<LoggedSignal>): Map<String, SignalAccuracyStats> =
         logs.groupBy { it.side }.mapValues { (_, list) -> accuracyStats(list) }
 }
