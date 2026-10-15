@@ -7,25 +7,6 @@ import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.SecureStorage
 import com.pumpwatch.app.data.Trade
 
-/**
- * 🚀 Commit 69 (فاز ۱ — پایداری داده): TradeStore ایمن.
- *
- * چهار باگ بسته شد (CONSTITUTION بندهای ۸، ۹، ۲):
- *
- * ۱) Race condition (بند ۹): upsert/remove/save حالا داخل `synchronized(lock)`
- *    اجرا می‌شوند تا Worker و UI هم‌زمان داده را overwrite نکنند.
- *
- * ۲) load error ≠ save empty (بند ۸): اگر decrypt/parse شکست بخورد،
- *    `loadEncryptedOrNull` مقدار null برمی‌گرداند (نه لیست خالی).
- *    هر نوشتنی که بخواهد لیست خالی را روی store خراب بنویسد، REJECT می‌شود.
- *    → تاریخچهٔ کاربر هرگز بی‌صدا پاک نمی‌شود.
- *
- * ۳) مسیر wipe چهارم داخل migrateIfNeeded: قبلاً اگر loadEncrypted در مرحلهٔ
- *    V2→V3 شکست می‌خورد، لیست خالی save می‌شد. حالا migration روی null abort می‌کند.
- *
- * ۴) maxDrawdown (بند ۲): سرمایه پایه دیگر ۱۰ هاردکد نیست؛
- *    از prefs خوانده می‌شود (setBaseCapital/getBaseCapital، پیش‌فرض ۱۰۰۰).
- */
 object TradeStore {
 
     private const val PREFS = "pumpdump_trades"
@@ -37,31 +18,21 @@ object TradeStore {
     private const val KEY_BASE_CAPITAL = "paper_base_capital"
     private const val MAX_HISTORY = 200
 
-    /** سرمایهٔ پایهٔ پیش‌فرض Paper Trading برای محاسبهٔ Drawdown */
     const val DEFAULT_BASE_CAPITAL = 1000.0
 
     private val gson = Gson()
-
-    /** قفل برای عملیات Read-Modify-Write (بند ۹) */
     private val lock = Any()
 
-    /**
-     * پرچم «آخرین خواندن شکست خورد».
-     * تا وقتی true است، هیچ save خالی‌ای پذیرفته نمی‌شود (بند ۸).
-     */
     @Volatile
     private var lastLoadFailed = false
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, 0)
 
-    fun isEnabled(ctx: Context): Boolean =
-        prefs(ctx).getBoolean(KEY_ENABLED, false)
+    fun isEnabled(ctx: Context): Boolean = prefs(ctx).getBoolean(KEY_ENABLED, false)
 
     fun setEnabled(ctx: Context, enabled: Boolean) {
         prefs(ctx).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
-
-    // -------- سرمایهٔ پایه (بند ۲: عدد دروغ ممنوع) --------
 
     fun getBaseCapital(ctx: Context): Double =
         prefs(ctx).getString(KEY_BASE_CAPITAL, null)?.toDoubleOrNull() ?: DEFAULT_BASE_CAPITAL
@@ -70,11 +41,6 @@ object TradeStore {
         prefs(ctx).edit().putString(KEY_BASE_CAPITAL, capital.toString()).apply()
     }
 
-    /**
-     * 🚀 Sprint 15 (Commit 11): sanitizer مهاجرت نسخه ۱/۲ به ۳
-     * درس Gson: فیلدهای غایب null می‌شوند، پس Boolean غایب → null → false
-     * Commit 69: cast امن `as? String` (جلوگیری ClassCastException احتمالی)
-     */
     internal fun upgradeLegacy(t: Trade): Trade = t.copy(
         source = (t.source as? String) ?: "manual",
         note = (t.note as? String) ?: "",
@@ -84,7 +50,7 @@ object TradeStore {
         slippagePct = if (t.slippagePct > 0.0) t.slippagePct else 0.0,
         feePct = if (t.feePct > 0.0) t.feePct else 0.1,
         fillTime = t.fillTime,
-        partialClose = t.partialClose,               // null => false
+        partialClose = t.partialClose,
         partialClosePrice = t.partialClosePrice,
         partialCloseTime = t.partialCloseTime,
         partialCloseReason = t.partialCloseReason as? String,
@@ -92,7 +58,6 @@ object TradeStore {
     )
 
     private fun migrateIfNeeded(ctx: Context) {
-        // V1 → V2 (legacy)
         if (!prefs(ctx).getBoolean(KEY_MIGRATED, false)) {
             val oldTrades = loadLegacy(ctx)
             if (oldTrades.isNotEmpty()) {
@@ -101,8 +66,6 @@ object TradeStore {
             }
             prefs(ctx).edit().putBoolean(KEY_MIGRATED, true).apply()
         }
-        // V2 → V3 (partial close fields)
-        // 🚀 Commit 69: اگر load شکست بخورد (null)، هرگز save خالی نمی‌کنیم (بند ۸)
         if (!prefs(ctx).getBoolean(KEY_MIGRATED_V3, false)) {
             val cur = loadEncryptedOrNull(ctx)
             if (cur != null && cur.isNotEmpty()) {
@@ -119,7 +82,7 @@ object TradeStore {
             val type = object : TypeToken<List<Trade>>() {}.type
             gson.fromJson(json, type) ?: emptyList()
         } catch (e: Exception) {
-            Log.e("TradeStore", "loadLegacy parse failed — returning empty (legacy only)", e)
+            Log.e("TradeStore", "loadLegacy parse failed", e)
             emptyList()
         }
     }
@@ -129,18 +92,19 @@ object TradeStore {
         SecureStorage.putString(ctx, KEY_TRADES_ENCRYPTED, json)
     }
 
-    /**
-     * 🚀 Commit 69 (بند ۸): نسخهٔ صادقِ خواندن.
-     * - اگر داده‌ای وجود ندارد → emptyList (این «شکست» نیست)
-     * - اگر decrypt/parse شکست بخورد → **null** (یعنی داده هست ولی خوانده نمی‌شود)
-     */
     private fun loadEncryptedOrNull(ctx: Context): List<Trade>? {
         val json = SecureStorage.getString(ctx, KEY_TRADES_ENCRYPTED) ?: return emptyList()
+        
+        // 🚀 P1-2b: مهاجرت نسخه‌دار + قرنطینه
+        val migrated = StorageGuard.migrateRaw(ctx, PREFS, KEY_TRADES_ENCRYPTED, json)
+        
         return try {
             val type = object : TypeToken<List<Trade>>() {}.type
-            gson.fromJson(json, type) ?: emptyList()
+            gson.fromJson(migrated, type) ?: emptyList()
         } catch (e: Exception) {
-            Log.e("TradeStore", "loadEncrypted FAILED — data exists but unreadable; NOT returning empty", e)
+            Log.e("TradeStore", "loadEncrypted FAILED — quarantining", e)
+            StorageGuard.quarantine(ctx, PREFS, KEY_TRADES_ENCRYPTED, migrated)
+            SecureStorage.remove(ctx, KEY_TRADES_ENCRYPTED)
             null
         }
     }
@@ -148,13 +112,12 @@ object TradeStore {
     fun save(ctx: Context, trades: List<Trade>) {
         synchronized(lock) {
             migrateIfNeeded(ctx)
-            // 🚀 Commit 69 (بند ۸): اگر آخرین خواندن شکست خورده و لیست خالی است، REJECT
             if (lastLoadFailed && trades.isEmpty()) {
                 Log.e("TradeStore", "SAVE REJECTED: refusing to overwrite unreadable store with empty list")
                 return
             }
             saveEncrypted(ctx, trades)
-            if (!trades.isEmpty()) lastLoadFailed = false
+            if (trades.isNotEmpty()) lastLoadFailed = false
         }
     }
 
@@ -173,7 +136,7 @@ object TradeStore {
             val current = loadEncryptedOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
-                Log.e("TradeStore", "UPSERT ABORTED: store unreadable — refusing to overwrite")
+                Log.e("TradeStore", "UPSERT ABORTED: store unreadable")
                 return
             }
             lastLoadFailed = false
@@ -194,7 +157,7 @@ object TradeStore {
             val current = loadEncryptedOrNull(ctx)
             if (current == null) {
                 lastLoadFailed = true
-                Log.e("TradeStore", "REMOVE ABORTED: store unreadable — refusing to overwrite")
+                Log.e("TradeStore", "REMOVE ABORTED: store unreadable")
                 return
             }
             lastLoadFailed = false
@@ -218,7 +181,7 @@ object TradeStore {
         val all = load(ctx)
         val open = all.filter { it.status == "OPEN" }
         val closed = all.filter { it.status == "CLOSED" }
-        val wins = closed.count { it.totalRealizedPnl() > 0 }   // 🚀 Commit 11
+        val wins = closed.count { it.totalRealizedPnl() > 0 }
         val totalPnl = closed.sumOf { it.totalRealizedPnl() } + open.sumOf { it.unrealizedPnl() }
         val winRate = if (closed.isEmpty()) 0.0 else wins * 100.0 / closed.size
         return TradeStats(
@@ -236,7 +199,7 @@ object TradeStore {
         val closed = all.filter { it.status == "CLOSED" }
         val wins = closed.filter { it.totalRealizedPnl() > 0 }
         val losses = closed.filter { it.totalRealizedPnl() <= 0 }
-        val pnlUsd = closed.sumOf { it.totalRealizedPnlUsd() }   // 🚀 Commit 11
+        val pnlUsd = closed.sumOf { it.totalRealizedPnlUsd() }
         val rMultiples = closed.mapNotNull { it.rMultiple() }
         val avgR = if (rMultiples.isEmpty()) 0.0 else rMultiples.average()
         val bestR = rMultiples.maxOrNull() ?: 0.0
@@ -252,7 +215,6 @@ object TradeStore {
             )
         }
 
-        // 🚀 Commit 69 (بند ۲): سرمایهٔ واقعی از prefs، نه ۱۰۰ هاردکد
         val maxDD = maxDrawdown(closed, getBaseCapital(ctx))
 
         return AdvancedTradeStats(
@@ -272,11 +234,6 @@ object TradeStore {
     private fun maxDrawdown(closedTrades: List<Trade>, baseCapital: Double): Double =
         maxDrawdownFromPnls(closedTrades.map { it.totalRealizedPnl() }, baseCapital)
 
-    /**
-     * 🚀 Commit 69: منطق خالص Drawdown (قابل تست بدون Android).
-     * Drawdown = بیشینهٔ افت نسبی از قلهٔ تاریخی equity curve.
-     * سرمایهٔ پایه ورودی است — هرگز هاردکد نمی‌شود (بند ۲).
-     */
     internal fun maxDrawdownFromPnls(pnls: List<Double>, baseCapital: Double): Double {
         if (pnls.isEmpty()) return 0.0
         val base = if (baseCapital > 0.0) baseCapital else DEFAULT_BASE_CAPITAL
