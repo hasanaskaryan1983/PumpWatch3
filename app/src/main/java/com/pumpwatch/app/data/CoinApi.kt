@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -178,6 +179,37 @@ object ThrottledHttp {
 
 class RateLimitedException(message: String) : IOException(message)
 
+/**
+ * 🚀 P0 Shared (معماری State و هم‌زمانی): Single-Flight
+ * اگر یک درخواست در حال پرواز (in-flight) باشد، فراخوانی‌های هم‌زمانِ بعدی
+ * به‌جای ارسال درخواست شبکهٔ موازی، همان نتیجه را await می‌کنند.
+ * - بدون تغییر در هیچ امضایی → همهٔ ۱۹ فراخوانی‌کننده دست‌نخورده می‌مانند
+ * - خطاها هم به همهٔ منتظرها منتشر می‌شوند (completeExceptionally)
+ */
+private class SingleFlight<T> {
+    private val inFlight = AtomicReference<CompletableDeferred<T>?>(null)
+
+    suspend fun joinOrRun(block: suspend () -> T): T {
+        while (true) {
+            val existing = inFlight.get()
+            if (existing != null) return existing.await()
+            val deferred = CompletableDeferred<T>()
+            if (inFlight.compareAndSet(null, deferred)) {
+                try {
+                    val result = block()
+                    deferred.complete(result)
+                    return result
+                } catch (e: Throwable) {
+                    deferred.completeExceptionally(e)
+                    throw e
+                } finally {
+                    inFlight.set(null)
+                }
+            }
+        }
+    }
+}
+
 object ApiClient {
 
     private val app: Context? by lazy {
@@ -209,6 +241,12 @@ object ApiClient {
     private val platformsTimeRef = AtomicLong(0L)
 
     private val marketMetaRef = AtomicReference(MarketMeta(0L, ServedFrom.UNKNOWN, 0))
+
+    // 🚀 P0 Shared:Slotهای Single-Flight به‌ازای هر endpoint
+    private val flight1000 = SingleFlight<List<CoinMarket>>()
+    private val flight100 = SingleFlight<List<CoinMarket>>()
+    private val flightPlatforms = SingleFlight<Map<String, Map<String, String>>>()
+    private val flightCharts = ConcurrentHashMap<String, SingleFlight<MarketChart>>()
 
     fun marketMeta(): MarketMeta = marketMetaRef.get()
 
@@ -288,39 +326,42 @@ object ApiClient {
             }
         }
 
-        return try {
-            val results = mutableListOf<CoinMarket>()
-            for (page in 1..4) {
-                GlobalHostLimiter.acquire("api.coingecko.com")
-                results.addAll(api.getMarkets(perPage = 250, page = page))
-                if (page < 4) delay(2000)
-            }
-            val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
-            val nowMs = System.currentTimeMillis()
-            val nowElapsed = SystemClock.elapsedRealtime()
+        // 🚀 P0 Shared: Single-Flight — درخواست‌های هم‌زمان فقط یک بار به شبکه می‌روند
+        return flight1000.joinOrRun {
+            try {
+                val results = mutableListOf<CoinMarket>()
+                for (page in 1..4) {
+                    GlobalHostLimiter.acquire("api.coingecko.com")
+                    results.addAll(api.getMarkets(perPage = 250, page = page))
+                    if (page < 4) delay(2000)
+                }
+                val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
+                val nowMs = System.currentTimeMillis()
+                val nowElapsed = SystemClock.elapsedRealtime()
 
-            cache1000Ref.set(sorted)
-            cache1000TimeRef.set(nowMs)
-            cache1000ElapsedRef.set(nowElapsed)
-            setMeta(nowMs, ServedFrom.NETWORK, sorted.size, nowElapsed)
+                cache1000Ref.set(sorted)
+                cache1000TimeRef.set(nowMs)
+                cache1000ElapsedRef.set(nowElapsed)
+                setMeta(nowMs, ServedFrom.NETWORK, sorted.size, nowElapsed)
 
-            OfflineCache.save(app, "m1000", gson.toJson(sorted))
-            sorted
-        } catch (e: Exception) {
-            var diskKey = "m1000"
-            var disk = loadList(diskKey)
-            if (disk == null) {
-                diskKey = "m250"
-                disk = loadList(diskKey)
+                OfflineCache.save(app, "m1000", gson.toJson(sorted))
+                sorted
+            } catch (e: Exception) {
+                var diskKey = "m1000"
+                var disk = loadList(diskKey)
+                if (disk == null) {
+                    diskKey = "m250"
+                    disk = loadList(diskKey)
+                }
+                if (disk != null) {
+                    val diskTime = OfflineCache.time(app, diskKey)
+                    cache1000Ref.set(disk)
+                    cache1000TimeRef.set(diskTime)
+                    cache1000ElapsedRef.set(0L)
+                    setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
+                    disk
+                } else throw e
             }
-            if (disk != null) {
-                val diskTime = OfflineCache.time(app, diskKey)
-                cache1000Ref.set(disk)
-                cache1000TimeRef.set(diskTime)
-                cache1000ElapsedRef.set(0L)
-                setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
-                disk
-            } else throw e
         }
     }
 
@@ -350,29 +391,32 @@ object ApiClient {
             }
         }
 
-        return try {
-            GlobalHostLimiter.acquire("api.coingecko.com")
-            val fresh = api.getMarkets(perPage = 100, page = 1)
-            val nowMs = System.currentTimeMillis()
-            val nowElapsed = SystemClock.elapsedRealtime()
+        // 🚀 P0 Shared: Single-Flight
+        return flight100.joinOrRun {
+            try {
+                GlobalHostLimiter.acquire("api.coingecko.com")
+                val fresh = api.getMarkets(perPage = 100, page = 1)
+                val nowMs = System.currentTimeMillis()
+                val nowElapsed = SystemClock.elapsedRealtime()
 
-            cache100Ref.set(fresh)
-            cache100TimeRef.set(nowMs)
-            cache100ElapsedRef.set(nowElapsed)
-            setMeta(nowMs, ServedFrom.NETWORK, fresh.size, nowElapsed)
+                cache100Ref.set(fresh)
+                cache100TimeRef.set(nowMs)
+                cache100ElapsedRef.set(nowElapsed)
+                setMeta(nowMs, ServedFrom.NETWORK, fresh.size, nowElapsed)
 
-            OfflineCache.save(app, "m100", gson.toJson(fresh))
-            fresh
-        } catch (e: Exception) {
-            val disk = loadList("m100")
-            val diskTime = OfflineCache.time(app, "m100")
-            if (disk != null) {
-                cache100Ref.set(disk)
-                cache100TimeRef.set(diskTime)
-                cache100ElapsedRef.set(0L)
-                setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
-                disk
-            } else throw e
+                OfflineCache.save(app, "m100", gson.toJson(fresh))
+                fresh
+            } catch (e: Exception) {
+                val disk = loadList("m100")
+                val diskTime = OfflineCache.time(app, "m100")
+                if (disk != null) {
+                    cache100Ref.set(disk)
+                    cache100TimeRef.set(diskTime)
+                    cache100ElapsedRef.set(0L)
+                    setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
+                    disk
+                } else throw e
+            }
         }
     }
 
@@ -386,19 +430,23 @@ object ApiClient {
                 return gson.fromJson(cachedJson, MarketChart::class.java)
             } catch (_: Exception) { }
         }
-        return try {
-            GlobalHostLimiter.acquire("api.coingecko.com")
-            val chart = api.getMarketChart(id, days = days)
-            OfflineCache.save(app, key, gson.toJson(chart))
-            chart
-        } catch (e: Exception) {
-            if (cachedJson != null) {
-                try {
-                    gson.fromJson(cachedJson, MarketChart::class.java)
-                } catch (_: Exception) {
-                    throw e
-                }
-            } else throw e
+        // 🚀 P0 Shared: Single-Flight به‌ازای کلید نمودار (coin + days)
+        val flight = flightCharts.getOrPut(key) { SingleFlight() }
+        return flight.joinOrRun {
+            try {
+                GlobalHostLimiter.acquire("api.coingecko.com")
+                val chart = api.getMarketChart(id, days = days)
+                OfflineCache.save(app, key, gson.toJson(chart))
+                chart
+            } catch (e: Exception) {
+                if (cachedJson != null) {
+                    try {
+                        gson.fromJson(cachedJson, MarketChart::class.java)
+                    } catch (_: Exception) {
+                        throw e
+                    }
+                } else throw e
+            }
         }
     }
 
@@ -423,36 +471,39 @@ object ApiClient {
             }
         }
 
-        return try {
-            GlobalHostLimiter.acquire("api.coingecko.com")
-            val list = api.getCoinsList(includePlatform = true)
-            val map = HashMap<String, Map<String, String>>()
-            for (item in list) {
-                val platforms = item.platforms ?: continue
-                if (platforms.isEmpty()) continue
-                val filtered = HashMap<String, String>()
-                for ((chain, addr) in platforms) {
-                    val a = addr?.trim().orEmpty()
-                    if (a.isNotEmpty()) filtered[chain] = a
+        // 🚀 P0 Shared: Single-Flight
+        return flightPlatforms.joinOrRun {
+            try {
+                GlobalHostLimiter.acquire("api.coingecko.com")
+                val list = api.getCoinsList(includePlatform = true)
+                val map = HashMap<String, Map<String, String>>()
+                for (item in list) {
+                    val platforms = item.platforms ?: continue
+                    if (platforms.isEmpty()) continue
+                    val filtered = HashMap<String, String>()
+                    for ((chain, addr) in platforms) {
+                        val a = addr?.trim().orEmpty()
+                        if (a.isNotEmpty()) filtered[chain] = a
+                    }
+                    if (filtered.isNotEmpty()) map[item.id] = filtered
                 }
-                if (filtered.isNotEmpty()) map[item.id] = filtered
+                platformsRef.set(map)
+                platformsTimeRef.set(System.currentTimeMillis())
+                OfflineCache.save(app, PLATFORMS_CACHE_KEY, gson.toJson(map))
+                map
+            } catch (e: Exception) {
+                val diskJson = OfflineCache.load(app, PLATFORMS_CACHE_KEY)
+                if (diskJson != null) {
+                    try {
+                        val type = object : TypeToken<Map<String, Map<String, String>>>() {}.type
+                        val disk: Map<String, Map<String, String>> = gson.fromJson(diskJson, type)
+                        platformsRef.set(disk)
+                        platformsTimeRef.set(System.currentTimeMillis())
+                        return@joinOrRun disk
+                    } catch (_: Exception) { }
+                }
+                throw e
             }
-            platformsRef.set(map)
-            platformsTimeRef.set(System.currentTimeMillis())
-            OfflineCache.save(app, PLATFORMS_CACHE_KEY, gson.toJson(map))
-            map
-        } catch (e: Exception) {
-            val diskJson = OfflineCache.load(app, PLATFORMS_CACHE_KEY)
-            if (diskJson != null) {
-                try {
-                    val type = object : TypeToken<Map<String, Map<String, String>>>() {}.type
-                    val disk: Map<String, Map<String, String>> = gson.fromJson(diskJson, type)
-                    platformsRef.set(disk)
-                    platformsTimeRef.set(System.currentTimeMillis())
-                    return disk
-                } catch (_: Exception) { }
-            }
-            throw e
         }
     }
 
