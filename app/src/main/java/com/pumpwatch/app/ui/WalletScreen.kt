@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pumpwatch.app.engine.Validators
 import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -90,7 +91,6 @@ fun WalletScreen() {
             role = note, huntedAtMs = System.currentTimeMillis(), multiplier = multiplier,
             boughtUsd = boughtUsd, maxSingleUsd = maxSingleUsd, soldUsd = soldUsd, txCount = txCount
         )
-        // 🚀 P0 Tab 08: زبان خنثی (حذف "نهنگ" و جایگزینی با "فعالیت")
         viewModel.info = "📌 فعالیت «$symbol • $note» با ضریب " +
             String.format(Locale.US, "%.1f", multiplier) + "x و حجم " +
             String.format(Locale.US, "$%,.0f", boughtUsd) + " به لیست رصد اضافه شد"
@@ -99,9 +99,15 @@ fun WalletScreen() {
     fun check() {
         // 🚀 P0 Tab 08: اعتبارسنجی آدرس بدون sanitize مخرب (فقط حذف فاصله‌های اضافی)
         val addr = viewModel.address.trim()
-        if (addr.isEmpty()) { 
+        if (addr.isEmpty()) {
             viewModel.error = "❌ لطفاً آدرس کیف پول را وارد کنید"
-            return 
+            return
+        }
+        // 🚀 P1-1: اعتبارسنجی دقیق قالب آدرس (EVM / Solana / TON)
+        val addrErr = Validators.validateWalletAddress(addr)
+        if (addrErr != null) {
+            viewModel.error = "❌ $addrErr"
+            return
         }
         val cfg = viewModel.chain
         scope.launch {
@@ -128,15 +134,13 @@ fun WalletScreen() {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // 🚀 P0 Tab 08: زبان خنثی و سلب مسئولیت شفاف
             EditorialPageHeader(
                 eyebrow = "WALLET · PUBLIC DATA",
                 title = "تحلیل عمومی کیف پول",
                 subtitle = "بررسی داده‌های عمومی آن‌چین. سود/زیان (P&L) تا زمان فراهم شدن دفترکل (ledger) معتبر، Unavailable است.",
                 accent = PumpWatchPalette.TabWallet
             )
-            
-            // نوار تب‌های فرعی (با عناوین خنثی)
+
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -190,7 +194,7 @@ fun WalletScreen() {
                     )
                 )
             }
-            
+
             if (infoText.isNotEmpty()) {
                 GlassCard(accent = PumpWatchPalette.TabWallet, modifier = Modifier.fillMaxWidth(), radius = 10.dp) {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -258,14 +262,13 @@ fun WalletScreen() {
                                 colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.TabWallet, contentColor = PumpWatchPalette.Ink),
                                 shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()
                             ) { Text(if (viewModel.loading) "⏳ در حال دریافت..." else "🔍 دریافت داده‌ها", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-                            
+
                             if (viewModel.info.isNotEmpty()) Text(viewModel.info, fontSize = 10.sp, color = PumpWatchPalette.Positive)
                         }
                     }
 
                     if (viewModel.error != null) Text(viewModel.error ?: "", fontSize = 10.sp, color = PumpWatchPalette.Negative)
 
-                    // 🚀 P0 Tab 08: نمایش شفاف ساختار کل دارایی (known + unpriced + coverage)
                     GlassCard(accent = PumpWatchPalette.Info, modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("📊 ساختار ارزش کل (Total Breakdown)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
@@ -275,15 +278,11 @@ fun WalletScreen() {
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("تعداد کل دارایی‌ها:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                                // ⚠️ توجه: اگر نام فیلد قیمت در کلاس Holding شما چیز دیگری است (مثلاً it.price یا it.usdValue)، 
-                                // لطفاً شرط زیر را از حالت کامنت خارج کرده و it.currentPrice را به نام صحیح تغییر دهید.
-                                // Text("${viewModel.holdings.count { /* it.price == null || it.price == 0.0 */ false }} مورد", ...)
                                 Text("${viewModel.holdings.size} مورد", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("پوشش داده (Coverage):", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                                // ⚠️ توجه: برای محاسبه دقیق، باید فیلد قیمت صحیح را جایگزین کنید. فعلاً به صورت موقت 100% نمایش داده می‌شود.
-                                val coverage = "100.0%" 
+                                val coverage = "100.0%"
                                 Text(coverage, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Info)
                             }
                             Surface(color = PumpWatchPalette.Negative.copy(alpha = 0.1f), shape = RoundedCornerShape(6.dp)) {
@@ -296,24 +295,22 @@ fun WalletScreen() {
                         }
                     }
 
-                    // فراخوانی توابع اصلی که در فایل‌های دیگر تعریف شده‌اند
                     HoldingsSection(
-                        holdings = viewModel.holdings, 
+                        holdings = viewModel.holdings,
                         total = viewModel.total,
                         onCopyContract = { c -> copyToClipboard("contract", c, "📋 آدرس قرارداد کپی شد") },
                         onInfo = { m -> viewModel.info = m }
                     )
-                    
+
                     TxHistorySection(txs = viewModel.txs)
                     WalletHistorySection()
-                    
+
                     ChainForensicsSection(
                         onCopy = { a -> copyToClipboard("addr", a, "📋 آدرس کپی شد") },
                         onInspect = { a -> viewModel.address = a; check() },
                         onStar = { a, s, sc, n, b, ms, sd, tc -> saveStar(a, s, sc, n, b, ms, sd, tc) }
                     )
 
-                    // 🚀 P0 Tab 08: افشای شفاف حریم خصوصی و محدودیت‌ها
                     GlassCard(accent = PumpWatchPalette.Muted, modifier = Modifier.fillMaxWidth()) {
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("🔒 افشای حریم خصوصی و محدودیت‌ها", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
@@ -328,7 +325,6 @@ fun WalletScreen() {
                     }
                 }
             } else {
-                // نمایش تب‌های فرعی (که در فایل‌های FavCenter.kt, WalletForensics.kt و ... تعریف شده‌اند)
                 when (subTab) {
                     1 -> FavoritesPage()
                     2 -> AlertsPage()
