@@ -13,17 +13,11 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.pumpwatch.app.engine.NotificationGuard
 import com.pumpwatch.app.engine.QuickScanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * SignalScannerWorker — اسکنر ساعتی سیگنال‌ها + نوتیفیکیشن
- *
- * Sprint 11 (C2): اگر اسکن ≥ ۵ سیگنال قوی پیدا کند، نوتیفیکیشن می‌فرستد.
- * Sprint 11 (C2b): علاوه بر intent extra، SignalNavigator را هم mark می‌کند
- * تا workspace حتی پس از fresh start هم تب سیگنال را باز کند.
- */
 class SignalScannerWorker(
     context: Context,
     params: WorkerParameters
@@ -34,6 +28,8 @@ class SignalScannerWorker(
         private const val CHANNEL_ID = "signal_alerts"
         private const val NOTIFICATION_ID = 1001
         private const val SIGNAL_THRESHOLD = 5
+        // 🚀 Commit 8: پنجرهٔ dedup شش‌ساعته
+        private const val DEDUP_WINDOW_MS = 6L * 3_600_000L
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -54,10 +50,14 @@ class SignalScannerWorker(
             .putString("last_scores", "سیگنال: ${report.signalCount}\n" + report.lines.joinToString("\n"))
             .apply()
 
-        // 🚀 Sprint 11 (C2 + C2b): نوتیفیکیشن + mark کردن SignalNavigator
         if (report.signalCount >= SIGNAL_THRESHOLD) {
             SignalNavigator.markPending(applicationContext)
-            sendSignalNotification(report.signalCount, mode)
+            // 🚀 Commit 8: dedup — گزارش یکسان داخل پنجره تکرار نمی‌شود
+            val key = "scan_${mode}_${report.signalCount}"
+            if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                sendSignalNotification(report.signalCount, mode)
+                NotificationGuard.recordDelivered(applicationContext, key)
+            }
         }
 
         Result.success()
@@ -88,8 +88,6 @@ class SignalScannerWorker(
 
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            // C2b: این دیگر ضروری نیست (SignalNavigator کار اصلی را می‌کند)،
-            // ولی به‌عنوان fallback می‌ماند
             putExtra("open_signals_tab", true)
         }
 
@@ -118,7 +116,6 @@ class SignalScannerWorker(
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
         } catch (_: SecurityException) {
-            // permission revoked mid-flight
         }
     }
 }
