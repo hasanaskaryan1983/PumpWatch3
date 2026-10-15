@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,8 +17,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -33,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.OpenPosition
@@ -45,15 +49,23 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.maxOf
 
 private fun fmtAmt(d: Double): String = String.format(Locale.US, "%.4f", d)
 private fun fmtUsd(d: Double): String = String.format(Locale.US, "$%,.2f", d)
+
+// 🚀 P0 Tab 10: وضعیت تایپ‌شده برای مدیریت داده‌ها
+internal sealed class LeaderboardLoadState {
+    object Loading : LeaderboardLoadState()
+    data class Loaded(val traders: List<TraderProfile>) : LeaderboardLoadState()
+    object Unreadable : LeaderboardLoadState()
+}
 
 @Composable
 fun TraderLeaderboardScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var traders by remember { mutableStateOf<List<TraderProfile>>(emptyList()) }
+    var loadState by remember { mutableStateOf<LeaderboardLoadState>(LeaderboardLoadState.Loading) }
     var addr by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf("") }
     var mint by remember { mutableStateOf("") }
@@ -62,31 +74,54 @@ fun TraderLeaderboardScreen() {
     var positions by remember { mutableStateOf<Map<String, OpenPosition?>>(emptyMap()) }
     val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
 
-    fun refresh() { traders = TraderStore.ranked(context) }
+    fun refresh() {
+        loadState = LeaderboardLoadState.Loading
+        try {
+            TraderStore.load(context)
+            val traders = TraderStore.ranked(context)
+            loadState = LeaderboardLoadState.Loaded(traders)
+        } catch (e: Exception) {
+            loadState = LeaderboardLoadState.Unreadable
+        }
+    }
 
-    LaunchedEffect(Unit) { TraderStore.load(context); refresh() }
+    LaunchedEffect(Unit) { refresh() }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 🚀 P0 Tab 10: عنوان و subtitle خنثی + سلب مسئولیت
         EditorialPageHeader(
             eyebrow = "TRACKER · LOCAL RANKING",
-            title = "تاپ تریدرها",
-            subtitle = "برترین‌های کشف‌شده توسط PumpWatch — نه ۵۰ برتر جهانی",
+            title = "رتبه‌بندی تریدرهای ردیابی‌شده",
+            subtitle = "داده‌های محلی شما (نه ۵۰ برتر جهانی). عملکرد گذشته تضمین‌کنندهٔ آینده نیست. کپی‌تریدینگ ریسک خاص خود را دارد.",
             accent = PumpWatchPalette.TabLeaderboard
         )
 
-        GlassCard(accent = PumpWatchPalette.TabLeaderboard, modifier = Modifier.fillMaxWidth()) {
+        // 🚀 P0 Tab 10: Disclaimer شفاف ریسک کپی‌تریدینگ
+        GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    "این لیست «۵۰ برتر جهانی» نیست؛ فقط تریدرهایی که خود اپ دیده و ثبت کرده است. PnL نمایش‌داده‌شده تقریبی است و ورود آن‌چین را تأیید نمی‌کند.",
+                    "⚠️ سلب مسئولیت ریسک کپی‌تریدینگ",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    color = PumpWatchPalette.Warning
+                )
+                Text(
+                    "• این لیست «۵۰ برتر جهانی» نیست؛ فقط تریدرهایی که شما در این اپ ردیابی کرده‌اید.\n" +
+                    "• PnL نمایش‌داده‌شده تقریبی است و ورود واقعی آن‌چین را تأیید نمی‌کند.\n" +
+                    "• رتبه‌های کوتاه‌مدت می‌توانند ناشی از شانس باشند؛ بازهٔ زمانی طولانی‌تر قابل اعتمادتر است.\n" +
+                    "• کپی‌تریدینگ ریسک‌های خاص (اسلیپیج، تأخیر، تفاوت حجم) را دارد.\n" +
+                    "• عملکرد گذشته هرگز تضمین‌کنندهٔ عملکرد آینده نیست.",
                     fontSize = 9.sp,
-                    color = PumpWatchPalette.Warning,
+                    color = PumpWatchPalette.Muted,
                     lineHeight = 14.sp
                 )
             }
         }
 
+        // فرم افزودن تریدر جدید
         GlassCard(accent = PumpWatchPalette.TabLeaderboard, modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("➕ افزودن تریدر به لیست ردیابی", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PumpWatchPalette.Text)
                 val tfColors = TextFieldDefaults.colors(
                     focusedContainerColor = PumpWatchPalette.GlassDeep,
                     unfocusedContainerColor = PumpWatchPalette.GlassDeep,
@@ -108,164 +143,218 @@ fun TraderLeaderboardScreen() {
                 )
                 TextField(
                     value = mint, onValueChange = { mint = it },
-                    placeholder = { Text("کانترکت توکن (mint) — اختیاری، برای بررسی موقعیت", fontSize = 10.sp, color = PumpWatchPalette.MutedDim) },
+                    placeholder = { Text("کانترکت توکن (mint) — اختیاری", fontSize = 10.sp, color = PumpWatchPalette.MutedDim) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true, colors = tfColors
                 )
                 TextField(
                     value = entryText, onValueChange = { entryText = it },
-                    placeholder = { Text("قیمت ورود تقریبی ($) — اختیاری، برای PnL", fontSize = 10.sp, color = PumpWatchPalette.MutedDim) },
+                    placeholder = { Text("قیمت ورود تقریبی ($) — اختیاری", fontSize = 10.sp, color = PumpWatchPalette.MutedDim) },
                     modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp), singleLine = true, colors = tfColors
                 )
                 Button(
                     onClick = {
                         val a = addr.trim(); val s = symbol.trim().uppercase(Locale.US)
                         if (a.length < 20) { info = "❌ آدرس معتبر نیست"; return@Button }
-                        if (s.isEmpty()) { info = "❌ نماد را وارد کن"; return@Button }
-                        TraderStore.upsert(
-                            context, TraderProfile(
-                                addr = a, chain = TraderStore.detectChain(a), symbol = s, note = "ردیابی دستی",
-                                addedAtMs = System.currentTimeMillis(), lastSeenTs = 0L, lastTxId = "",
-                                boughtUsd = 0.0, maxSingleUsd = 0.0, soldUsd = 0.0, txCount = 0,
-                                multiplier = 0.0, pumpsCount = 0, alertOn = true,
-                                mint = mint.trim().takeIf { it.isNotEmpty() },
-                                entryPrice = entryText.trim().toDoubleOrNull()
+                        if (s.isEmpty()) { info = "❌ نماد را وارد کنید"; return@Button }
+                        try {
+                            TraderStore.upsert(
+                                context, TraderProfile(
+                                    addr = a, chain = TraderStore.detectChain(a), symbol = s, note = "ردیابی دستی",
+                                    addedAtMs = System.currentTimeMillis(), lastSeenTs = 0L, lastTxId = "",
+                                    boughtUsd = 0.0, maxSingleUsd = 0.0, soldUsd = 0.0, txCount = 0,
+                                    multiplier = 0.0, pumpsCount = 0, alertOn = true,
+                                    mint = mint.trim().takeIf { it.isNotEmpty() },
+                                    entryPrice = entryText.trim().toDoubleOrNull()
+                                )
                             )
-                        )
-                        addr = ""; symbol = ""; mint = ""; entryText = ""
-                        info = "✅ تریدر به لیست ردیابی اضافه شد"
-                        refresh()
+                            addr = ""; symbol = ""; mint = ""; entryText = ""
+                            info = "✅ تریدر به لیست ردیابی اضافه شد"
+                            refresh()
+                        } catch (e: Exception) {
+                            info = "⚠️ خطا در افزودن: ${e.message}"
+                        }
                     },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PumpWatchPalette.TabLeaderboard,
-                        contentColor = PumpWatchPalette.Ink
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.TabLeaderboard, contentColor = PumpWatchPalette.Ink),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("➕ افزودن به ردیابی", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
-                if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = PumpWatchPalette.Positive)
+                if (info.isNotEmpty()) Text(info, fontSize = 10.sp, color = if (info.startsWith("✅")) PumpWatchPalette.Positive else if (info.startsWith("❌") || info.startsWith("⚠️")) PumpWatchPalette.Negative else PumpWatchPalette.Muted)
             }
         }
 
-        if (traders.isEmpty()) {
-            Text(
-                "😴 هنوز تریدری ردیابی نمی‌شود. از موتور ۶ یک نهنگ را ❤️ بزن یا دستی اضافه کن.",
-                fontSize = 11.sp,
-                color = PumpWatchPalette.Muted
-            )
-        }
-
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
-            itemsIndexed(traders) { idx, t ->
-                val pos = positions[t.addr]
-                GlassCard(accent = PumpWatchPalette.TabLeaderboard, modifier = Modifier.fillMaxWidth()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("#${idx + 1}", fontSize = 14.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Warning)
-                            Spacer(Modifier.width(6.dp))
-                            Text("🐋 ${TraderStore.short(t.addr)}", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Positive)
-                            Spacer(Modifier.weight(1f))
-                            Text("${TraderStore.scoreOf(t)} امتیاز", fontSize = 12.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Info)
+        // 🚀 P0 Tab 10: وضعیت تایپ‌شده (Loading/Loaded/Unreadable)
+        when (val state = loadState) {
+            is LeaderboardLoadState.Loading -> {
+                Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = PumpWatchPalette.TabLeaderboard)
+                }
+            }
+            is LeaderboardLoadState.Unreadable -> {
+                GlassCard(accent = PumpWatchPalette.Negative, modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("⚠️ خطا در بارگذاری داده‌ها", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
+                        Text("داده‌های محلی شما قابل خواندن نیستند. لطفاً اپ را مجدداً باز کنید.", fontSize = 10.sp, color = PumpWatchPalette.Muted, textAlign = TextAlign.Center)
+                        Button(
+                            onClick = { refresh() },
+                            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Negative.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
+                            shape = RoundedCornerShape(8.dp)
+                        ) { Text("تلاش مجدد", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+            is LeaderboardLoadState.Loaded -> {
+                val traders = state.traders
+                if (traders.isEmpty()) {
+                    GlassCard(accent = PumpWatchPalette.Muted, modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("📭", fontSize = 32.sp)
+                            Text("هنوز تریدری در لیست ردیابی شما نیست", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                            Text("از بخش ردیابی نهنگ‌ها، یک فعالیت را به لیست اضافه کنید یا از فرم بالا استفاده کنید.", fontSize = 9.sp, color = PumpWatchPalette.Muted, textAlign = TextAlign.Center)
                         }
-                        Text("${t.symbol} • ${t.note} • زنجیره: ${t.chain}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
-                        Text("💵 خرید: ${fmtUsd(t.boughtUsd)} • بزرگ‌ترین: ${fmtUsd(t.maxSingleUsd)} • فروش: ${fmtUsd(t.soldUsd)} • ${t.txCount} tx", fontSize = 9.sp, color = PumpWatchPalette.Muted)
-                        Text("🔁 ${t.pumpsCount} پامپ • ضریب ${String.format(Locale.US, "%.1f", t.multiplier)}x • آخرین فعالیت: ${if (t.lastSeenTs > 0) sdf.format(Date(t.lastSeenTs)) else "بررسی نشده"}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                    }
+                } else {
+                    // 🚀 P0 Tab 10: شفافیت درباره ماهیت داده‌ها و بازهٔ زمانی
+                    Surface(color = PumpWatchPalette.Info.copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
+                        Text(
+                            "📊 ${traders.size} تریدر در لیست شما • رتبه‌بندی بر اساس امتیاز محلی (حجم خرید/فروش، تعداد پامپ، ضریب)\n" +
+                            "⏱️ بازهٔ زمانی: از زمان افزودن به لیست تا الان • PnL: تقریبی و بدون تأیید آن‌چین",
+                            fontSize = 9.sp,
+                            color = PumpWatchPalette.Info,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
 
-                        when {
-                            t.mint.isNullOrBlank() -> Text("📊 موقعیت: بررسی نمی‌شود (کانترکت توکن ثبت نشده)", fontSize = 9.sp, color = PumpWatchPalette.Muted)
-                            pos == null -> Text("📊 موقعیت: بررسی نشده", fontSize = 9.sp, color = PumpWatchPalette.Muted)
-                            pos.amount > 0.0 -> Text("🟢 موقعیت باز: ${fmtAmt(pos.amount)} ${t.symbol} ≈ ${fmtUsd(pos.valueUsd)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Positive)
-                            else -> Text("🔴 خارج شده / بدون موقعیت", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
-                        }
-
-                        val entry = t.entryPrice
-                        if (pos != null && pos.amount > 0.0 && pos.priceUsd != null && entry != null && entry > 0.0) {
-                            val pnl = (pos.priceUsd - entry) / entry * 100.0
-                            Text(
-                                "سود/زیان تقریبی: ${String.format(Locale.US, "%+.1f", pnl)}% (تقریبی — ورود آن‌چین تأیید نشده)",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (pnl >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative
-                            )
-                        } else if (pos != null && pos.amount > 0.0) {
-                            Text("سود/زیان: نامعلوم (قیمت ورود ثبت نشده)", fontSize = 9.sp, color = PumpWatchPalette.Muted)
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            FilterChip(
-                                selected = t.alertOn,
-                                onClick = { TraderStore.setAlert(context, t.addr, !t.alertOn); refresh() },
-                                label = { Text("هشدار", fontSize = 9.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = PumpWatchPalette.TabLeaderboard,
-                                    selectedLabelColor = PumpWatchPalette.Ink,
-                                    containerColor = PumpWatchPalette.Glass,
-                                    labelColor = PumpWatchPalette.Muted
-                                )
-                            )
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        val p = TraderStore.checkOpenPosition(context, t)
-                                        positions = positions + (t.addr to p)
-                                        info = when {
-                                            p == null -> "⚠️ بررسی موقعیت فقط برای Solana + با کانترکت است"
-                                            p.amount > 0.0 -> "🟢 موقعیت باز پیدا شد"
-                                            else -> "🔴 موقعیتی ندارد"
-                                        }
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+                        itemsIndexed(traders) { idx, t ->
+                            val pos = positions[t.addr]
+                            GlassCard(accent = PumpWatchPalette.TabLeaderboard, modifier = Modifier.fillMaxWidth()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    // 🚀 P0 Tab 10: زبان خنثی (حذف 🐋 نهنگ و "تاپ")
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("#${idx + 1}", fontSize = 14.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Warning)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(TraderStore.short(t.addr), fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Info)
+                                        Spacer(Modifier.weight(1f))
+                                        Text("امتیاز: ${TraderStore.scoreOf(t)}", fontSize = 12.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Info)
                                     }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = PumpWatchPalette.Glass,
-                                    contentColor = PumpWatchPalette.Text
-                                ),
-                                shape = RoundedCornerShape(6.dp)
-                            ) { Text("📊 موقعیت", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        val act = TraderStore.checkNewActivity(context, t)
-                                        if (act != null) {
-                                            TraderStore.markSeen(context, t.addr, act.ts, act.txId)
-                                            info = "🔔 فعالیت جدید برای ${TraderStore.short(t.addr)} ثبت شد"
-                                        } else {
-                                            if (t.chain == "solana") {
-                                                TraderStore.markSeen(context, t.addr, maxOf(t.lastSeenTs, System.currentTimeMillis()), t.lastTxId)
-                                                info = "✅ بررسی شد؛ فعالیت جدیدی نبود"
-                                            } else {
-                                                info = "⚠️ بررسی خودکار فعلاً فقط برای Solana است"
-                                            }
-                                        }
-                                        refresh()
+                                    Text("${t.symbol} • ${t.note} • زنجیره: ${t.chain}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                                    
+                                    Text("حجم خرید: ${fmtUsd(t.boughtUsd)} • بزرگ‌ترین تراکنش: ${fmtUsd(t.maxSingleUsd)} • حجم فروش: ${fmtUsd(t.soldUsd)} • ${t.txCount} تراکنش", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                                    Text("تعداد پامپ: ${t.pumpsCount} • ضریب: ${String.format(Locale.US, "%.1f", t.multiplier)}x • آخرین فعالیت: ${if (t.lastSeenTs > 0) sdf.format(Date(t.lastSeenTs)) else "بررسی نشده"}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+
+                                    when {
+                                        t.mint.isNullOrBlank() -> Text("📊 موقعیت: بررسی نمی‌شود (کانترکت توکن ثبت نشده)", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                                        pos == null -> Text("📊 موقعیت: بررسی نشده", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                                        pos.amount > 0.0 -> Text("🟢 موقعیت باز: ${fmtAmt(pos.amount)} ${t.symbol} ≈ ${fmtUsd(pos.valueUsd)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Positive)
+                                        else -> Text("🔴 بدون موقعیت باز", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
                                     }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = PumpWatchPalette.Glass,
-                                    contentColor = PumpWatchPalette.Text
-                                ),
-                                shape = RoundedCornerShape(6.dp)
-                            ) { Text("🔍 فعالیت", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
-                            Button(
-                                onClick = {
-                                    try {
-                                        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                                            .setPrimaryClip(ClipData.newPlainText("addr", t.addr))
-                                        info = "📋 آدرس کپی شد"
-                                    } catch (_: Exception) { }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = PumpWatchPalette.Glass,
-                                    contentColor = PumpWatchPalette.Text
-                                ),
-                                shape = RoundedCornerShape(6.dp)
-                            ) { Text("📋", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
-                            Button(
-                                onClick = { TraderStore.remove(context, t.addr); refresh() },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = PumpWatchPalette.Negative.copy(alpha = 0.25f),
-                                    contentColor = PumpWatchPalette.Text
-                                ),
-                                shape = RoundedCornerShape(6.dp)
-                            ) { Text("🗑", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
+
+                                    val entry = t.entryPrice
+                                    if (pos != null && pos.amount > 0.0 && pos.priceUsd != null && entry != null && entry > 0.0) {
+                                        val pnl = (pos.priceUsd - entry) / entry * 100.0
+                                        Text(
+                                            "تغییر قیمت تقریبی: ${String.format(Locale.US, "%+.1f", pnl)}% (⚠️ تقریبی — ورود آن‌چین تأیید نشده)",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (pnl >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative
+                                        )
+                                    } else if (pos != null && pos.amount > 0.0) {
+                                        Text("تغییر قیمت: نامعلوم (قیمت ورود ثبت نشده)", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                                    }
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        FilterChip(
+                                            selected = t.alertOn,
+                                            onClick = { 
+                                                try {
+                                                    TraderStore.setAlert(context, t.addr, !t.alertOn)
+                                                    refresh()
+                                                } catch (_: Exception) { }
+                                            },
+                                            label = { Text("هشدار", fontSize = 9.sp) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = PumpWatchPalette.TabLeaderboard,
+                                                selectedLabelColor = PumpWatchPalette.Ink,
+                                                containerColor = PumpWatchPalette.Glass,
+                                                labelColor = PumpWatchPalette.Muted
+                                            )
+                                        )
+                                        Button(
+                                            onClick = {
+                                                scope.launch {
+                                                    try {
+                                                        val p = TraderStore.checkOpenPosition(context, t)
+                                                        positions = positions + (t.addr to p)
+                                                        info = when {
+                                                            p == null -> "⚠️ بررسی موقعیت فقط برای Solana + با کانترکت است"
+                                                            p.amount > 0.0 -> "🟢 موقعیت باز پیدا شد"
+                                                            else -> "🔴 موقعیتی ندارد"
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        info = "⚠️ خطا: ${e.message}"
+                                                    }
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) { Text("📊 موقعیت", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
+                                        Button(
+                                            onClick = {
+                                                scope.launch {
+                                                    try {
+                                                        val act = TraderStore.checkNewActivity(context, t)
+                                                        if (act != null) {
+                                                            TraderStore.markSeen(context, t.addr, act.ts, act.txId)
+                                                            info = "🔔 فعالیت جدید برای ${TraderStore.short(t.addr)} ثبت شد"
+                                                        } else {
+                                                            if (t.chain == "solana") {
+                                                                TraderStore.markSeen(context, t.addr, max(t.lastSeenTs, System.currentTimeMillis()), t.lastTxId)
+                                                                info = "✅ بررسی شد؛ فعالیت جدیدی نبود"
+                                                            } else {
+                                                                info = "⚠️ بررسی خودکار فعلاً فقط برای Solana است"
+                                                            }
+                                                        }
+                                                        refresh()
+                                                    } catch (e: Exception) {
+                                                        info = "⚠️ خطا: ${e.message}"
+                                                    }
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) { Text("🔍 فعالیت", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
+                                        Button(
+                                            onClick = {
+                                                try {
+                                                    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                                                        .setPrimaryClip(ClipData.newPlainText("addr", t.addr))
+                                                    info = "📋 آدرس کپی شد"
+                                                } catch (_: Exception) { info = "⚠️ کپی ناموفق" }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) { Text("📋", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
+                                        Button(
+                                            onClick = { 
+                                                try {
+                                                    TraderStore.remove(context, t.addr)
+                                                    refresh()
+                                                    info = "🗑 تریدر حذف شد"
+                                                } catch (e: Exception) {
+                                                    info = "⚠️ خطا در حذف: ${e.message}"
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Negative.copy(alpha = 0.25f), contentColor = PumpWatchPalette.Text),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) { Text("🗑", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
