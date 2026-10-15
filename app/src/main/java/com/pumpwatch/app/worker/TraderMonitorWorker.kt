@@ -10,20 +10,11 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.pumpwatch.app.data.TraderStore
+import com.pumpwatch.app.engine.NotificationGuard
 import kotlinx.coroutines.delay
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-/**
- * 🚀 Sprint 16 — Worker بررسی فعالیت تاپ تریدرها
- * 🚀 Commit 71 (فاز ۱ — بند ۱۱): تفکیک transient vs terminal errors
- *
- * هر ۱۵ دقیقه ولت‌های ردیابی‌شده (با هشدار روشن) را چک می‌کند.
- * اگر فعالیت جدیدی دید: ثبت + نوتیفیکیشن.
- *
- * ⚠️ `delay(300)` بین هر تریدر عمدی است: Solana RPC rate limit را دور می‌زند.
- *    این ۶ ثانیه worker را می‌گیرد، ولی ANR نمی‌دهد چون background است.
- */
 class TraderMonitorWorker(
     private val ctx: Context,
     params: WorkerParameters
@@ -31,11 +22,9 @@ class TraderMonitorWorker(
 
     companion object {
         private const val TAG = "TraderMonitorWorker"
+        // 🚀 Commit 8: هر تراکنش فقط یک بار نوتیفیکیشن می‌گیرد
+        private const val DEDUP_WINDOW_MS = 24L * 3_600_000L
 
-        /**
-         * 🚀 Commit 71: تشخیص خطای موقتی از قطعی (بند ۱۱).
-         * (همان منطق MonitorWorker — کپی شده برای استقلال هر worker)
-         */
         internal fun isTransient(e: Throwable): Boolean {
             val name = e::class.java.simpleName
             val msg = (e.message ?: "").lowercase(Locale.US)
@@ -70,16 +59,17 @@ class TraderMonitorWorker(
                 val act = TraderStore.checkNewActivity(ctx, t)
                 if (act != null) {
                     TraderStore.markSeen(ctx, t.addr, act.ts, act.txId)
-                    TraderStore.notify(ctx, t, act)
+                    // 🚀 Commit 8: dedup بر اساس txId + شمارش پوشش
+                    val key = "trader_${t.addr}_${act.txId}"
+                    if (NotificationGuard.shouldDeliver(ctx, key, DEDUP_WINDOW_MS)) {
+                        TraderStore.notify(ctx, t, act)
+                        NotificationGuard.recordDelivered(ctx, key)
+                    }
                 }
-                // ⚠️ delay(300) عمدی: Solana RPC rate limit
-                // ۲۰ تریدر × ۳۰۰ms = ۶ ثانیه worker را می‌گیرد
-                // ولی ANR نمی‌دهد چون background است و WorkManager محدودیت ۱۰ دقیقه دارد
                 delay(300)
             }
             Result.success()
         } catch (e: Exception) {
-            // 🚀 Commit 71 (بند ۱۱): تفکیک transient vs terminal
             if (isTransient(e)) {
                 Log.w(TAG, "Transient error (network/rate-limit), will retry", e)
                 Result.retry()
