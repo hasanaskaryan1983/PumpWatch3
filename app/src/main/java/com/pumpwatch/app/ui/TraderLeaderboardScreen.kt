@@ -17,9 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -348,9 +347,9 @@ fun TraderLeaderboardScreen() {
                                                     info = "📋 آدرس کپی شد"
                                                 } catch (_: Exception) { info = "⚠️ کپی ناموفق" }
                                             },
-                                            modifier = Modifier.size(48.dp)
+                                            modifier = Modifier.size(48.dp).semantics { contentDescription = "کپی آدرس کیف پول ${t.symbol}" }
                                         ) {
-                                            Icon(Icons.Default.ContentCopy, contentDescription = "کپی آدرس کیف پول ${t.symbol}", tint = PumpWatchPalette.Info)
+                                            Text("📋", fontSize = 18.sp)
                                         }
                                         
                                         IconButton(
@@ -363,9 +362,9 @@ fun TraderLeaderboardScreen() {
                                                     info = "⚠️ خطا در حذف: ${e.message}"
                                                 }
                                             },
-                                            modifier = Modifier.size(48.dp)
+                                            modifier = Modifier.size(48.dp).semantics { contentDescription = "حذف تریدر ${t.symbol} از لیست ردیابی" }
                                         ) {
-                                            Icon(Icons.Default.Delete, contentDescription = "حذف تریدر ${t.symbol} از لیست ردیابی", tint = PumpWatchPalette.Negative)
+                                            Text("🗑", fontSize = 18.sp)
                                         }
                                     }
                                 }
