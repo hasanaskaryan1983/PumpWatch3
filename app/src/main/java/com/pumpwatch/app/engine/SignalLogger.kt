@@ -6,6 +6,7 @@ import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.BinanceClient
 import com.pumpwatch.app.data.GeckoTerminal
+import com.pumpwatch.app.store.StorageGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -63,22 +64,32 @@ data class SignalAccuracyStats(
 )
 
 object SignalLogger {
+    private const val PREFS = "pumpwatch_prefs"
     private const val KEY = "signal_logs"
     private val GSON = Gson()
 
-    fun load(ctx: Context): List<LoggedSignal> = try {
-        val json = ctx.getSharedPreferences("pumpwatch_prefs", 0).getString(KEY, "") ?: ""
-        if (json.isEmpty()) emptyList()
-        else GSON.fromJson(json, object : TypeToken<MutableList<LoggedSignal>>() {}.type) ?: emptyList()
-    } catch (_: Exception) { emptyList() }
+    // 🚀 P1-2: خواندن با مهاجرت + قرنطینه به‌جای حذف بی‌صدا
+    fun load(ctx: Context): List<LoggedSignal> {
+        val p = ctx.getSharedPreferences(PREFS, 0)
+        val raw = p.getString(KEY, "") ?: ""
+        if (raw.isEmpty()) return emptyList()
+        val migrated = StorageGuard.migrateRaw(ctx, PREFS, KEY, raw)
+        return try {
+            GSON.fromJson(migrated, object : TypeToken<MutableList<LoggedSignal>>() {}.type) ?: emptyList()
+        } catch (_: Exception) {
+            StorageGuard.quarantine(ctx, PREFS, KEY, migrated)
+            p.edit().remove(KEY).apply()
+            emptyList()
+        }
+    }
 
     fun save(ctx: Context, logs: List<LoggedSignal>) {
-        ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
+        ctx.getSharedPreferences(PREFS, 0).edit()
             .putString(KEY, GSON.toJson(logs)).apply()
     }
 
     fun clear(ctx: Context) {
-        ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
+        ctx.getSharedPreferences(PREFS, 0).edit()
             .remove(KEY)
             .apply()
     }
@@ -89,10 +100,6 @@ object SignalLogger {
         save(ctx, list.take(200))
     }
 
-    /**
-     * 🚀 Commit 9: پارامتر [nowMs] با پیش‌فرض ساعت واقعی →
-     * کدهای فعلی بدون تغییر می‌مانند، تست‌ها ساعت جعلی تزریق می‌کنند.
-     */
     fun log(ctx: Context, s: LoggedSignal, nowMs: Long = System.currentTimeMillis()): Boolean {
         val list = load(ctx).toMutableList()
         if (isDuplicate(list, s, nowMs)) return false
@@ -101,10 +108,6 @@ object SignalLogger {
         return true
     }
 
-    /**
-     * 🚀 Commit 9: تصمیم ded به‌صورت pure (بدون Context) → قابل تست واحد با FakeClock.
-     * سه لایه: ۱) OPEN هم‌نماد/هم‌جهت ۲) کندل تکراری ۳) پنجرهٔ لغزندهٔ ۱ ساعته
-     */
     fun isDuplicate(existing: List<LoggedSignal>, s: LoggedSignal, now: Long): Boolean =
         existing.any { it.symbol == s.symbol && it.side == s.side && it.status == "OPEN" } ||
                 (s.time > 0 && existing.any { it.symbol == s.symbol && it.side == s.side && it.time == s.time }) ||
@@ -126,7 +129,6 @@ object SignalLogger {
         null
     }
 
-    /** 🚀 Commit 9: پارامتر [nowMs] برای تست انقضا با ساعت جعلی */
     suspend fun evaluate(ctx: Context, logs: List<LoggedSignal>, nowMs: Long = System.currentTimeMillis()): List<LoggedSignal> = withContext(Dispatchers.IO) {
         logs.map { s ->
             if (s.status == "OPEN" && s.time > 0 && nowMs - s.time > 24 * 3600_000L) s.copy(status = "EXP")
