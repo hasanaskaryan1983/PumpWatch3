@@ -3,6 +3,7 @@ package com.pumpwatch.app.engine
 import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.pumpwatch.app.store.StorageGuard
 
 object NotificationGuard {
 
@@ -20,11 +21,20 @@ object NotificationGuard {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, 0)
 
-    private fun loadMap(ctx: Context): MutableMap<String, Long> = try {
-        val json = prefs(ctx).getString(KEY_LAST_TS, "") ?: ""
-        if (json.isEmpty()) mutableMapOf()
-        else GSON.fromJson(json, object : TypeToken<MutableMap<String, Long>>() {}.type) ?: mutableMapOf()
-    } catch (_: Exception) { mutableMapOf() }
+    // 🚀 P1-2: مهاجرت + قرنطینه
+    private fun loadMap(ctx: Context): MutableMap<String, Long> {
+        val p = prefs(ctx)
+        val raw = p.getString(KEY_LAST_TS, "") ?: ""
+        if (raw.isEmpty()) return mutableMapOf()
+        val migrated = StorageGuard.migrateRaw(ctx, PREFS, KEY_LAST_TS, raw)
+        return try {
+            GSON.fromJson(migrated, object : TypeToken<MutableMap<String, Long>>() {}.type) ?: mutableMapOf()
+        } catch (_: Exception) {
+            StorageGuard.quarantine(ctx, PREFS, KEY_LAST_TS, migrated)
+            p.edit().remove(KEY_LAST_TS).apply()
+            mutableMapOf()
+        }
+    }
 
     private fun saveMap(ctx: Context, map: Map<String, Long>) {
         prefs(ctx).edit().putString(KEY_LAST_TS, GSON.toJson(map)).apply()
@@ -35,11 +45,9 @@ object NotificationGuard {
         p.edit().putInt(key, p.getInt(key, 0) + 1).apply()
     }
 
-    /** 🚀 Commit 9: تصمیم سرکوب به‌صورت pure → قابل تست با FakeClock */
     fun isSuppressed(lastTs: Long, nowMs: Long, windowMs: Long): Boolean =
         lastTs > 0L && nowMs - lastTs < windowMs
 
-    /** 🚀 Commit 9: پارامتر [nowMs] با پیش‌فرض ساعت واقعی */
     fun shouldDeliver(ctx: Context, key: String, windowMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean {
         val last = loadMap(ctx)[key] ?: 0L
         return if (isSuppressed(last, nowMs, windowMs)) {
