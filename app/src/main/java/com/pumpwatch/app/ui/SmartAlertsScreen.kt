@@ -47,6 +47,7 @@ import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
+import com.pumpwatch.app.engine.Validators
 import com.pumpwatch.app.ui.components.AlertCard
 import com.pumpwatch.app.ui.components.AlertView
 import com.pumpwatch.app.ui.components.GlassCard
@@ -263,9 +264,13 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                             )
                             Button(
                                 onClick = {
-                                    val thr = ruleThreshold.trim().toDoubleOrNull()
-                                    if (thr == null) ruleMsg = "❌ آستانه باید عدد باشد"
+                                    // 🚀 P1-1: اعتبارسنجی دقیق نماد و آستانه
+                                    val symErr = Validators.validateRuleSymbol(ruleSymbol.trim())
+                                    val thrErr = Validators.validateThreshold(ruleThreshold.trim())
+                                    if (symErr != null) ruleMsg = "❌ $symErr"
+                                    else if (thrErr != null) ruleMsg = "❌ $thrErr"
                                     else {
+                                        val thr = ruleThreshold.trim().toDouble()
                                         AlertRulesStore.add(ctx, ruleSymbol.trim().uppercase(Locale.US).ifEmpty { "*" }, ruleCondition, thr)
                                         reloadRules(); ruleSymbol = ""; ruleThreshold = ""; ruleMsg = "✅ اضافه شد"
                                     }
