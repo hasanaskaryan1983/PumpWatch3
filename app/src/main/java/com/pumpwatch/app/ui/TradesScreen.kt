@@ -57,6 +57,7 @@ import com.pumpwatch.app.engine.PositionSizer
 import com.pumpwatch.app.engine.ScoringEngine
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
+import com.pumpwatch.app.store.StorageGuard
 import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -69,11 +70,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.min
 
 private val GSON = Gson()
 
+// 🔧 نگهبان: اگر کمتر از ۵ دقیقه از آخرین اسکن گذشته، با بازکردن تب دوباره اسکن نکن
 private var lastCycleMs = 0L
 
 data class PaperTrade(
@@ -108,23 +109,39 @@ private fun tierOfRank(rank: Int?): String = when (rank) {
     in 51..100 -> "51-100"; in 101..200 -> "101-200"; else -> "201-1000"
 }
 
-private fun loadState(ctx: Context): PaperState = try {
+// 🚀 P1-2: مهاجرت + قرنطینه به‌جای حذف بی‌صدای state کاربر
+private fun loadState(ctx: Context): PaperState {
     val p = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-    val json = p.getString("paper_state", "") ?: ""
-    if (json.isEmpty()) PaperState() else GSON.fromJson(json, PaperState::class.java) ?: PaperState()
-} catch (_: Exception) { PaperState() }
+    val raw = p.getString("paper_state", "") ?: ""
+    if (raw.isEmpty()) return PaperState()
+    val migrated = StorageGuard.migrateRaw(ctx, "pumpwatch_prefs", "paper_state", raw)
+    return try {
+        GSON.fromJson(migrated, PaperState::class.java) ?: PaperState()
+    } catch (_: Exception) {
+        StorageGuard.quarantine(ctx, "pumpwatch_prefs", "paper_state", migrated)
+        p.edit().remove("paper_state").apply()
+        PaperState()
+    }
+}
 
 private fun saveState(ctx: Context, s: PaperState) {
     ctx.getSharedPreferences("pumpwatch_prefs", 0).edit().putString("paper_state", GSON.toJson(s)).apply()
 }
 
+// 🚀 P1-2: مهاجرت + قرنطینه برای تخصیص ربات
 private fun loadAlloc(ctx: Context): MutableMap<String, Int> {
     val def = linkedMapOf("1-10" to 30, "11-50" to 25, "51-100" to 15, "101-200" to 10, "201-1000" to 10, "DEX" to 10)
+    val p = ctx.getSharedPreferences("pumpwatch_prefs", 0)
+    val raw = p.getString("paper_alloc", "") ?: ""
+    if (raw.isEmpty()) return def
+    val migrated = StorageGuard.migrateRaw(ctx, "pumpwatch_prefs", "paper_alloc", raw)
     return try {
-        val p = ctx.getSharedPreferences("pumpwatch_prefs", 0)
-        val json = p.getString("paper_alloc", "") ?: ""
-        if (json.isEmpty()) def else GSON.fromJson(json, object : TypeToken<MutableMap<String, Int>>() {}.type) ?: def
-    } catch (_: Exception) { def }
+        GSON.fromJson(migrated, object : TypeToken<MutableMap<String, Int>>() {}.type) ?: def
+    } catch (_: Exception) {
+        StorageGuard.quarantine(ctx, "pumpwatch_prefs", "paper_alloc", migrated)
+        p.edit().remove("paper_alloc").apply()
+        def
+    }
 }
 
 private fun saveAlloc(ctx: Context, a: Map<String, Int>) {
@@ -350,12 +367,10 @@ fun TradesScreen() {
     val winRate = if (wins + losses > 0) wins * 100.0 / (wins + losses) else 0.0
     val totalPnl = equity() - START_CAPITAL; val allocSum = alloc.values.sum()
 
-    // 🚀 P0 Tab 09: Fresh Gate - بررسی تازگی قیمت
     val priceAgeSec = if (mPriceFetchedAt > 0L) (System.currentTimeMillis() - mPriceFetchedAt) / 1000L else -1L
     val isPriceStale = priceAgeSec > 60
 
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // 🚀 P0 Tab 09: عنوان خنثی + subtitle صادقانه
         EditorialPageHeader(
             eyebrow = "PAPER · SIMULATION",
             title = "شبیه‌ساز معاملات و ژورنال",
@@ -363,10 +378,9 @@ fun TradesScreen() {
             accent = PumpWatchPalette.TabTrade
         )
 
-        // 🚀 P0 Tab 09: Disclaimer شفاف شبیه‌سازی
         GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("⚠️ سلب مسئولیت شبیه‌سازی", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = PumpWatchPalette.Warning)
+                Text("️ سلب مسئولیت شبیه‌سازی", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = PumpWatchPalette.Warning)
                 Text(
                     "• این محیط کاملاً شبیه‌سازی‌شده است و هیچ پول واقعی در کار نیست.\n" +
                     "• PnL نمایش‌داده‌شده «ناخالص» (Gross) است؛ اسلیپیج واقعی، کارمزد دقیق و Funding Rate منظور نشده‌اند.\n" +
@@ -380,7 +394,6 @@ fun TradesScreen() {
         }
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // 🚀 P0 Tab 09: تغییر ادبیات "ربات" به "شبیه‌ساز خودکار"
             Text("شبیه‌ساز خودکار:", fontSize = 12.sp, color = PumpWatchPalette.Muted)
             Switch(
                 checked = botOn,
@@ -451,7 +464,7 @@ fun TradesScreen() {
                 GlassCard(accent = PumpWatchPalette.TabTrade, modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) { Text(pk.symbol, fontWeight = FontWeight.Black, fontSize = 14.sp, color = PumpWatchPalette.Text); Text(if (pk.isDex) " (${pk.chain ?: "DEX"})" else " #${pk.rank}", fontSize = 10.sp, color = PumpWatchPalette.Muted); Spacer(Modifier.weight(1f)); Text("${pk.total}/100", fontSize = 16.sp, fontWeight = FontWeight.Black, color = if (pk.total >= 80) PumpWatchPalette.Positive else if (pk.total >= 65) PumpWatchPalette.Warning else PumpWatchPalette.Muted) }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) PumpWatchPalette.Positive else PumpWatchPalette.Muted); Text("📊 فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) PumpWatchPalette.Positive else if (pk.whaleRatio > 0) PumpWatchPalette.Negative else PumpWatchPalette.Muted); Text("⚡ س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative) }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("📈 روند: ${pk.trend}", fontSize = 10.sp, color = if (pk.trend >= 65) PumpWatchPalette.Positive else PumpWatchPalette.Muted); Text(" فشار DEX: ${String.format(Locale.US, "%.0f", pk.whaleRatio * 100)}٪", fontSize = 10.sp, color = if (pk.whaleRatio >= 0.6) PumpWatchPalette.Positive else if (pk.whaleRatio > 0) PumpWatchPalette.Negative else PumpWatchPalette.Muted); Text("⚡ س: ${String.format(Locale.US, "%+.1f%%", pk.ch24)}", fontSize = 10.sp, color = if (pk.ch24 >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative) }
                         if (!pk.isDex) Text("🕯️ کندل‌ها: ${klineSourceLabel(BinanceClient.api.lastSource(pk.symbol))} • موتور امتیاز: ScoringEngine v1", fontSize = 8.sp, color = PumpWatchPalette.MutedDim)
                         realWhale[pk.symbol]?.let { rw -> Text("📊 جریان حجم بالا (${rw.sourceLabel()}): ${String.format(Locale.US, "%.0f", rw.buyRatio * 100)}٪ خرید • ${rw.whaleTrades} معاملهٔ بالای ${compactUsd(rw.adaptiveThresholdUsed)}", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (rw.buyRatio >= 0.6) PumpWatchPalette.Positive else if (rw.buyRatio <= 0.4) PumpWatchPalette.Negative else PumpWatchPalette.Muted) }
                         if (pk.total >= 80) Text("🎯 هم‌گرایی چند منبع — بررسی دقیق", fontSize = 9.sp, color = PumpWatchPalette.Positive, fontWeight = FontWeight.Bold)
@@ -471,7 +484,7 @@ fun TradesScreen() {
 
             GlassCard(accent = PumpWatchPalette.TabTrade, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("➕ ثبت موقعیت دستی (خودت انتخاب کن)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
+                    Text(" ثبت موقعیت دستی (خودت انتخاب کن)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextField(
                             value = mSymbol, onValueChange = { mSymbol = it },
@@ -498,7 +511,7 @@ fun TradesScreen() {
                     if (mStatus.isNotEmpty()) Text(mStatus, fontSize = 10.sp, color = if (mStatus.contains("✅")) PumpWatchPalette.Positive else if (mStatus.contains("❌") || mStatus.contains("⚠️")) PumpWatchPalette.Negative else PumpWatchPalette.Muted)
                     if (mPrice != null && isPriceStale) {
                         Surface(color = PumpWatchPalette.Warning.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
-                            Text("⏰ قیمت بیش از ۶۰ ثانیه پیش دریافت شده — برای ثبت موقعیت، دوباره قیمت را تازه‌سازی کنید.", fontSize = 9.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
+                            Text(" قیمت بیش از ۶۰ ثانیه پیش دریافت شده — برای ثبت موقعیت، دوباره قیمت را تازه‌سازی کنید.", fontSize = 9.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -545,7 +558,6 @@ fun TradesScreen() {
 
             GlassCard(accent = PumpWatchPalette.TabTrade, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // 🚀 P0 Tab 09: تغییر "ربات" به "شبیه‌ساز خودکار"
                     Text("⚙️ تقسیم‌بندی دارایی شبیه‌ساز خودکار (مجموع: $allocSum٪)", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PumpWatchPalette.Text)
                     TIERS.forEach { (name, _) ->
                         val v = alloc[name] ?: 0
@@ -557,11 +569,11 @@ fun TradesScreen() {
                             Spacer(Modifier.weight(1f)); Text("≤${MAX_PER_TIER} پوزیشن", fontSize = 9.sp, color = PumpWatchPalette.MutedDim)
                         }
                     }
-                    if (allocSum != 100) Text("💡 مجموع رو روی ۱۰۰٪ تنظیم کن (الان $allocSum٪)", fontSize = 9.sp, color = PumpWatchPalette.Warning)
+                    if (allocSum != 100) Text("💡 مجموع رو روی ۱۰٪ تنظیم کن (الان $allocSum٪)", fontSize = 9.sp, color = PumpWatchPalette.Warning)
                 }
             }
 
-            Text("📂 پوزیشن‌های آزمایشی باز (${openTrades().size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
+            Text(" پوزیشن‌های آزمایشی باز (${openTrades().size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
             if (openTrades().isEmpty()) Text("هنوز موقعیتی ثبت نشده", fontSize = 11.sp, color = PumpWatchPalette.Muted)
             openTrades().forEach { t ->
                 val pnl = if (t.entry > 0) (t.price - t.entry) / t.entry * 100 else 0.0
@@ -578,7 +590,7 @@ fun TradesScreen() {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("ورود: ${usd(t.entry)}", fontSize = 9.sp, color = PumpWatchPalette.Muted); Text("الان: ${usd(t.price)}", fontSize = 9.sp, color = PumpWatchPalette.Muted); Text("استاپ: ${usd(t.stop)}", fontSize = 9.sp, color = PumpWatchPalette.Negative); Text(if (t.target > 0) "هدف: ${usd(t.target)}" else "هدف: 🏃 آزاد", fontSize = 9.sp, color = PumpWatchPalette.Positive) }
                         if (t.target < 0) Text("🏃 حالت دونده: سود قفل شده، تا برگشت روند ادامه می‌ده", fontSize = 9.sp, color = PumpWatchPalette.Warning)
                         Button(
-                            onClick = { closeTrade(t, t.price); save(); status = "✋ ${t.symbol} دستی بسته شد" },
+                            onClick = { closeTrade(t, t.price); save(); status = " ${t.symbol} دستی بسته شد" },
                             colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Negative.copy(alpha = 0.25f), contentColor = PumpWatchPalette.Text),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -587,7 +599,7 @@ fun TradesScreen() {
                 }
             }
 
-            Text("📜 آخرین موقعیت‌های بسته‌شده:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
+            Text(" آخرین موقعیت‌های بسته‌شده:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = PumpWatchPalette.Text)
             if (closed.isEmpty()) Text("هنوز موقعیتی بسته نشده", fontSize = 11.sp, color = PumpWatchPalette.Muted)
             closed.sortedByDescending { it.closeTime }.take(15).forEach { t ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -595,7 +607,7 @@ fun TradesScreen() {
                     Text(String.format(Locale.US, "%+.2f%%", t.pnl), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (t.pnl > 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative)
                 }
             }
-            Text("⚠️ محیط شبیه‌سازی — پول واقعی در کار نیست.", fontSize = 9.sp, color = PumpWatchPalette.Warning)
+            Text("️ محیط شبیه‌سازی — پول واقعی در کار نیست.", fontSize = 9.sp, color = PumpWatchPalette.Warning)
         }
     }
 }
@@ -631,7 +643,7 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("📊 خلاصهٔ عملکرد (ناخالص)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Text)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Stat("کل موقعیت‌ها", "${closed.size}", PumpWatchPalette.Muted); Stat("✅ برد", "${wins.size}", PumpWatchPalette.Positive); Stat("❌ باخت", "${losses.size}", PumpWatchPalette.Negative) }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Stat("وین‌ریت", String.format(Locale.US, "%.1f%%", winRate), if (winRate >= 50) PumpWatchPalette.Positive else PumpWatchPalette.Negative); Stat("Profit Factor", if (profitFactor.isInfinite()) "∞" else String.format(Locale.US, "%.2f", profitFactor), if (profitFactor >= 1.5) PumpWatchPalette.Positive else if (profitFactor >= 1.0) PumpWatchPalette.Warning else PumpWatchPalette.Negative); Stat("Max DD", String.format(Locale.US, "%.1f%%", maxDD), if (maxDD < 15) PumpWatchPalette.Positive else if (maxDD < 30) PumpWatchPalette.Warning else PumpWatchPalette.Negative) }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Stat("وین‌ریت", String.format(Locale.US, "%.1f%%", winRate), if (winRate >= 50) PumpWatchPalette.Positive else PumpWatchPalette.Negative); Stat("Profit Factor", if (profitFactor.isInfinite()) "" else String.format(Locale.US, "%.2f", profitFactor), if (profitFactor >= 1.5) PumpWatchPalette.Positive else if (profitFactor >= 1.0) PumpWatchPalette.Warning else PumpWatchPalette.Negative); Stat("Max DD", String.format(Locale.US, "%.1f%%", maxDD), if (maxDD < 15) PumpWatchPalette.Positive else if (maxDD < 30) PumpWatchPalette.Warning else PumpWatchPalette.Negative) }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Stat("میانگین تغییر قیمت", String.format(Locale.US, "%+.2f%%", avgPnl), if (avgPnl >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative); Stat("امید ریاضی", String.format(Locale.US, "%+.2f%%", expectancy), if (expectancy > 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative); Stat("تغییر کل", String.format(Locale.US, "%+.2f$", totalPnlUsd), if (totalPnlUsd >= 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative) }
                 }
             }
@@ -654,7 +666,7 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
             if (monthly.isNotEmpty()) {
                 GlassCard(accent = PumpWatchPalette.TabTrade, modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🗓️ Heatmap ماهانه (تغییر قیمت $)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Text)
+                        Text("️ Heatmap ماهانه (تغییر قیمت $)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Text)
                         val maxAbs = monthly.maxOfOrNull { abs(it.pnlPct) }?.coerceAtLeast(1.0) ?: 1.0
                         monthly.chunked(4).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -682,7 +694,7 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                     }
                 }
             }
-            Text("📋 ۳۰ موقعیت اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Purple)
+            Text("📋 ۳ موقعیت اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Purple)
             closed.sortedByDescending { it.closeTime }.take(30).forEach { t ->
                 GlassCard(accent = PumpWatchPalette.TabTrade, modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
