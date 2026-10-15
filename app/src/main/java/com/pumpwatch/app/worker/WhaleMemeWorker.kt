@@ -11,24 +11,16 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.pumpwatch.app.MainActivity
 import com.pumpwatch.app.data.FollowedWhalesStore
-// 🚀 Commit 153: مهاجرت از bridge منسوخ data.WatchlistStore به store.WatchlistStore
 import com.pumpwatch.app.store.WatchlistStore
 import com.pumpwatch.app.engine.MemeRadar
 import com.pumpwatch.app.engine.MemeSignal
+import com.pumpwatch.app.engine.NotificationGuard
 import com.pumpwatch.app.engine.WhaleFlowEngine
 import com.pumpwatch.app.engine.WhaleFlowResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-/**
- * 🚀 Commit 91 (A5) + Commit 93 (7.1): Worker پس‌زمینه برای نهنگ و میم.
- * هر ۱۵ دقیقه اجرا می‌شود و در صورت یافتن سیگنال قوی، نوتیفیکیشن ارسال می‌کند.
- *
- * 🚀 Commit 153: مهاجرت به store.WatchlistStore (رمزنگاری‌شده)
- * قبلاً از bridge منسوخ data.WatchlistStore استفاده می‌کرد که فقط plaintext می‌خواند.
- * حالا از store رمزنگاری‌شده می‌خواند که منبع واحد حقیقت است.
- */
 class WhaleMemeWorker(
     context: Context,
     params: WorkerParameters
@@ -41,13 +33,15 @@ class WhaleMemeWorker(
         private const val NOTIFICATION_ID_WHALE = 1001
         private const val NOTIFICATION_ID_MEME = 1002
         private const val NOTIFICATION_ID_FOLLOWED = 1003
+        // 🚀 Commit 8: پنجرهٔ dedup شش‌ساعته برای هر رویداد
+        private const val DEDUP_WINDOW_MS = 6L * 3_600_000L
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
             checkWhaleAlerts()
             checkMemeAlerts()
-            checkFollowedWhalesAlerts() // 🚀 Commit 93: چک نهنگ‌های دنبال‌شده
+            checkFollowedWhalesAlerts()
             Result.success()
         } catch (e: Exception) {
             Result.retry()
@@ -55,8 +49,6 @@ class WhaleMemeWorker(
     }
 
     private suspend fun checkWhaleAlerts() {
-        // 🚀 Commit 153: خواندن از store رمزنگاری‌شده (به‌جای bridge منسوخ)
-        // loadGroups همهٔ گروه‌ها را برمی‌گرداند؛ flatMap همهٔ ارزها را استخراج می‌کند
         val watchlist = WatchlistStore.loadGroups(applicationContext).flatMap { it.coins }
         if (watchlist.isEmpty()) return
 
@@ -70,10 +62,14 @@ class WhaleMemeWorker(
                 if (result.pressure == WhaleFlowEngine.PRESSURE_ACCUMULATION ||
                     result.pressure == WhaleFlowEngine.PRESSURE_DISTRIBUTION
                 ) {
-                    sendWhaleNotification(coin.symbol, result)
+                    // 🚀 Commit 8: dedup در سطح تحویل
+                    val key = "whale_${coin.symbol}_${result.pressure}"
+                    if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                        sendWhaleNotification(coin.symbol, result)
+                        NotificationGuard.recordDelivered(applicationContext, key)
+                    }
                 }
             } catch (_: Exception) {
-                // خطای یک توکن نباید بقیه را متوقف کند
             }
         }
     }
@@ -84,14 +80,17 @@ class WhaleMemeWorker(
             val highScoreSignals = signals.filter { it.score >= 80 }
 
             if (highScoreSignals.isNotEmpty()) {
-                sendMemeNotification(highScoreSignals.take(3))
+                // 🚀 Commit 8: dedup بر اساس مجموعهٔ نمادها
+                val key = "meme_" + highScoreSignals.joinToString("_") { it.symbol }
+                if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                    sendMemeNotification(highScoreSignals.take(3))
+                    NotificationGuard.recordDelivered(applicationContext, key)
+                }
             }
         } catch (_: Exception) {
-            // خطا در اسکن میم نباید worker را شکست دهد
         }
     }
 
-    // 🚀 Commit 93: چک نهنگ‌های دنبال‌شده (بر اساس فعالیت تجمعی نماد)
     private suspend fun checkFollowedWhalesAlerts() {
         val followedWhales = FollowedWhalesStore.load(applicationContext)
         if (followedWhales.isEmpty()) return
@@ -103,12 +102,15 @@ class WhaleMemeWorker(
                     limit = 1000
                 ) ?: continue
 
-                // اگر فعالیت نهنگی وجود دارد و بزرگ‌ترین معامله از آستانه بیشتر است
                 if (result.whaleTrades > 0 && result.largestTrade >= whale.alertThreshold) {
-                    sendFollowedWhaleNotification(whale, result)
+                    // 🚀 Commit 8: dedup برای هر نماد دنبال‌شده
+                    val key = "fwhale_${whale.symbol}"
+                    if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                        sendFollowedWhaleNotification(whale, result)
+                        NotificationGuard.recordDelivered(applicationContext, key)
+                    }
                 }
             } catch (_: Exception) {
-                // خطای یک نماد نباید بقیه را متوقف کند
             }
         }
     }
@@ -139,9 +141,8 @@ class WhaleMemeWorker(
         sendNotification(NOTIFICATION_ID_MEME, title, body)
     }
 
-    // 🚀 Commit 93: نوتیفیکیشن برای فعالیت نهنگی در نماد دنبال‌شده
     private fun sendFollowedWhaleNotification(
-        whale: com.pumpwatch.app.data.FollowedWhale, 
+        whale: com.pumpwatch.app.data.FollowedWhale,
         result: WhaleFlowResult
     ) {
         val title = "🐳 فعالیت نهنگی در نماد دنبال‌شده: ${whale.symbol}"
