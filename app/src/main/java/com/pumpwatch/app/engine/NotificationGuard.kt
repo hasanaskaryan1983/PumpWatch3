@@ -4,17 +4,6 @@ import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 
-/**
- * 🚀 P0 Commit 8: لایهٔ dedup در سطح «تحویل نوتیفیکیشن» + گزارش پوشش.
- *
- * تفاوت با dedupهای قبلی:
- *   - SignalLogger.log() جلوی ثبت تکراری «سیگنال» را می‌گیرد
- *   - AlertRulesStore.inCooldown() جلوی تکرار «قانون» را می‌گیرد
- *   - این لایه جلوی تکرار «تحویل نوتیفیکیشن» برای همان رویداد را می‌گیرد
- *     (مثلاً WhaleMemeWorker که قبلاً هر ۱۵ دقیقه یک نوتیفیکیشن تکراری می‌فرستاد)
- *
- * پوشش (Coverage): شمارندهٔ delivered / suppressed برای گزارش شفاف به کاربر.
- */
 object NotificationGuard {
 
     private const val PREFS = "pumpwatch_prefs"
@@ -46,23 +35,22 @@ object NotificationGuard {
         p.edit().putInt(key, p.getInt(key, 0) + 1).apply()
     }
 
-    /**
-     * آیا نوتیفیکیشن این رویداد باید تحویل شود؟
-     * اگر همان [key] داخل [windowMs] قبلاً تحویل شده → سرکوب (و شمارش suppressed).
-     */
-    fun shouldDeliver(ctx: Context, key: String, windowMs: Long): Boolean {
-        val now = System.currentTimeMillis()
+    /** 🚀 Commit 9: تصمیم سرکوب به‌صورت pure → قابل تست با FakeClock */
+    fun isSuppressed(lastTs: Long, nowMs: Long, windowMs: Long): Boolean =
+        lastTs > 0L && nowMs - lastTs < windowMs
+
+    /** 🚀 Commit 9: پارامتر [nowMs] با پیش‌فرض ساعت واقعی */
+    fun shouldDeliver(ctx: Context, key: String, windowMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean {
         val last = loadMap(ctx)[key] ?: 0L
-        return if (last > 0L && now - last < windowMs) {
+        return if (isSuppressed(last, nowMs, windowMs)) {
             bump(ctx, KEY_SUPPRESSED)
             false
         } else true
     }
 
-    /** فقط پس از موفقیت ارسال صدا زده شود */
-    fun recordDelivered(ctx: Context, key: String) {
+    fun recordDelivered(ctx: Context, key: String, nowMs: Long = System.currentTimeMillis()) {
         val map = loadMap(ctx)
-        map[key] = System.currentTimeMillis()
+        map[key] = nowMs
         if (map.size > MAX_KEYS) {
             val keep = map.entries.sortedByDescending { it.value }.take(MAX_KEYS)
             map.clear()
