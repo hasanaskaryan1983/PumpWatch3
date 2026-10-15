@@ -25,6 +25,7 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.DataEnvelope
 import com.pumpwatch.app.data.DataStatus
 import com.pumpwatch.app.data.ServedFrom
+import com.pumpwatch.app.engine.Validators
 import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -203,7 +204,7 @@ fun WatchlistScreen(onCoinClick: (CoinMarket) -> Unit = {}) {
                     }
                 }
                 is WatchlistMarketState.Loading -> Text("… در حال دریافت دادهٔ بازار", fontSize = 9.sp, color = PumpWatchPalette.Muted, modifier = Modifier.weight(1f))
-                is WatchlistMarketState.Unavailable -> Text("⚠️ دادهٔ بازار در دسترس نیست: ${st.reason}", fontSize = 9.sp, color = PumpWatchPalette.Warning, modifier = Modifier.weight(1f))
+                is WatchlistMarketState.Unavailable -> Text("⚠️ داده بازار در دسترس نیست: ${st.reason}", fontSize = 9.sp, color = PumpWatchPalette.Warning, modifier = Modifier.weight(1f))
                 is WatchlistMarketState.Idle -> Text("دادهٔ بازار بارگذاری نشده", fontSize = 9.sp, color = PumpWatchPalette.Muted, modifier = Modifier.weight(1f))
             }
             TextButton(onClick = { refreshPrices() }, enabled = marketState !is WatchlistMarketState.Loading) {
@@ -437,6 +438,8 @@ private fun ManageAlertDialog(
 ) {
     var alertPrice by remember { mutableStateOf("") }
     var selectedCondition by remember { mutableStateOf(AlertCondition.ABOVE) }
+    // 🚀 P1-1: پیام خطای اعتبارسنجی فرم هشدار
+    var alertErr by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -503,7 +506,7 @@ private fun ManageAlertDialog(
 
                 TextField(
                     value = alertPrice,
-                    onValueChange = { alertPrice = it },
+                    onValueChange = { alertPrice = it; alertErr = null },
                     placeholder = {
                         Text(
                             if (selectedCondition == AlertCondition.CHANGE_UP || selectedCondition == AlertCondition.CHANGE_DOWN) "درصد را وارد کنید" else "قیمت را وارد کنید"
@@ -511,18 +514,27 @@ private fun ManageAlertDialog(
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
+                // 🚀 P1-1: نمایش خطای اعتبارسنجی
+                if (alertErr != null) {
+                    Text("❌ $alertErr", fontSize = 9.sp, color = PumpWatchPalette.Negative, fontWeight = FontWeight.Bold)
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    alertPrice.toDoubleOrNull()?.let { price ->
-                        onAlertAdded(PriceAlert(id = System.currentTimeMillis().toString(), condition = selectedCondition, price = price, isActive = true))
-                        alertPrice = ""
-                    }
+                    // 🚀 P1-1: اعتبارسنجی دقیق بر اساس نوع شرط
+                    val err = if (selectedCondition == AlertCondition.CHANGE_UP || selectedCondition == AlertCondition.CHANGE_DOWN)
+                        Validators.validatePercent(alertPrice)
+                    else
+                        Validators.validatePositivePrice(alertPrice)
+                    if (err != null) { alertErr = err; return@Button }
+                    alertErr = null
+                    val price = alertPrice.trim().toDouble()
+                    onAlertAdded(PriceAlert(id = System.currentTimeMillis().toString(), condition = selectedCondition, price = price, isActive = true))
+                    alertPrice = ""
                 },
-                // 🚀 Fail-closed: دکمه وقتی داده خوانا/تازه نیست غیرفعال است
-                enabled = allowMutation && alertPrice.toDoubleOrNull() != null
+                enabled = allowMutation && alertPrice.trim().isNotEmpty()
             ) { Text("افزودن هشدار") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("بستن") } }
