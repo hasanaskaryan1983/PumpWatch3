@@ -49,12 +49,11 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.maxOf
+import kotlin.math.max
 
 private fun fmtAmt(d: Double): String = String.format(Locale.US, "%.4f", d)
 private fun fmtUsd(d: Double): String = String.format(Locale.US, "$%,.2f", d)
 
-// 🚀 P0 Tab 10: وضعیت تایپ‌شده برای مدیریت داده‌ها
 internal sealed class LeaderboardLoadState {
     object Loading : LeaderboardLoadState()
     data class Loaded(val traders: List<TraderProfile>) : LeaderboardLoadState()
@@ -88,7 +87,6 @@ fun TraderLeaderboardScreen() {
     LaunchedEffect(Unit) { refresh() }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // 🚀 P0 Tab 10: عنوان و subtitle خنثی + سلب مسئولیت
         EditorialPageHeader(
             eyebrow = "TRACKER · LOCAL RANKING",
             title = "رتبه‌بندی تریدرهای ردیابی‌شده",
@@ -96,15 +94,9 @@ fun TraderLeaderboardScreen() {
             accent = PumpWatchPalette.TabLeaderboard
         )
 
-        // 🚀 P0 Tab 10: Disclaimer شفاف ریسک کپی‌تریدینگ
         GlassCard(accent = PumpWatchPalette.Warning, modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "⚠️ سلب مسئولیت ریسک کپی‌تریدینگ",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
-                    color = PumpWatchPalette.Warning
-                )
+                Text("⚠️ سلب مسئولیت ریسک کپی‌تریدینگ", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = PumpWatchPalette.Warning)
                 Text(
                     "• این لیست «۵۰ برتر جهانی» نیست؛ فقط تریدرهایی که شما در این اپ ردیابی کرده‌اید.\n" +
                     "• PnL نمایش‌داده‌شده تقریبی است و ورود واقعی آن‌چین را تأیید نمی‌کند.\n" +
@@ -118,7 +110,6 @@ fun TraderLeaderboardScreen() {
             }
         }
 
-        // فرم افزودن تریدر جدید
         GlassCard(accent = PumpWatchPalette.TabLeaderboard, modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("➕ افزودن تریدر به لیست ردیابی", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = PumpWatchPalette.Text)
@@ -182,7 +173,6 @@ fun TraderLeaderboardScreen() {
             }
         }
 
-        // 🚀 P0 Tab 10: وضعیت تایپ‌شده (Loading/Loaded/Unreadable)
         when (val state = loadState) {
             is LeaderboardLoadState.Loading -> {
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -217,7 +207,6 @@ fun TraderLeaderboardScreen() {
                         }
                     }
                 } else {
-                    // 🚀 P0 Tab 10: شفافیت درباره ماهیت داده‌ها و بازهٔ زمانی
                     Surface(color = PumpWatchPalette.Info.copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
                         Text(
                             "📊 ${traders.size} تریدر در لیست شما • رتبه‌بندی بر اساس امتیاز محلی (حجم خرید/فروش، تعداد پامپ، ضریب)\n" +
@@ -234,7 +223,6 @@ fun TraderLeaderboardScreen() {
                             val pos = positions[t.addr]
                             GlassCard(accent = PumpWatchPalette.TabLeaderboard, modifier = Modifier.fillMaxWidth()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    // 🚀 P0 Tab 10: زبان خنثی (حذف 🐋 نهنگ و "تاپ")
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text("#${idx + 1}", fontSize = 14.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Warning)
                                         Spacer(Modifier.width(6.dp))
