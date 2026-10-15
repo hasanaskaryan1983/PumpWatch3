@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.OpenPosition
 import com.pumpwatch.app.data.TraderProfile
 import com.pumpwatch.app.data.TraderStore
+import com.pumpwatch.app.engine.Validators
 import com.pumpwatch.app.ui.EditorialPageHeader
 import com.pumpwatch.app.ui.PumpWatchPalette
 import com.pumpwatch.app.ui.components.GlassCard
@@ -144,9 +145,22 @@ fun TraderLeaderboardScreen() {
                 )
                 Button(
                     onClick = {
+                        // 🚀 P1-1: اعتبارسنجی دقیق آدرس/نماد/mint/قیمت
                         val a = addr.trim(); val s = symbol.trim().uppercase(Locale.US)
-                        if (a.length < 20) { info = "❌ آدرس معتبر نیست"; return@Button }
-                        if (s.isEmpty()) { info = "❌ نماد را وارد کنید"; return@Button }
+                        val addrErr = Validators.validateWalletAddress(a)
+                        if (addrErr != null) { info = "❌ $addrErr"; return@Button }
+                        val symErr = Validators.validateSymbol(s)
+                        if (symErr != null) { info = "❌ $symErr"; return@Button }
+                        val mintTrim = mint.trim()
+                        if (mintTrim.isNotEmpty()) {
+                            val mErr = Validators.validateContractMint(mintTrim, Validators.detectChainFamily(a))
+                            if (mErr != null) { info = "❌ $mErr"; return@Button }
+                        }
+                        val entryTrim = entryText.trim()
+                        if (entryTrim.isNotEmpty()) {
+                            val eErr = Validators.validatePositivePrice(entryTrim)
+                            if (eErr != null) { info = "❌ $eErr"; return@Button }
+                        }
                         try {
                             TraderStore.upsert(
                                 context, TraderProfile(
@@ -154,8 +168,8 @@ fun TraderLeaderboardScreen() {
                                     addedAtMs = System.currentTimeMillis(), lastSeenTs = 0L, lastTxId = "",
                                     boughtUsd = 0.0, maxSingleUsd = 0.0, soldUsd = 0.0, txCount = 0,
                                     multiplier = 0.0, pumpsCount = 0, alertOn = true,
-                                    mint = mint.trim().takeIf { it.isNotEmpty() },
-                                    entryPrice = entryText.trim().toDoubleOrNull()
+                                    mint = mintTrim.takeIf { it.isNotEmpty() },
+                                    entryPrice = entryTrim.toDoubleOrNull()
                                 )
                             )
                             addr = ""; symbol = ""; mint = ""; entryText = ""
@@ -231,7 +245,7 @@ fun TraderLeaderboardScreen() {
                                         Text("امتیاز: ${TraderStore.scoreOf(t)}", fontSize = 12.sp, fontWeight = FontWeight.Black, color = PumpWatchPalette.Info)
                                     }
                                     Text("${t.symbol} • ${t.note} • زنجیره: ${t.chain}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
-                                    
+
                                     Text("حجم خرید: ${fmtUsd(t.boughtUsd)} • بزرگ‌ترین تراکنش: ${fmtUsd(t.maxSingleUsd)} • حجم فروش: ${fmtUsd(t.soldUsd)} • ${t.txCount} تراکنش", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                                     Text("تعداد پامپ: ${t.pumpsCount} • ضریب: ${String.format(Locale.US, "%.1f", t.multiplier)}x • آخرین فعالیت: ${if (t.lastSeenTs > 0) sdf.format(Date(t.lastSeenTs)) else "بررسی نشده"}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
 
@@ -258,7 +272,7 @@ fun TraderLeaderboardScreen() {
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                         FilterChip(
                                             selected = t.alertOn,
-                                            onClick = { 
+                                            onClick = {
                                                 try {
                                                     TraderStore.setAlert(context, t.addr, !t.alertOn)
                                                     refresh()
@@ -328,7 +342,7 @@ fun TraderLeaderboardScreen() {
                                             shape = RoundedCornerShape(6.dp)
                                         ) { Text("📋", fontSize = 9.sp, fontWeight = FontWeight.Medium) }
                                         Button(
-                                            onClick = { 
+                                            onClick = {
                                                 try {
                                                     TraderStore.remove(context, t.addr)
                                                     refresh()
