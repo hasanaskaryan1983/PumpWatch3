@@ -1,6 +1,6 @@
 package com.pumpwatch.app.testing
 
-import com.pumpwatch.app.data.ApiClient
+import com.pumpwatch.app.data.SingleFlight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -11,11 +11,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
+/**
+ * 🚀 P1-4: تست‌های هم‌زمانی (Concurrency Tests)
+ * اثبات می‌کند که الگوی SingleFlight جلوی اجرای موازی درخواست‌های تکراری را می‌گیرد.
+ */
 class ConcurrencyTest {
 
     @Test
     fun `SingleFlight prevents concurrent execution of same request`() = runBlocking {
-        val singleFlight = ApiClient.SingleFlight<String>()
+        val singleFlight = SingleFlight<String>()
         val executionCount = AtomicInteger(0)
 
         val results = (1..5).map {
@@ -35,7 +39,7 @@ class ConcurrencyTest {
 
     @Test
     fun `SingleFlight propagates exceptions to all waiting coroutines`() = runBlocking {
-        val singleFlight = ApiClient.SingleFlight<String>()
+        val singleFlight = SingleFlight<String>()
         val executionCount = AtomicInteger(0)
 
         val results = (1..3).map {
@@ -60,7 +64,7 @@ class ConcurrencyTest {
 
     @Test
     fun `SingleFlight allows sequential requests after completion`() = runBlocking {
-        val singleFlight = ApiClient.SingleFlight<String>()
+        val singleFlight = SingleFlight<String>()
         val executionCount = AtomicInteger(0)
 
         val first = singleFlight.joinOrRun {
