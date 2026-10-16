@@ -21,6 +21,7 @@ import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.NotificationGuard
 import com.pumpwatch.app.engine.ParamsStore
 import com.pumpwatch.app.engine.RuleCondition
+import com.pumpwatch.app.engine.SignalFormulaStore
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.engine.SignalResult
 import com.pumpwatch.app.engine.SmartAlertEngine
@@ -37,15 +38,14 @@ class MonitorWorker(
     companion object {
         private const val CHANNEL_ID = "pumpwatch_monitor"
         private const val CHANNEL_RULES = "pumpwatch_rules"
-        private const val CHANNEL_SMART = "pumpwatch_smart" // 🚀 P3-1: کانال جدید
+        private const val CHANNEL_SMART = "pumpwatch_smart"
         private const val MIN_SCORE = 70
         private const val MAX_RULE_ALERTS_PER_RUN = 3
-        private const val MAX_SMART_ALERTS_PER_RUN = 3 // 🚀 P3-1
+        private const val MAX_SMART_ALERTS_PER_RUN = 3
         private const val TAG = "MonitorWorker"
         // 🚀 Commit 8: پنجرهٔ dedup یک‌ساعته (لایهٔ دوم روی dedup سیگنال/قانون)
         private const val DEDUP_WINDOW_MS = 3_600_000L
         // 🚀 P3-1: پنجرهٔ dedup طولانی‌تر برای سیگنال‌های هوشمند (۶ ساعت)
-        // این سیگنال‌ها کم‌تر اتفاق می‌افتند و نباید کاربر را اسپم کنند
         private const val SMART_DEDUP_WINDOW_MS = 21_600_000L
 
         const val KEY_MODE = "mode"
@@ -179,13 +179,14 @@ class MonitorWorker(
         }
     }
 
-    // 🚀 P3-1: ارزیابی سیگنال‌های هوشمند بازار در پس‌زمینه
+    // 🚀 P3-1 + P3-3: ارزیابی سیگنال‌های هوشمند بازار در پس‌زمینه با فرمول سفارشی کاربر
     private suspend fun evaluateSmartAlerts() {
         val strategies = CustomStrategiesStore.load(applicationContext)
-        val hasActiveStrategy = strategies.any { it.isEnabled }
 
-        // از داده‌های کش شده استفاده می‌کنیم تا درخواست شبکهٔ اضافی نزنیم
-        // این مهم‌ترین اصل بهینه‌سازی مصرف باتری/شبکه است
+        // 🚀 P3-3: بارگذاری فرمول سفارشی کاربر (اگر ذخیره نشده باشد، DEFAULT برگردانده می‌شود)
+        val formula = SignalFormulaStore.load(applicationContext)
+
+        // از داده‌های کش شده استفاده می‌کنیم تا درخواست شبکهٔ اضافی نزنیم (بهینه‌سازی باتری)
         val coins = try {
             withContext(Dispatchers.IO) {
                 MarketHub.ensure(force = false)
@@ -205,13 +206,13 @@ class MonitorWorker(
         var alertsSent = 0
         val worthySignals = coins
             .mapNotNull { SmartAlertEngine.evalCoin(it, strategies) }
-            .filter { SmartAlertEngine.isAlertWorthy(it) }
+            .filter { SmartAlertEngine.isAlertWorthy(it) && SmartAlertEngine.passesFormula(it.coin, it, formula) }
             .sortedByDescending { it.score }
 
         for (eval in worthySignals) {
             if (alertsSent >= MAX_SMART_ALERTS_PER_RUN) break
 
-            // کلید dedup: ترکیبی از نماد + side + روز (برای اینکه همان سیگنال ۶ ساعت تکرار نشود)
+            // کلید dedup: ترکیبی از نماد + side + بازهٔ ۶ ساعته
             val key = "smart_${eval.coin.id}_${eval.side}_${System.currentTimeMillis() / SMART_DEDUP_WINDOW_MS}"
             if (!NotificationGuard.shouldDeliver(applicationContext, key, SMART_DEDUP_WINDOW_MS)) {
                 continue
