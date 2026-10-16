@@ -235,8 +235,9 @@ fun TraderLeaderboardScreen() {
                         )
                     }
 
+                    // 🚀 P1-5: اضافه کردن key پایدار برای جلوگیری از Recomposition کل لیست
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
-                        itemsIndexed(traders) { idx, t ->
+                        itemsIndexed(traders, key = { _, t -> t.addr }) { idx, t ->
                             val pos = positions[t.addr]
                             GlassCard(accent = PumpWatchPalette.TabLeaderboard, modifier = Modifier.fillMaxWidth()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -256,7 +257,7 @@ fun TraderLeaderboardScreen() {
                                         t.mint.isNullOrBlank() -> Text("📊 موقعیت: بررسی نمی‌شود (کانترکت توکن ثبت نشده)", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                                         pos == null -> Text("📊 موقعیت: بررسی نشده", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                                         pos.amount > 0.0 -> Text("🟢 موقعیت باز: ${fmtAmt(pos.amount)} ${t.symbol} ≈ ${fmtUsd(pos.valueUsd)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Positive)
-                                        else -> Text("🔴 بدون موقعیت باز", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
+                                        else -> Text(" بدون موقعیت باز", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Negative)
                                     }
 
                                     val entry = t.entryPrice
@@ -337,7 +338,7 @@ fun TraderLeaderboardScreen() {
                                             colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text),
                                             shape = RoundedCornerShape(6.dp),
                                             modifier = Modifier.heightIn(min = 48.dp)
-                                        ) { Text("🔍 فعالیت", fontSize = 10.sp, fontWeight = FontWeight.Medium) }
+                                        ) { Text(" فعالیت", fontSize = 10.sp, fontWeight = FontWeight.Medium) }
                                         
                                         IconButton(
                                             onClick = {
