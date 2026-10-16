@@ -26,6 +26,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -75,7 +76,6 @@ import kotlin.math.abs
 import kotlin.math.min
 
 private val GSON = Gson()
-
 private var lastCycleMs = 0L
 
 data class PaperTrade(
@@ -97,7 +97,6 @@ private data class ConsensusPick(
 private data class TierStats(val count: Int, val wins: Int, val pnlPct: Double, val pnlUsd: Double, val winRate: Double)
 private data class MonthlyPnl(val key: String, val label: String, val pnlPct: Double, val count: Int)
 
-// 🚀 P1-5: ساختار داده برای کش کردن محاسبات ژورنال
 private data class JournalStats(
     val closed: List<PaperTrade>,
     val wins: List<PaperTrade>,
@@ -213,6 +212,34 @@ private fun computeTierStats(closed: List<PaperTrade>): Map<String, TierStats> =
         TierStats(list.size, wins, list.sumOf { it.pnl }, list.sumOf { it.pnl * it.sizeUsd / 100.0 },
             if (list.isEmpty()) 0.0 else wins * 100.0 / list.size)
     }
+
+// 🚀 P2-3: موتور تولید بینش هوشمند (Smart Insights Engine)
+private fun generateSmartInsight(stats: JournalStats): String {
+    if (stats.closed.size < 3) return "📈 حداقل ۳ معامله بسته‌شده نیاز است تا بینش هوشمند تولید شود."
+    
+    // ۱. بررسی ریسک (Max Drawdown)
+    if (stats.maxDD > 25.0) {
+        return "⚠️ حداکثر افت سرمایه (Max DD) شما ${String.format(Locale.US, "%.1f", stats.maxDD)}٪ است. پیشنهاد: حجم هر معامله را ۳۰٪ کاهش دهید."
+    }
+    
+    // ۲. بررسی کیفیت استراتژی (Profit Factor)
+    if (stats.profitFactor >= 1.5 && stats.winRate < 45.0) {
+        return "💡 استراتژی شما با وجود وین‌ریت پایین، سودده است (PF > 1.5). به سیستم اعتماد کنید و اجازه دهید سودها رشد کنند."
+    }
+    
+    // ۳. بررسی بهترین دسته (Tier)
+    val bestTier = stats.tierStats.maxByOrNull { it.value.pnlUsd }?.key
+    if (bestTier != null && stats.tierStats[bestTier]?.winRate ?: 0.0 >= 60.0) {
+        return "💡 شما در دسته «$bestTier» عملکرد بهتری دارید (وین‌ریت ${String.format(Locale.US, "%.0f", stats.tierStats[bestTier]?.winRate ?: 0.0)}٪). تمرکز خود را اینجا حفظ کنید."
+    }
+    
+    // ۴. بررسی امید ریاضی (Expectancy)
+    if (stats.expectancy > 0.5) {
+        return "✅ سیستم شما امید ریاضی مثبت قوی دارد. به قوانین ورود و خروج خود پایبند بمانید."
+    }
+    
+    return "📊 در حال جمع‌آوری داده‌های بیشتر برای تحلیل دقیق‌تر الگوی معاملاتی شما..."
+}
 
 @Composable
 fun TradesScreen() {
@@ -449,7 +476,12 @@ fun TradesScreen() {
                 modifier = Modifier.weight(1f)
             ) { Text("📓 ژورنال", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
         }
-        if (journalTab) { JournalContent(state.trades) } else {
+        
+        if (journalTab) { 
+            Column(modifier = Modifier.fillMaxWidth()) {
+                JournalContent(state.trades)
+            }
+        } else {
             GlassCard(accent = PumpWatchPalette.TabTrade, modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -530,7 +562,7 @@ fun TradesScreen() {
                             shape = RoundedCornerShape(8.dp)
                         ) { Text("💲 قیمت", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     }
-                    if (mStatus.isNotEmpty()) Text(mStatus, fontSize = 10.sp, color = if (mStatus.contains("✅")) PumpWatchPalette.Positive else if (mStatus.contains("") || mStatus.contains("⚠️")) PumpWatchPalette.Negative else PumpWatchPalette.Muted)
+                    if (mStatus.isNotEmpty()) Text(mStatus, fontSize = 10.sp, color = if (mStatus.contains("✅")) PumpWatchPalette.Positive else if (mStatus.contains("❌") || mStatus.contains("⚠️")) PumpWatchPalette.Negative else PumpWatchPalette.Muted)
                     if (mPrice != null && isPriceStale) {
                         Surface(color = PumpWatchPalette.Warning.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
                             Text(" قیمت بیش از ۶۰ ثانیه پیش دریافت شده — برای ثبت موقعیت، دوباره قیمت را تازه‌سازی کنید.", fontSize = 9.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold, modifier = Modifier.padding(8.dp))
@@ -634,7 +666,6 @@ fun TradesScreen() {
     }
 }
 
-// 🚀 P1-5: تابع JournalContent با کش کردن محاسبات سنگین
 @Composable
 private fun JournalContent(allTrades: List<PaperTrade>) {
     val stats = remember(allTrades) {
@@ -683,6 +714,18 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 🚀 P2-3: کارت بینش هوشمند عملکرد (Smart Insight)
+        GlassCard(accent = PumpWatchPalette.Purple, modifier = Modifier.fillMaxWidth()) {
+            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                Text("💡", fontSize = 20.sp, modifier = Modifier.padding(end = 8.dp))
+                Column {
+                    Text("بینش هوشمند عملکرد", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                    Spacer(Modifier.height(4.dp))
+                    Text(generateSmartInsight(stats), fontSize = 11.sp, color = PumpWatchPalette.Muted, lineHeight = 16.sp)
+                }
+            }
+        }
+
         Text("📓 ژورنال عملکرد شبیه‌سازی (${stats.closed.size} موقعیت بسته‌شده)", fontWeight = FontWeight.Black, fontSize = 15.sp, color = PumpWatchPalette.Purple)
         if (stats.closed.isEmpty()) {
             GlassCard(accent = PumpWatchPalette.TabTrade, modifier = Modifier.fillMaxWidth()) {
@@ -746,9 +789,8 @@ private fun JournalContent(allTrades: List<PaperTrade>) {
                     }
                 }
             }
-            Text("📋 ۰ موقعیت اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Purple)
+            Text("📋 ۳۰ موقعیت اخیر (جزئیات کامل)", fontWeight = FontWeight.Black, fontSize = 13.sp, color = PumpWatchPalette.Purple)
             
-            // 🚀 P1-5: استفاده از LazyColumn با key به جای forEach برای ۳۰ آیتم آخر
             val recentTrades = remember(stats.closed) { stats.closed.sortedByDescending { it.closeTime }.take(30) }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                 items(recentTrades, key = { it.openTime.toString() + it.symbol }) { t ->
