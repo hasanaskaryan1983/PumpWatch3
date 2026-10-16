@@ -27,6 +27,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -149,18 +150,24 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     val dataAgeSec = (System.currentTimeMillis() - loadTimeMs) / 1000L
     val isDataStale = dataAgeSec > 300
 
-    val alerts = if (isDataStale) emptyList() else coins
-        .mapNotNull { evalCoin(it) }
-        .filter { ev ->
-            val severity = when { ev.score >= 70 -> 3; ev.score >= 50 -> 2; else -> 1 }
-            when (filter) {
-                "HOT" -> severity == 3
-                "MID" -> severity == 2
-                "EARLY" -> ev.early
-                else -> true
-            }
+    // 🚀 P1-5: استفاده از derivedStateOf برای جلوگیری از محاسبهٔ مکرر و غیرضروری لیست
+    val alerts by remember(isDataStale, coins, filter) {
+        derivedStateOf {
+            if (isDataStale) emptyList()
+            else coins
+                .mapNotNull { evalCoin(it) }
+                .filter { ev ->
+                    val severity = when { ev.score >= 70 -> 3; ev.score >= 50 -> 2; else -> 1 }
+                    when (filter) {
+                        "HOT" -> severity == 3
+                        "MID" -> severity == 2
+                        "EARLY" -> ev.early
+                        else -> true
+                    }
+                }
+                .sortedByDescending { it.score }
         }
-        .sortedByDescending { it.score }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -191,7 +198,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 FilterChip(
                     selected = openPanel == "RULES",
                     onClick = { openPanel = if (openPanel == "RULES") null else "RULES" },
-                    label = { Text("🔔 قوانین (${rules.size})", fontSize = 10.sp) },
+                    label = { Text(" قوانین (${rules.size})", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
                 )
             }
@@ -225,7 +232,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (rules.isEmpty()) {
-                            Text("هنوز قانونی تعریف نشده. مثال: BTC بالای ۷۰۰۰", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                            Text("هنوز قانونی تعریف نشده. مثال: BTC بالای ۷۰۰", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                         } else {
                             rules.take(4).forEach { r ->
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -264,7 +271,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                             )
                             Button(
                                 onClick = {
-                                    // 🚀 P1-1: اعتبارسنجی دقیق نماد و آستانه
                                     val symErr = Validators.validateRuleSymbol(ruleSymbol.trim())
                                     val thrErr = Validators.validateThreshold(ruleThreshold.trim())
                                     if (symErr != null) ruleMsg = "❌ $symErr"
@@ -291,7 +297,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
                 FilterChip(selected = filter == "MID", onClick = { filter = "MID" }, label = { Text("⚠️ متوسط", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
-                FilterChip(selected = filter == "EARLY", onClick = { filter = "EARLY" }, label = { Text("👀 زودهنگام", fontSize = 10.sp) },
+                FilterChip(selected = filter == "EARLY", onClick = { filter = "EARLY" }, label = { Text(" زودهنگام", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
             }
         }
@@ -313,7 +319,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 Text(errorMsg ?: "", color = PumpWatchPalette.Negative, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center)
             }
             alerts.isEmpty() && !isDataStale -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("😴 در بازهٔ فعلی دارایی منطبق با فیلتر یافت نشد؛ بازار آرام است.", color = PumpWatchPalette.Muted, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center, fontSize = 11.sp)
+                Text(" در بازهٔ فعلی دارایی منطبق با فیلتر یافت نشد؛ بازار آرام است.", color = PumpWatchPalette.Muted, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center, fontSize = 11.sp)
             }
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
