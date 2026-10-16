@@ -5,13 +5,13 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * 🚀 P3-1: موتور مشترک ارزیابی سیگنال‌های هوشمند.
+ * 🚀 P3-1 + P3-3: موتور مشترک ارزیابی سیگنال‌های هوشمند.
  *
- * این موتور در دو جا استفاده می‌شود:
- *   ۱. SmartAlertsScreen (UI) — برای نمایش به کاربر
- *   ۲. MonitorWorker (پس‌زمینه) — برای ارسال اعلان‌ها
+ * استفاده‌کنندگان:
+ *   ۱. SmartAlertsScreen (UI)
+ *   ۲. MonitorWorker (پس‌زمینه)
  *
- * یک منبع واحد از حقیقت برای منطق امتیازدهی و تطابق استراتژی‌ها.
+ * یک منبع واحد از حقیقت برای منطق امتیازدهی، تطابق استراتژی و فرمول سفارشی.
  */
 object SmartAlertEngine {
 
@@ -26,8 +26,6 @@ object SmartAlertEngine {
 
     /**
      * ارزیابی یک سکه در برابر الگوهای شتاب/حجم + استراتژی‌های فعال.
-     *
-     * @return AlertEval اگر امتیاز ≥ ۵ باشد، در غیر این صورت null
      */
     fun evalCoin(c: CoinMarket, strategies: List<CustomStrategy>): AlertEval? {
         val c1 = c.change1h ?: 0.0
@@ -62,7 +60,6 @@ object SmartAlertEngine {
         if (score < 35) return null
         val early = abs(c1) >= 1.5 && abs(c24) < 10
 
-        // تطابق با استراتژی‌های فعال کاربر
         val matched = strategies.filter { it.isEnabled }.filter { s ->
             val scoreMatch = score >= s.minScore
             val changeMatch = if (s.minChange1h < 0) c1 <= s.minChange1h else c1 >= s.minChange1h
@@ -75,12 +72,40 @@ object SmartAlertEngine {
 
     /**
      * آیا این سیگنال ارزش اعلان کردن دارد؟
-     *
-     * معیارها (fail-closed):
-     *   - امتیاز ≥ ۷۰ (severity = 3)
-     *   - یا تطابق با حداقل یک استراتژی فعال
      */
     fun isAlertWorthy(eval: AlertEval): Boolean {
         return eval.score >= 70 || eval.matchedStrategies.isNotEmpty()
+    }
+
+    /**
+     * 🚀 P3-3: آیا سیگنال از فیلترهای فرمول سفارشی کاربر عبور می‌کند؟
+     *
+     * این تابع هم در UI و هم در Worker استفاده می‌شود تا رفتار یکسان باشد.
+     */
+    fun passesFormula(c: CoinMarket, eval: AlertEval, f: SignalFormula): Boolean {
+        if (eval.score < f.minScore) return false
+
+        val c1 = c.change1h ?: 0.0
+        if (abs(c1) < f.minChange1h) return false
+
+        val turnover = if (c.market_cap > 0) c.total_volume / c.market_cap else 0.0
+        if (turnover < f.minVolumeRatio) return false
+
+        val high = c.high24h ?: 0.0
+        val low = c.low24h ?: 0.0
+        val rangePos = if (high > low) (c.current_price - low) / (high - low) else 0.5
+        when (f.rangeMode) {
+            RangeMode.NEAR_HIGH -> if (rangePos < 0.7) return false
+            RangeMode.NEAR_LOW -> if (rangePos > 0.3) return false
+            RangeMode.ANY -> { }
+        }
+
+        when (f.side) {
+            FormulaSide.PUMP -> if (eval.side != "PUMP") return false
+            FormulaSide.DUMP -> if (eval.side != "DUMP") return false
+            FormulaSide.BOTH -> { }
+        }
+
+        return true
     }
 }
