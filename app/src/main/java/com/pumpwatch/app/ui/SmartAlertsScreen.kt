@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,10 +64,10 @@ import kotlin.math.max
 // 🚀 P2-1: ساختار داده برای بینش بازار
 private data class MarketInsights(
     val totalScanned: Int,
-    val lowMomentum: Int,   // تغییر قیمت ۲ ساعته کم
-    val lowVolume: Int,     // نسبت حجم به مارکت کپ کم
-    val lowScore: Int,      // امتیاز الگوریتمی کم
-    val marketMood: String  // آرام / پرنوسان / صعودی / نزولی
+    val lowMomentum: Int,
+    val lowVolume: Int,
+    val lowScore: Int,
+    val marketMood: String
 )
 
 private data class AlertEval(
@@ -98,9 +101,9 @@ private fun evalCoin(c: CoinMarket): AlertEval? {
     val dr = mutableListOf<String>()
     if (c1 <= -1.0) { dump += 25; dr.add("کاهش ۱ ساعته") }
     if (c1 <= -3.0) dump += 15
-    if (c24 in -35.0..-2.0) { dump += 20; dr.add("حرکت منفی ۴ ساعته") }
+    if (c24 in -35.0..-2.0) { dump += 20; dr.add("حرکت منفی ۲۴ ساعته") }
     if (turnover >= 0.15) { dump += 20; dr.add("نسبت حجم به ارزش بازار بالا") }
-    if (rangePos <= 0.15) { dump += 20; dr.add("نزدیک به کف ۴ ساعته") }
+    if (rangePos <= 0.15) { dump += 20; dr.add("نزدیک به کف ۲۴ ساعته") }
     if (c7 < -10) dump += 5
 
     val side = if (pump >= dump) "PUMP" else "DUMP"
@@ -178,7 +181,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    //  P2-1: محاسبه بینش بازار (فقط وقتی coins تغییر می‌کند)
+    // 🚀 P2-1: محاسبه بینش بازار (فقط وقتی coins تغییر می‌کند)
     val insights by remember(coins) {
         derivedStateOf {
             if (coins.isEmpty()) null
@@ -270,16 +273,98 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 FilterChip(
                     selected = openPanel == "RULES",
                     onClick = { openPanel = if (openPanel == "RULES") null else "RULES" },
-                    label = { Text(" قوانین (${rules.size})", fontSize = 10.sp) },
+                    label = { Text("🔔 قوانین (${rules.size})", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
                 )
             }
 
-            // ... (بقیه کد پنل‌های Accuracy و Rules و فیلترها دقیقاً مثل قبل) ...
-            // برای کوتاه شدن پیام، بخش‌های تکراری پنل‌ها را حذف کردم. 
-            // در فایل واقعی، تمام کدهای پنل Accuracy، Rules و فیلترهای HOT/MID/EARLY را از نسخه قبلی نگه دارید.
-            
-            // فقط بخش نمایش لیست را اینجا می‌آورم:
+            AnimatedVisibility(visible = openPanel == "ACCURACY") {
+                GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("📊 کارنامهٔ انطباق قوانین", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text, modifier = Modifier.weight(1f))
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        try {
+                                            SignalLogger.clear(ctx)
+                                            resetMsg = "✅ آمار پاک شد"
+                                            delay(2000); resetMsg = null
+                                        } catch (_: Exception) { }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Negative.copy(alpha = 0.3f), contentColor = PumpWatchPalette.Text),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) { Text("🔄 ریست", fontSize = 9.sp) }
+                        }
+                        Text("آمار انطباق بر اساس خروجی‌های واقعی محاسبه می‌شود؛ جزئیات در بخش ژورنال.", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                    }
+                }
+            }
+
+            AnimatedVisibility(visible = openPanel == "RULES") {
+                GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (rules.isEmpty()) {
+                            Text("هنوز قانونی تعریف نشده. مثال: BTC بالای ۷۰۰۰۰", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                        } else {
+                            rules.take(4).forEach { r ->
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("${r.symbol} • ${r.condition.label} ${String.format(Locale.US, "%.4f", r.threshold)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (r.enabled) PumpWatchPalette.Positive else PumpWatchPalette.Muted)
+                                        Text(if (r.enabled) "فعال ✅" else "غیرفعال ⚪", fontSize = 8.sp, color = PumpWatchPalette.Muted)
+                                    }
+                                    Switch(
+                                        checked = r.enabled,
+                                        onCheckedChange = { AlertRulesStore.toggle(ctx, r.id); reloadRules() },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = PumpWatchPalette.Ink, checkedTrackColor = PumpWatchPalette.TabAlerts, uncheckedThumbColor = PumpWatchPalette.Muted, uncheckedTrackColor = PumpWatchPalette.Glass)
+                                    )
+                                    TextButton(onClick = { AlertRulesStore.delete(ctx, r.id); reloadRules() }) { Text("🗑", fontSize = 10.sp) }
+                                }
+                            }
+                            if (rules.size > 4) Text("… و ${rules.size - 4} قانون دیگر", fontSize = 8.sp, color = PumpWatchPalette.Muted)
+                            HorizontalDivider(color = PumpWatchPalette.Border.copy(alpha = 0.3f))
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextField(
+                                value = ruleSymbol, onValueChange = { ruleSymbol = it },
+                                placeholder = { Text("نماد یا *", fontSize = 9.sp) },
+                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true,
+                                colors = TextFieldDefaults.colors(focusedContainerColor = PumpWatchPalette.GlassDeep, unfocusedContainerColor = PumpWatchPalette.GlassDeep, focusedTextColor = PumpWatchPalette.Text, unfocusedTextColor = PumpWatchPalette.Text, cursorColor = PumpWatchPalette.TabAlerts, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                            )
+                            Button(onClick = { conditionDialogOpen = true }, colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text), shape = RoundedCornerShape(8.dp)) {
+                                Text(ruleCondition.label, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TextField(
+                                value = ruleThreshold, onValueChange = { ruleThreshold = it },
+                                placeholder = { Text("آستانه (عدد)", fontSize = 9.sp) },
+                                modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp), singleLine = true,
+                                colors = TextFieldDefaults.colors(focusedContainerColor = PumpWatchPalette.GlassDeep, unfocusedContainerColor = PumpWatchPalette.GlassDeep, focusedTextColor = PumpWatchPalette.Text, unfocusedTextColor = PumpWatchPalette.Text, cursorColor = PumpWatchPalette.TabAlerts, focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                            )
+                            Button(
+                                onClick = {
+                                    val symErr = Validators.validateRuleSymbol(ruleSymbol.trim())
+                                    val thrErr = Validators.validateThreshold(ruleThreshold.trim())
+                                    if (symErr != null) ruleMsg = "❌ $symErr"
+                                    else if (thrErr != null) ruleMsg = "❌ $thrErr"
+                                    else {
+                                        val thr = ruleThreshold.trim().toDouble()
+                                        AlertRulesStore.add(ctx, ruleSymbol.trim().uppercase(Locale.US).ifEmpty { "*" }, ruleCondition, thr)
+                                        reloadRules(); ruleSymbol = ""; ruleThreshold = ""; ruleMsg = "✅ اضافه شد"
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning, contentColor = PumpWatchPalette.Ink),
+                                shape = RoundedCornerShape(8.dp)
+                            ) { Text("➕", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        }
+                        if (ruleMsg.isNotEmpty()) Text(ruleMsg, fontSize = 8.sp, color = if (ruleMsg.startsWith("✅")) PumpWatchPalette.Positive else PumpWatchPalette.Negative)
+                    }
+                }
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = filter == "ALL", onClick = { filter = "ALL" }, label = { Text("همه ${alerts.size}", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
@@ -335,7 +420,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 title = title,
                                 detail = ev.reasons.joinToString(" • "),
                                 rank = ev.coin.market_cap_rank,
-                                emoji = if (isPump) "📈" else "",
+                                emoji = if (isPump) "📈" else "📉",
                                 source = "Rule Engine",
                                 ageSec = dataAgeSec,
                                 contractChain = ref?.chain ?: "ارز بومی / بدون قرارداد هوشمند",
@@ -358,7 +443,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    // ... (کد AlertDialog برای conditionDialogOpen دقیقاً مثل قبل باقی می‌ماند) ...
     if (conditionDialogOpen) {
         AlertDialog(
             onDismissRequest = { conditionDialogOpen = false },
