@@ -9,9 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,6 +47,8 @@ import com.pumpwatch.app.data.CoinMarket
 import com.pumpwatch.app.data.platformContractRef
 import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
+import com.pumpwatch.app.engine.CustomStrategiesStore
+import com.pumpwatch.app.engine.CustomStrategy
 import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.engine.Validators
@@ -61,7 +61,6 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 
-// 🚀 P2-1: ساختار داده برای بینش بازار
 private data class MarketInsights(
     val totalScanned: Int,
     val lowMomentum: Int,
@@ -70,15 +69,17 @@ private data class MarketInsights(
     val marketMood: String
 )
 
+// 🚀 P2-2: اضافه شدن matchedStrategies
 private data class AlertEval(
     val coin: CoinMarket,
     val side: String,
     val score: Int,
     val early: Boolean,
-    val reasons: List<String>
+    val reasons: List<String>,
+    val matchedStrategies: List<String> = emptyList()
 )
 
-private fun evalCoin(c: CoinMarket): AlertEval? {
+private fun evalCoin(c: CoinMarket, strategies: List<CustomStrategy>): AlertEval? {
     val c1 = c.change1h ?: 0.0
     val c24 = c.price_change_percentage_24h ?: 0.0
     val c7 = c.change7d ?: 0.0
@@ -110,7 +111,16 @@ private fun evalCoin(c: CoinMarket): AlertEval? {
     val score = max(pump, dump).coerceAtMost(100)
     if (score < 35) return null
     val early = abs(c1) >= 1.5 && abs(c24) < 10
-    return AlertEval(c, side, score, early, if (pump >= dump) pr else dr)
+
+    // 🚀 P2-2: بررسی تطابق با استراتژی‌های فعال
+    val matched = strategies.filter { it.isEnabled }.filter { s ->
+        val scoreMatch = score >= s.minScore
+        val changeMatch = if (s.minChange1h < 0) c1 <= s.minChange1h else c1 >= s.minChange1h
+        val volMatch = turnover >= s.minVolumeRatio
+        scoreMatch && changeMatch && volMatch
+    }.map { it.name }
+
+    return AlertEval(c, side, score, early, if (pump >= dump) pr else dr, matched)
 }
 
 @Composable
@@ -135,6 +145,9 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var ruleMsg by remember { mutableStateOf("") }
     var conditionDialogOpen by remember { mutableStateOf(false) }
 
+    // 🚀 P2-2: بارگذاری استراتژی‌های سفارشی
+    var strategies by remember { mutableStateOf<List<CustomStrategy>>(CustomStrategiesStore.load(ctx)) }
+
     fun load(force: Boolean = false) {
         scope.launch {
             loading = true
@@ -152,22 +165,28 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    fun reloadRules() { rules = AlertRulesStore.load(ctx) }
+    fun reloadRules() { 
+        rules = AlertRulesStore.load(ctx) 
+    }
+    
+    fun reloadStrategies() {
+        strategies = CustomStrategiesStore.load(ctx)
+    }
 
     LaunchedEffect(Unit) {
         load()
         reloadRules()
+        reloadStrategies()
     }
 
     val dataAgeSec = (System.currentTimeMillis() - loadTimeMs) / 1000L
     val isDataStale = dataAgeSec > 300
 
-    // 🚀 P1-5: بهینه‌سازی با derivedStateOf
-    val alerts by remember(isDataStale, coins, filter) {
+    val alerts by remember(isDataStale, coins, filter, strategies) {
         derivedStateOf {
             if (isDataStale) emptyList()
             else coins
-                .mapNotNull { evalCoin(it) }
+                .mapNotNull { evalCoin(it, strategies) }
                 .filter { ev ->
                     val severity = when { ev.score >= 70 -> 3; ev.score >= 50 -> 2; else -> 1 }
                     when (filter) {
@@ -181,7 +200,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    // 🚀 P2-1: محاسبه بینش بازار (فقط وقتی coins تغییر می‌کند)
     val insights by remember(coins) {
         derivedStateOf {
             if (coins.isEmpty()) null
@@ -196,7 +214,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                     val c24 = c.price_change_percentage_24h ?: 0.0
                     val cap = c.market_cap
                     val turnover = if (cap > 0) c.total_volume / cap else 0.0
-                    val eval = evalCoin(c)
+                    val eval = evalCoin(c, strategies)
                     
                     if (abs(c24) < 1.0) lowMom++
                     if (turnover < 0.05) lowVol++
@@ -241,7 +259,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             )
 
-            // 🚀 P2-1: کارت بینش بازار (Market Insights)
             if (insights != null && !isDataStale) {
                 GlassCard(accent = PumpWatchPalette.Info, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -265,9 +282,9 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(
-                    selected = openPanel == "ACCURACY",
-                    onClick = { openPanel = if (openPanel == "ACCURACY") null else "ACCURACY" },
-                    label = { Text("📊 کارنامه", fontSize = 10.sp) },
+                    selected = openPanel == "STRATEGIES",
+                    onClick = { openPanel = if (openPanel == "STRATEGIES") null else "STRATEGIES" },
+                    label = { Text("🎯 استراتژی‌ها", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
                 )
                 FilterChip(
@@ -278,27 +295,37 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 )
             }
 
-            AnimatedVisibility(visible = openPanel == "ACCURACY") {
+            // 🚀 P2-2: پنل استراتژی‌های سفارشی
+            AnimatedVisibility(visible = openPanel == "STRATEGIES") {
                 GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("📊 کارنامهٔ انطباق قوانین", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text, modifier = Modifier.weight(1f))
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        try {
-                                            SignalLogger.clear(ctx)
-                                            resetMsg = "✅ آمار پاک شد"
-                                            delay(2000); resetMsg = null
-                                        } catch (_: Exception) { }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Negative.copy(alpha = 0.3f), contentColor = PumpWatchPalette.Text),
-                                shape = RoundedCornerShape(6.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) { Text("🔄 ریست", fontSize = 9.sp) }
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("استراتژی‌های از پیش تعریف‌شده را فعال کنید تا سیگنال‌های منطبق با بج ویژه نمایش داده شوند:", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                        strategies.forEach { strategy ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(strategy.name, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                                    Text(strategy.description, fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                                }
+                                Switch(
+                                    checked = strategy.isEnabled,
+                                    onCheckedChange = { 
+                                        CustomStrategiesStore.toggle(ctx, strategy.id)
+                                        reloadStrategies()
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PumpWatchPalette.Ink,
+                                        checkedTrackColor = PumpWatchPalette.TabAlerts,
+                                        uncheckedThumbColor = PumpWatchPalette.Muted,
+                                        uncheckedTrackColor = PumpWatchPalette.Glass
+                                    )
+                                )
+                            }
+                            HorizontalDivider(color = PumpWatchPalette.Border.copy(alpha = 0.3f))
                         }
-                        Text("آمار انطباق بر اساس خروجی‌های واقعی محاسبه می‌شود؛ جزئیات در بخش ژورنال.", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                     }
                 }
             }
@@ -428,6 +455,16 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                             ),
                             tabKey = "alerts"
                         )
+                        
+                        // 🚀 P2-2: نمایش بج استراتژی‌های منطبق
+                        if (ev.matchedStrategies.isNotEmpty()) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                ev.matchedStrategies.forEach { strategyName ->
+                                    Text("🎯 $strategyName", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Positive)
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
