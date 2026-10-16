@@ -5,6 +5,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -53,10 +55,13 @@ import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.CustomStrategiesStore
 import com.pumpwatch.app.engine.CustomStrategy
+import com.pumpwatch.app.engine.FormulaSide
+import com.pumpwatch.app.engine.RangeMode
 import com.pumpwatch.app.engine.RuleCondition
+import com.pumpwatch.app.engine.SignalFormula
+import com.pumpwatch.app.engine.SignalFormulaStore
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.engine.SmartAlertEngine
-import com.pumpwatch.app.engine.SmartAlertEngine.AlertEval
 import com.pumpwatch.app.engine.Validators
 import com.pumpwatch.app.ui.components.AlertCard
 import com.pumpwatch.app.ui.components.AlertView
@@ -65,7 +70,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.max
 
 private data class MarketInsights(
     val totalScanned: Int,
@@ -99,6 +103,9 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 
     var strategies by remember { mutableStateOf<List<CustomStrategy>>(CustomStrategiesStore.load(ctx)) }
 
+    // 🚀 P3-3: فرمول سیگنال سفارشی کاربر
+    var formula by remember { mutableStateOf(SignalFormulaStore.load(ctx)) }
+
     fun load(force: Boolean = false) {
         scope.launch {
             loading = true
@@ -116,12 +123,13 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    fun reloadRules() { 
-        rules = AlertRulesStore.load(ctx) 
-    }
-    
-    fun reloadStrategies() {
-        strategies = CustomStrategiesStore.load(ctx)
+    fun reloadRules() { rules = AlertRulesStore.load(ctx) }
+    fun reloadStrategies() { strategies = CustomStrategiesStore.load(ctx) }
+
+    // 🚀 P3-3: helper برای ذخیرهٔ فرمول پس از هر تغییر
+    fun updateFormula(newFormula: SignalFormula) {
+        formula = newFormula
+        SignalFormulaStore.save(ctx, newFormula)
     }
 
     LaunchedEffect(Unit) {
@@ -133,11 +141,12 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     val dataAgeSec = (System.currentTimeMillis() - loadTimeMs) / 1000L
     val isDataStale = dataAgeSec > 300
 
-    val alerts by remember(isDataStale, coins, filter, strategies) {
+    val alerts by remember(isDataStale, coins, filter, strategies, formula) {
         derivedStateOf {
             if (isDataStale) emptyList()
             else coins
                 .mapNotNull { SmartAlertEngine.evalCoin(it, strategies) }
+                .filter { ev -> SmartAlertEngine.passesFormula(ev.coin, ev, formula) }
                 .filter { ev ->
                     val severity = when { ev.score >= 70 -> 3; ev.score >= 50 -> 2; else -> 1 }
                     when (filter) {
@@ -160,28 +169,28 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 var lowScr = 0
                 var upCount = 0
                 var downCount = 0
-                
+
                 coins.forEach { c ->
                     val c24 = c.price_change_percentage_24h ?: 0.0
                     val cap = c.market_cap
                     val turnover = if (cap > 0) c.total_volume / cap else 0.0
                     val eval = SmartAlertEngine.evalCoin(c, strategies)
-                    
+
                     if (abs(c24) < 1.0) lowMom++
                     if (turnover < 0.05) lowVol++
                     if (eval == null) lowScr++
-                    
+
                     if (c24 > 2.0) upCount++
                     else if (c24 < -2.0) downCount++
                 }
-                
+
                 val mood = when {
                     upCount > coins.size * 0.6 -> "صعودی 🔥"
                     downCount > coins.size * 0.6 -> "نزولی 🩸"
                     upCount + downCount < coins.size * 0.3 -> "رنج و آرام 😴"
                     else -> "مختلط 🌊"
                 }
-                
+
                 MarketInsights(
                     totalScanned = coins.size,
                     lowMomentum = lowMom,
@@ -231,7 +240,16 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 
             if (resetMsg != null) Text(resetMsg ?: "", fontSize = 9.sp, color = PumpWatchPalette.Positive, fontWeight = FontWeight.Bold)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = openPanel == "FORMULA",
+                    onClick = { openPanel = if (openPanel == "FORMULA") null else "FORMULA" },
+                    label = { Text("⚙️ فرمول", fontSize = 10.sp) },
+                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
+                )
                 FilterChip(
                     selected = openPanel == "STRATEGIES",
                     onClick = { openPanel = if (openPanel == "STRATEGIES") null else "STRATEGIES" },
@@ -246,7 +264,82 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 )
             }
 
-            // 🚀 P2-final: انیمیشن نرم برای پنل استراتژی‌ها
+            // 🚀 P3-3: پنل فرمول سیگنال سفارشی + دکمهٔ بازگشت به بهترین تنظیمات
+            AnimatedVisibility(
+                visible = openPanel == "FORMULA",
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("⚙️ فرمول سیگنال سفارشی", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
+                                Text(
+                                    if (formula == SignalFormula.DEFAULT) "✅ تنظیمات استاندارد (بهینه) فعال است"
+                                    else "⚙️ تنظیمات سفارشی فعال است",
+                                    fontSize = 8.sp,
+                                    color = if (formula == SignalFormula.DEFAULT) PumpWatchPalette.Positive else PumpWatchPalette.Warning
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    SignalFormulaStore.resetToDefault(ctx)
+                                    formula = SignalFormula.DEFAULT
+                                },
+                                enabled = formula != SignalFormula.DEFAULT,
+                                colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) { Text("🔄 بازگشت به بهترین", fontSize = 9.sp) }
+                        }
+
+                        FormulaStepper(
+                            label = "حداقل امتیاز موتور",
+                            value = "${formula.minScore}",
+                            onMinus = { updateFormula(formula.copy(minScore = (formula.minScore - 5).coerceAtLeast(0))) },
+                            onPlus = { updateFormula(formula.copy(minScore = (formula.minScore + 5).coerceAtMost(100))) }
+                        )
+                        FormulaStepper(
+                            label = "حداقل تغییر ۱ ساعته (٪)",
+                            value = String.format(Locale.US, "%.1f", formula.minChange1h),
+                            onMinus = { updateFormula(formula.copy(minChange1h = (formula.minChange1h - 0.5).coerceAtLeast(0.0))) },
+                            onPlus = { updateFormula(formula.copy(minChange1h = (formula.minChange1h + 0.5).coerceAtMost(10.0))) }
+                        )
+                        FormulaStepper(
+                            label = "حداقل نسبت حجم/مارکت‌کپ",
+                            value = String.format(Locale.US, "%.2f", formula.minVolumeRatio),
+                            onMinus = { updateFormula(formula.copy(minVolumeRatio = (formula.minVolumeRatio - 0.05).coerceAtLeast(0.0))) },
+                            onPlus = { updateFormula(formula.copy(minVolumeRatio = (formula.minVolumeRatio + 0.05).coerceAtMost(0.5))) }
+                        )
+
+                        Text("محدودهٔ ۲۴ ساعته:", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            RangeMode.values().forEach { rm ->
+                                FilterChip(
+                                    selected = formula.rangeMode == rm,
+                                    onClick = { updateFormula(formula.copy(rangeMode = rm)) },
+                                    label = { Text(rm.label, fontSize = 8.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
+                                )
+                            }
+                        }
+
+                        Text("جهت سیگنال:", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            FormulaSide.values().forEach { fs ->
+                                FilterChip(
+                                    selected = formula.side == fs,
+                                    onClick = { updateFormula(formula.copy(side = fs)) },
+                                    label = { Text(fs.label, fontSize = 8.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             AnimatedVisibility(
                 visible = openPanel == "STRATEGIES",
                 enter = fadeIn() + expandVertically(),
@@ -267,7 +360,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 }
                                 Switch(
                                     checked = strategy.isEnabled,
-                                    onCheckedChange = { 
+                                    onCheckedChange = {
                                         CustomStrategiesStore.toggle(ctx, strategy.id)
                                         reloadStrategies()
                                     },
@@ -285,7 +378,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             }
 
-            // 🚀 P2-final: انیمیشن نرم برای پنل قوانین
             AnimatedVisibility(
                 visible = openPanel == "RULES",
                 enter = fadeIn() + expandVertically(),
@@ -294,7 +386,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (rules.isEmpty()) {
-                            Text("هنوز قانونی تعریف نشده. مثال: BTC بالای ۷۰۰۰۰", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                            Text("هنوز قانونی تعریف نشده. مثال: BTC بالای ۷۰۰۰", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                         } else {
                             rules.take(4).forEach { r ->
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -415,7 +507,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                             ),
                             tabKey = "alerts"
                         )
-                        
+
                         if (ev.matchedStrategies.isNotEmpty()) {
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 ev.matchedStrategies.forEach { strategyName ->
@@ -454,5 +546,16 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
             },
             confirmButton = { Button(onClick = { conditionDialogOpen = false }) { Text("بستن", fontSize = 10.sp) } }
         )
+    }
+}
+
+// 🚀 P3-3: کامپوننت کوچک برای تنظیم اعداد فرمول
+@Composable
+private fun FormulaStepper(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 9.sp, color = PumpWatchPalette.Muted, modifier = Modifier.weight(1f))
+        Button(onClick = onMinus, colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text), shape = RoundedCornerShape(6.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("−", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+        Text(" $value ", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
+        Button(onClick = onPlus, colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text), shape = RoundedCornerShape(6.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)) { Text("+", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
     }
 }
