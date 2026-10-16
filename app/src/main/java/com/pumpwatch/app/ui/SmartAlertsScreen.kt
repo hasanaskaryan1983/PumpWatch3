@@ -13,9 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,6 +55,8 @@ import com.pumpwatch.app.engine.CustomStrategiesStore
 import com.pumpwatch.app.engine.CustomStrategy
 import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
+import com.pumpwatch.app.engine.SmartAlertEngine
+import com.pumpwatch.app.engine.SmartAlertEngine.AlertEval
 import com.pumpwatch.app.engine.Validators
 import com.pumpwatch.app.ui.components.AlertCard
 import com.pumpwatch.app.ui.components.AlertView
@@ -74,58 +74,6 @@ private data class MarketInsights(
     val lowScore: Int,
     val marketMood: String
 )
-
-private data class AlertEval(
-    val coin: CoinMarket,
-    val side: String,
-    val score: Int,
-    val early: Boolean,
-    val reasons: List<String>,
-    val matchedStrategies: List<String> = emptyList()
-)
-
-private fun evalCoin(c: CoinMarket, strategies: List<CustomStrategy>): AlertEval? {
-    val c1 = c.change1h ?: 0.0
-    val c24 = c.price_change_percentage_24h ?: 0.0
-    val c7 = c.change7d ?: 0.0
-    val cap = c.market_cap
-    val turnover = if (cap > 0) c.total_volume / cap else 0.0
-    val high = c.high24h ?: 0.0
-    val low = c.low24h ?: 0.0
-    val rangePos = if (high > low) (c.current_price - low) / (high - low) else 0.5
-
-    var pump = 0
-    val pr = mutableListOf<String>()
-    if (c1 >= 1.0) { pump += 25; pr.add("شتاب  ساعته") }
-    if (c1 >= 3.0) pump += 15
-    if (c24 in 2.0..35.0) { pump += 20; pr.add("حرکت مثبت ۲۴ ساعته") }
-    if (turnover >= 0.15) { pump += 20; pr.add("نسبت حجم به ارزش بازار بالا") }
-    if (rangePos >= 0.85) { pump += 20; pr.add("نزدیک به سقف ۲۴ ساعته") }
-    if (c7 > 10) pump += 5
-
-    var dump = 0
-    val dr = mutableListOf<String>()
-    if (c1 <= -1.0) { dump += 25; dr.add("کاهش ۱ ساعته") }
-    if (c1 <= -3.0) dump += 15
-    if (c24 in -35.0..-2.0) { dump += 20; dr.add("حرکت منفی ۲۴ ساعته") }
-    if (turnover >= 0.15) { dump += 20; dr.add("نسبت حجم به ارزش بازار بالا") }
-    if (rangePos <= 0.15) { dump += 20; dr.add("نزدیک به کف ۲۴ ساعته") }
-    if (c7 < -10) dump += 5
-
-    val side = if (pump >= dump) "PUMP" else "DUMP"
-    val score = max(pump, dump).coerceAtMost(100)
-    if (score < 35) return null
-    val early = abs(c1) >= 1.5 && abs(c24) < 10
-
-    val matched = strategies.filter { it.isEnabled }.filter { s ->
-        val scoreMatch = score >= s.minScore
-        val changeMatch = if (s.minChange1h < 0) c1 <= s.minChange1h else c1 >= s.minChange1h
-        val volMatch = turnover >= s.minVolumeRatio
-        scoreMatch && changeMatch && volMatch
-    }.map { it.name }
-
-    return AlertEval(c, side, score, early, if (pump >= dump) pr else dr, matched)
-}
 
 @Composable
 fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
@@ -189,7 +137,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         derivedStateOf {
             if (isDataStale) emptyList()
             else coins
-                .mapNotNull { evalCoin(it, strategies) }
+                .mapNotNull { SmartAlertEngine.evalCoin(it, strategies) }
                 .filter { ev ->
                     val severity = when { ev.score >= 70 -> 3; ev.score >= 50 -> 2; else -> 1 }
                     when (filter) {
@@ -203,7 +151,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
         }
     }
 
-    val insights by remember(coins) {
+    val insights by remember(coins, strategies) {
         derivedStateOf {
             if (coins.isEmpty()) null
             else {
@@ -217,7 +165,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                     val c24 = c.price_change_percentage_24h ?: 0.0
                     val cap = c.market_cap
                     val turnover = if (cap > 0) c.total_volume / cap else 0.0
-                    val eval = evalCoin(c, strategies)
+                    val eval = SmartAlertEngine.evalCoin(c, strategies)
                     
                     if (abs(c24) < 1.0) lowMom++
                     if (turnover < 0.05) lowVol++
@@ -397,7 +345,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning, contentColor = PumpWatchPalette.Ink),
                                 shape = RoundedCornerShape(8.dp)
-                            ) { Text("", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                            ) { Text("➕", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                         }
                         if (ruleMsg.isNotEmpty()) Text(ruleMsg, fontSize = 8.sp, color = if (ruleMsg.startsWith("✅")) PumpWatchPalette.Positive else PumpWatchPalette.Negative)
                     }
@@ -409,7 +357,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
                 FilterChip(selected = filter == "HOT", onClick = { filter = "HOT" }, label = { Text("🔥 شدید", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
-                FilterChip(selected = filter == "MID", onClick = { filter = "MID" }, label = { Text("️ متوسط", fontSize = 10.sp) },
+                FilterChip(selected = filter == "MID", onClick = { filter = "MID" }, label = { Text("⚠️ متوسط", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
                 FilterChip(selected = filter == "EARLY", onClick = { filter = "EARLY" }, label = { Text("👀 زودهنگام", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
@@ -459,7 +407,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 title = title,
                                 detail = ev.reasons.joinToString(" • "),
                                 rank = ev.coin.market_cap_rank,
-                                emoji = if (isPump) "" else "📉",
+                                emoji = if (isPump) "📈" else "📉",
                                 source = "Rule Engine",
                                 ageSec = dataAgeSec,
                                 contractChain = ref?.chain ?: "ارز بومی / بدون قرارداد هوشمند",
