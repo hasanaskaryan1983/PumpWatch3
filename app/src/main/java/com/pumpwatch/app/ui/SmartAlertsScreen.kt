@@ -1,6 +1,10 @@
 package com.pumpwatch.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,7 +13,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -69,7 +75,6 @@ private data class MarketInsights(
     val marketMood: String
 )
 
-// 🚀 P2-2: اضافه شدن matchedStrategies
 private data class AlertEval(
     val coin: CoinMarket,
     val side: String,
@@ -91,7 +96,7 @@ private fun evalCoin(c: CoinMarket, strategies: List<CustomStrategy>): AlertEval
 
     var pump = 0
     val pr = mutableListOf<String>()
-    if (c1 >= 1.0) { pump += 25; pr.add("شتاب ۱ ساعته") }
+    if (c1 >= 1.0) { pump += 25; pr.add("شتاب  ساعته") }
     if (c1 >= 3.0) pump += 15
     if (c24 in 2.0..35.0) { pump += 20; pr.add("حرکت مثبت ۲۴ ساعته") }
     if (turnover >= 0.15) { pump += 20; pr.add("نسبت حجم به ارزش بازار بالا") }
@@ -112,7 +117,6 @@ private fun evalCoin(c: CoinMarket, strategies: List<CustomStrategy>): AlertEval
     if (score < 35) return null
     val early = abs(c1) >= 1.5 && abs(c24) < 10
 
-    // 🚀 P2-2: بررسی تطابق با استراتژی‌های فعال
     val matched = strategies.filter { it.isEnabled }.filter { s ->
         val scoreMatch = score >= s.minScore
         val changeMatch = if (s.minChange1h < 0) c1 <= s.minChange1h else c1 >= s.minChange1h
@@ -145,7 +149,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     var ruleMsg by remember { mutableStateOf("") }
     var conditionDialogOpen by remember { mutableStateOf(false) }
 
-    // 🚀 P2-2: بارگذاری استراتژی‌های سفارشی
     var strategies by remember { mutableStateOf<List<CustomStrategy>>(CustomStrategiesStore.load(ctx)) }
 
     fun load(force: Boolean = false) {
@@ -295,8 +298,12 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 )
             }
 
-            // 🚀 P2-2: پنل استراتژی‌های سفارشی
-            AnimatedVisibility(visible = openPanel == "STRATEGIES") {
+            // 🚀 P2-final: انیمیشن نرم برای پنل استراتژی‌ها
+            AnimatedVisibility(
+                visible = openPanel == "STRATEGIES",
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
                 GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("استراتژی‌های از پیش تعریف‌شده را فعال کنید تا سیگنال‌های منطبق با بج ویژه نمایش داده شوند:", fontSize = 9.sp, color = PumpWatchPalette.Muted)
@@ -330,7 +337,12 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                 }
             }
 
-            AnimatedVisibility(visible = openPanel == "RULES") {
+            // 🚀 P2-final: انیمیشن نرم برای پنل قوانین
+            AnimatedVisibility(
+                visible = openPanel == "RULES",
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
                 GlassCard(accent = PumpWatchPalette.TabAlerts, modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (rules.isEmpty()) {
@@ -385,7 +397,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning, contentColor = PumpWatchPalette.Ink),
                                 shape = RoundedCornerShape(8.dp)
-                            ) { Text("➕", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                            ) { Text("", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                         }
                         if (ruleMsg.isNotEmpty()) Text(ruleMsg, fontSize = 8.sp, color = if (ruleMsg.startsWith("✅")) PumpWatchPalette.Positive else PumpWatchPalette.Negative)
                     }
@@ -397,7 +409,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
                 FilterChip(selected = filter == "HOT", onClick = { filter = "HOT" }, label = { Text("🔥 شدید", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
-                FilterChip(selected = filter == "MID", onClick = { filter = "MID" }, label = { Text("⚠️ متوسط", fontSize = 10.sp) },
+                FilterChip(selected = filter == "MID", onClick = { filter = "MID" }, label = { Text("️ متوسط", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
                 FilterChip(selected = filter == "EARLY", onClick = { filter = "EARLY" }, label = { Text("👀 زودهنگام", fontSize = 10.sp) },
                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = PumpWatchPalette.TabAlerts, selectedLabelColor = PumpWatchPalette.Ink, containerColor = PumpWatchPalette.Glass, labelColor = PumpWatchPalette.Muted))
@@ -447,7 +459,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 title = title,
                                 detail = ev.reasons.joinToString(" • "),
                                 rank = ev.coin.market_cap_rank,
-                                emoji = if (isPump) "📈" else "📉",
+                                emoji = if (isPump) "" else "📉",
                                 source = "Rule Engine",
                                 ageSec = dataAgeSec,
                                 contractChain = ref?.chain ?: "ارز بومی / بدون قرارداد هوشمند",
@@ -456,7 +468,6 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                             tabKey = "alerts"
                         )
                         
-                        // 🚀 P2-2: نمایش بج استراتژی‌های منطبق
                         if (ev.matchedStrategies.isNotEmpty()) {
                             Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 ev.matchedStrategies.forEach { strategyName ->
