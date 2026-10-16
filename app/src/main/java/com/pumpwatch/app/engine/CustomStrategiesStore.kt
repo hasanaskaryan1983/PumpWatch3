@@ -52,12 +52,23 @@ object CustomStrategiesStore {
     fun load(ctx: Context): List<CustomStrategy> {
         val p = ctx.getSharedPreferences(PREFS, 0)
         val json = p.getString(KEY, null) ?: return defaultStrategies
+        
         return try {
             val type = object : TypeToken<List<CustomStrategy>>() {}.type
-            val loaded = gson.fromJson<List<CustomStrategy>>(json, type)
-            // ادغام با مقادیر پیش‌فرض برای اطمینان از سازگاری در آپدیت‌های آینده
-            defaultStrategies.map { def ->
-                loaded.find { it.id == def.id }?.copy(isEnabled = it.isEnabled) ?: def
+            val loaded: List<CustomStrategy>? = gson.fromJson(json, type)
+            
+            if (loaded.isNullOrEmpty()) {
+                defaultStrategies
+            } else {
+                // 🚀 اصلاح: جلوگیری از تداخل 'it' و مدیریت ایمن null
+                defaultStrategies.map { def ->
+                    val found = loaded.find { strategy -> strategy.id == def.id }
+                    if (found != null) {
+                        def.copy(isEnabled = found.isEnabled)
+                    } else {
+                        def
+                    }
+                }
             }
         } catch (e: Exception) {
             defaultStrategies
