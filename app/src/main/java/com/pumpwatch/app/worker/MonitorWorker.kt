@@ -16,12 +16,15 @@ import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.BatchScanner
+import com.pumpwatch.app.engine.CustomStrategiesStore
 import com.pumpwatch.app.engine.LoggedSignal
 import com.pumpwatch.app.engine.NotificationGuard
 import com.pumpwatch.app.engine.ParamsStore
 import com.pumpwatch.app.engine.RuleCondition
 import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.engine.SignalResult
+import com.pumpwatch.app.engine.SmartAlertEngine
+import com.pumpwatch.app.ui.MarketHub
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -34,11 +37,16 @@ class MonitorWorker(
     companion object {
         private const val CHANNEL_ID = "pumpwatch_monitor"
         private const val CHANNEL_RULES = "pumpwatch_rules"
+        private const val CHANNEL_SMART = "pumpwatch_smart" // 🚀 P3-1: کانال جدید
         private const val MIN_SCORE = 70
         private const val MAX_RULE_ALERTS_PER_RUN = 3
+        private const val MAX_SMART_ALERTS_PER_RUN = 3 // 🚀 P3-1
         private const val TAG = "MonitorWorker"
         // 🚀 Commit 8: پنجرهٔ dedup یک‌ساعته (لایهٔ دوم روی dedup سیگنال/قانون)
         private const val DEDUP_WINDOW_MS = 3_600_000L
+        // 🚀 P3-1: پنجرهٔ dedup طولانی‌تر برای سیگنال‌های هوشمند (۶ ساعت)
+        // این سیگنال‌ها کم‌تر اتفاق می‌افتند و نباید کاربر را اسپم کنند
+        private const val SMART_DEDUP_WINDOW_MS = 21_600_000L
 
         const val KEY_MODE = "mode"
 
@@ -147,6 +155,13 @@ class MonitorWorker(
                 Log.w(TAG, "Watchlist checkAndFire failed (non-critical)", e)
             }
 
+            // 🚀 P3-1: ارزیابی سیگنال‌های هوشمند بازار (SmartAlerts) + استراتژی‌های فعال
+            try {
+                evaluateSmartAlerts()
+            } catch (e: Exception) {
+                Log.w(TAG, "evaluateSmartAlerts failed (non-critical)", e)
+            }
+
             Result.success()
         } catch (e: Exception) {
             if (isTransient(e)) {
@@ -162,6 +177,80 @@ class MonitorWorker(
                 Result.failure()
             }
         }
+    }
+
+    // 🚀 P3-1: ارزیابی سیگنال‌های هوشمند بازار در پس‌زمینه
+    private suspend fun evaluateSmartAlerts() {
+        val strategies = CustomStrategiesStore.load(applicationContext)
+        val hasActiveStrategy = strategies.any { it.isEnabled }
+
+        // از داده‌های کش شده استفاده می‌کنیم تا درخواست شبکهٔ اضافی نزنیم
+        // این مهم‌ترین اصل بهینه‌سازی مصرف باتری/شبکه است
+        val coins = try {
+            withContext(Dispatchers.IO) {
+                MarketHub.ensure(force = false)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MarketHub data unavailable for smart alerts", e)
+            return
+        }
+
+        // اگر دادهٔ بازار کهنه باشد (بیش از ۵ دقیقه)، ارزیابی نمی‌کنیم (fail-closed)
+        val ageSec = (System.currentTimeMillis() - MarketHub.lastUpdateMs) / 1000L
+        if (ageSec > 300) {
+            Log.i(TAG, "Market data too stale (${ageSec}s) for smart alerts — skipping")
+            return
+        }
+
+        var alertsSent = 0
+        val worthySignals = coins
+            .mapNotNull { SmartAlertEngine.evalCoin(it, strategies) }
+            .filter { SmartAlertEngine.isAlertWorthy(it) }
+            .sortedByDescending { it.score }
+
+        for (eval in worthySignals) {
+            if (alertsSent >= MAX_SMART_ALERTS_PER_RUN) break
+
+            // کلید dedup: ترکیبی از نماد + side + روز (برای اینکه همان سیگنال ۶ ساعت تکرار نشود)
+            val key = "smart_${eval.coin.id}_${eval.side}_${System.currentTimeMillis() / SMART_DEDUP_WINDOW_MS}"
+            if (!NotificationGuard.shouldDeliver(applicationContext, key, SMART_DEDUP_WINDOW_MS)) {
+                continue
+            }
+
+            val hasMatched = eval.matchedStrategies.isNotEmpty()
+            val title = buildSmartTitle(eval.coin.symbol.uppercase(Locale.US), eval.side, eval.score, hasMatched)
+            val text = buildSmartText(eval.reasons, eval.matchedStrategies)
+
+            val ok = showSmartNotification(
+                id = 2000 + alertsSent,
+                title = title,
+                text = text
+            )
+
+            if (ok) {
+                NotificationGuard.recordDelivered(applicationContext, key)
+                alertsSent++
+            }
+        }
+
+        if (alertsSent > 0) {
+            Log.i(TAG, "Smart alerts sent: $alertsSent / ${worthySignals.size} worthy signals")
+        }
+    }
+
+    private fun buildSmartTitle(symbol: String, side: String, score: Int, hasMatched: Boolean): String {
+        val icon = if (side == "PUMP") "📈" else "📉"
+        val badge = if (hasMatched) " 🎯" else ""
+        return "$icon ${symbol} — امتیاز ${score}/100$badge"
+    }
+
+    private fun buildSmartText(reasons: List<String>, matchedStrategies: List<String>): String {
+        val sb = StringBuilder()
+        sb.append(reasons.take(3).joinToString(" • "))
+        if (matchedStrategies.isNotEmpty()) {
+            sb.append("\n🎯 منطبق بر: ${matchedStrategies.joinToString("، ")}")
+        }
+        return sb.toString()
     }
 
     private suspend fun evaluateRulesOnFullMarket(mode: String) {
@@ -320,6 +409,55 @@ class MonitorWorker(
             false
         } catch (e: Exception) {
             Log.w(TAG, "Unexpected error on notify", e)
+            false
+        }
+    }
+
+    // 🚀 P3-1: نمایش اعلان سیگنال هوشمند
+    private fun showSmartNotification(id: Int, title: String, text: String): Boolean {
+        if (!canPostNotifications()) {
+            markNotificationsBlocked(true)
+            return false
+        }
+
+        val nm = applicationContext
+            .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // بررسی اینکه آیا کانال از قبل وجود دارد (برای جلوگیری از بازنویسی تنظیمات کاربر)
+            val existing = nm.getNotificationChannel(CHANNEL_SMART)
+            if (existing == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_SMART,
+                        "سیگنال‌های هوشمند بازار 🎯",
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "سیگنال‌های امتیاز بالا و تطابق با استراتژی‌های فعال شما"
+                    }
+                )
+            }
+        }
+
+        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_SMART)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        return try {
+            nm.notify(id, notification)
+            markNotificationsBlocked(false)
+            true
+        } catch (e: SecurityException) {
+            Log.w(TAG, "SecurityException on smart notify (OEM restriction)", e)
+            markNotificationsBlocked(true)
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Unexpected error on smart notify", e)
             false
         }
     }
