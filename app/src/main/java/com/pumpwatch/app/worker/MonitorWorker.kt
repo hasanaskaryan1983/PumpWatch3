@@ -18,6 +18,7 @@ import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.BatchScanner
 import com.pumpwatch.app.engine.CustomStrategiesStore
 import com.pumpwatch.app.engine.LoggedSignal
+import com.pumpwatch.app.engine.MarketHeatStore
 import com.pumpwatch.app.engine.NotificationGuard
 import com.pumpwatch.app.engine.ParamsStore
 import com.pumpwatch.app.engine.RuleCondition
@@ -43,9 +44,7 @@ class MonitorWorker(
         private const val MAX_RULE_ALERTS_PER_RUN = 3
         private const val MAX_SMART_ALERTS_PER_RUN = 3
         private const val TAG = "MonitorWorker"
-        // 🚀 Commit 8: پنجرهٔ dedup یک‌ساعته (لایهٔ دوم روی dedup سیگنال/قانون)
         private const val DEDUP_WINDOW_MS = 3_600_000L
-        // 🚀 P3-1: پنجرهٔ dedup طولانی‌تر برای سیگنال‌های هوشمند (۶ ساعت)
         private const val SMART_DEDUP_WINDOW_MS = 21_600_000L
 
         const val KEY_MODE = "mode"
@@ -87,6 +86,7 @@ class MonitorWorker(
         return try {
             KlineCache.prune()
 
+            // همیشه اجرا می‌شود (ارزان و محلی): به‌روزرسانی سیگنال‌های باز
             try {
                 val currentLogs = SignalLogger.load(applicationContext)
                 val hasOpen = currentLogs.any { it.status == "OPEN" || it.status == "EXP" }
@@ -104,62 +104,76 @@ class MonitorWorker(
                 ?: "SPOT"
             val mode = if (modeRaw == "FUTURES") "FUT" else "SPOT"
 
-            val signalParams = ParamsStore.load(applicationContext)
-            val results = BatchScanner.scan(mode, signalParams, limit = 25)
-            val hot = results.filter { it.side != "NONE" && it.score >= MIN_SCORE }.take(3)
-
-            hot.forEachIndexed { i, r ->
-                val logSide = if (r.side == "PUMP") "BUY" else "SELL"
-                val signalTs = if (r.candleCloseTs > 0L) r.candleCloseTs else System.currentTimeMillis()
-
-                val logged = SignalLogger.log(
-                    applicationContext,
-                    LoggedSignal(
-                        symbol = r.symbol, side = logSide, score = r.score,
-                        entry = r.entry, stop = r.stopLoss, target = r.target1,
-                        time = signalTs, mode = mode
-                    )
+            // 🚀 P3-2: زمان‌بندی تطبیقی — در بازار آرام، اسکن سنگین رد می‌شود
+            val skipHeavy = MarketHeatStore.consumeSkip(applicationContext)
+            if (skipHeavy) {
+                Log.i(
+                    TAG,
+                    "Calm market — heavy scan skipped this run (battery saving). " +
+                        "lastWorthy=${MarketHeatStore.lastWorthy(applicationContext)}"
                 )
+            } else {
+                val signalParams = ParamsStore.load(applicationContext)
+                val results = BatchScanner.scan(mode, signalParams, limit = 25)
+                val hot = results.filter { it.side != "NONE" && it.score >= MIN_SCORE }.take(3)
 
-                if (logged) {
-                    // 🚀 Commit 8: لایهٔ دوم dedup در سطح تحویل
-                    val key = "mon_${mode}_${r.symbol}_${logSide}_${signalTs}"
-                    if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
-                        val ok = showNotification(
-                            id = 1000 + i,
-                            title = "${if (r.side == "PUMP") "🚀 پامپ" else "🩸 دامپ"} ${r.symbol} — ${r.score}/100 ${if (r.golden) "🏅" else ""} 📡",
-                            text = String.format(
-                                Locale.US, "ورود: %.6f | استاپ: %.6f | هدف: %.6f",
-                                r.entry, r.stopLoss, r.target1
-                            )
+                hot.forEachIndexed { i, r ->
+                    val logSide = if (r.side == "PUMP") "BUY" else "SELL"
+                    val signalTs = if (r.candleCloseTs > 0L) r.candleCloseTs else System.currentTimeMillis()
+
+                    val logged = SignalLogger.log(
+                        applicationContext,
+                        LoggedSignal(
+                            symbol = r.symbol, side = logSide, score = r.score,
+                            entry = r.entry, stop = r.stopLoss, target = r.target1,
+                            time = signalTs, mode = mode
                         )
-                        if (ok) {
-                            NotificationGuard.recordDelivered(applicationContext, key)
-                        } else {
-                            Log.w(TAG, "Notification delivery failed for ${r.symbol}")
+                    )
+
+                    if (logged) {
+                        val key = "mon_${mode}_${r.symbol}_${logSide}_${signalTs}"
+                        if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                            val ok = showNotification(
+                                id = 1000 + i,
+                                title = "${if (r.side == "PUMP") "🚀 پامپ" else "🩸 دامپ"} ${r.symbol} — ${r.score}/100 ${if (r.golden) "🏅" else ""} 📡",
+                                text = String.format(
+                                    Locale.US, "ورود: %.6f | استاپ: %.6f | هدف: %.6f",
+                                    r.entry, r.stopLoss, r.target1
+                                )
+                            )
+                            if (ok) {
+                                NotificationGuard.recordDelivered(applicationContext, key)
+                            } else {
+                                Log.w(TAG, "Notification delivery failed for ${r.symbol}")
+                            }
                         }
                     }
                 }
+
+                var worthyTotal = hot.size
+
+                try {
+                    evaluateRulesOnFullMarket(mode)
+                } catch (e: Exception) {
+                    Log.w(TAG, "evaluateRulesOnFullMarket failed (non-critical)", e)
+                }
+
+                try {
+                    worthyTotal += evaluateSmartAlerts()
+                } catch (e: Exception) {
+                    Log.w(TAG, "evaluateSmartAlerts failed (non-critical)", e)
+                }
+
+                // 🚀 P3-2: ثبت حرارت بازار برای تصمیم‌گیری اجرای بعدی
+                MarketHeatStore.recordRun(applicationContext, worthyTotal)
             }
 
-            try {
-                evaluateRulesOnFullMarket(mode)
-            } catch (e: Exception) {
-                Log.w(TAG, "evaluateRulesOnFullMarket failed (non-critical)", e)
-            }
-
+            // همیشه اجرا می‌شود (ارزان و حیاتی برای کاربر): هشدارهای واچ‌لیست
             try {
                 val fired = com.pumpwatch.app.store.WatchlistStore.checkAndFire(applicationContext)
                 if (fired > 0) Log.i(TAG, "Watchlist alerts fired: $fired")
             } catch (e: Exception) {
                 Log.w(TAG, "Watchlist checkAndFire failed (non-critical)", e)
-            }
-
-            // 🚀 P3-1: ارزیابی سیگنال‌های هوشمند بازار (SmartAlerts) + استراتژی‌های فعال
-            try {
-                evaluateSmartAlerts()
-            } catch (e: Exception) {
-                Log.w(TAG, "evaluateSmartAlerts failed (non-critical)", e)
             }
 
             Result.success()
@@ -179,28 +193,24 @@ class MonitorWorker(
         }
     }
 
-    // 🚀 P3-1 + P3-3: ارزیابی سیگنال‌های هوشمند بازار در پس‌زمینه با فرمول سفارشی کاربر
-    private suspend fun evaluateSmartAlerts() {
+    // 🚀 P3-1 + P3-3: ارزیابی سیگنال‌های هوشمند؛ تعداد سیگنال‌های ارزشمند را برمی‌گرداند
+    private suspend fun evaluateSmartAlerts(): Int {
         val strategies = CustomStrategiesStore.load(applicationContext)
-
-        // 🚀 P3-3: بارگذاری فرمول سفارشی کاربر (اگر ذخیره نشده باشد، DEFAULT برگردانده می‌شود)
         val formula = SignalFormulaStore.load(applicationContext)
 
-        // از داده‌های کش شده استفاده می‌کنیم تا درخواست شبکهٔ اضافی نزنیم (بهینه‌سازی باتری)
         val coins = try {
             withContext(Dispatchers.IO) {
                 MarketHub.ensure(force = false)
             }
         } catch (e: Exception) {
             Log.w(TAG, "MarketHub data unavailable for smart alerts", e)
-            return
+            return 0
         }
 
-        // اگر دادهٔ بازار کهنه باشد (بیش از ۵ دقیقه)، ارزیابی نمی‌کنیم (fail-closed)
         val ageSec = (System.currentTimeMillis() - MarketHub.lastUpdateMs) / 1000L
         if (ageSec > 300) {
             Log.i(TAG, "Market data too stale (${ageSec}s) for smart alerts — skipping")
-            return
+            return 0
         }
 
         var alertsSent = 0
@@ -212,7 +222,6 @@ class MonitorWorker(
         for (eval in worthySignals) {
             if (alertsSent >= MAX_SMART_ALERTS_PER_RUN) break
 
-            // کلید dedup: ترکیبی از نماد + side + بازهٔ ۶ ساعته
             val key = "smart_${eval.coin.id}_${eval.side}_${System.currentTimeMillis() / SMART_DEDUP_WINDOW_MS}"
             if (!NotificationGuard.shouldDeliver(applicationContext, key, SMART_DEDUP_WINDOW_MS)) {
                 continue
@@ -237,6 +246,7 @@ class MonitorWorker(
         if (alertsSent > 0) {
             Log.i(TAG, "Smart alerts sent: $alertsSent / ${worthySignals.size} worthy signals")
         }
+        return worthySignals.size
     }
 
     private fun buildSmartTitle(symbol: String, side: String, score: Int, hasMatched: Boolean): String {
@@ -272,7 +282,6 @@ class MonitorWorker(
                 if (AlertRulesStore.inCooldown(rule, now)) continue
                 if (!AlertRulesStore.matches(rule, r.price, r.score, funding, r.rsi, r.volumeRatio)) continue
 
-                // 🚀 Commit 8: لایهٔ دوم dedup برای قوانین
                 val key = "rule_${rule.id}_${r.symbol}"
                 if (!NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) continue
 
@@ -414,7 +423,6 @@ class MonitorWorker(
         }
     }
 
-    // 🚀 P3-1: نمایش اعلان سیگنال هوشمند
     private fun showSmartNotification(id: Int, title: String, text: String): Boolean {
         if (!canPostNotifications()) {
             markNotificationsBlocked(true)
@@ -425,7 +433,6 @@ class MonitorWorker(
             .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // بررسی اینکه آیا کانال از قبل وجود دارد (برای جلوگیری از بازنویسی تنظیمات کاربر)
             val existing = nm.getNotificationChannel(CHANNEL_SMART)
             if (existing == null) {
                 nm.createNotificationChannel(
