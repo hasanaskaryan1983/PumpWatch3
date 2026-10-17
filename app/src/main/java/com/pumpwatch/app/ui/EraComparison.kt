@@ -3,8 +3,10 @@ package com.pumpwatch.app.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
@@ -37,6 +39,16 @@ data class EraStats(
 )
 
 /**
+ * 🚀 P4-1 fix: محاسبهٔ محلی R-multiple — کاملاً مستقل از TradesScreen
+ * تا دیگر به دسترسی internal/private وابسته نباشیم.
+ */
+private fun eraR(t: PaperTrade): Double {
+    if (t.entry <= 0.0 || t.stopPct <= 0.0) return 0.0
+    val risk = t.entry * t.stopPct / 100.0
+    return (t.price - t.entry) / risk
+}
+
+/**
  * 🚀 P4-1: موتور مقایسهٔ دو دورهٔ عملکرد.
  * تابع خالص و کاملاً تست‌پذیر.
  */
@@ -63,7 +75,7 @@ object EraComparisonEngine {
             grossProfit > 0 -> Double.POSITIVE_INFINITY
             else -> 0.0
         }
-        val rs = trades.map { rMultiple(it) }
+        val rs = trades.map { eraR(it) }
         val avgR = if (rs.isEmpty()) 0.0 else rs.average()
         val totalPnlUsd = trades.sumOf { it.pnl * it.sizeUsd / 100.0 }
         return EraStats(trades.size, winRate, pf, avgR, totalPnlUsd)
@@ -155,15 +167,19 @@ fun EraComparisonCard(closed: List<PaperTrade>) {
             Button(
                 onClick = { EraStore.mark(ctx, "نقطهٔ تغییر دستی"); refreshKey++ },
                 colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Glass, contentColor = PumpWatchPalette.Text),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) { Text("📍 ثبت نقطهٔ تغییر (از حالا تنظیم جدید را تست می‌کنم)", fontSize = 10.sp, fontWeight = FontWeight.Bold) }
         }
     }
 }
 
+/**
+ * 🚀 P4-1 fix: ستون آمار به‌صورت extension روی RowScope
+ * تا Modifier.weight در دسترس باشد.
+ */
 @Composable
-private fun EraColumn(title: String, s: EraStats) {
+private fun RowScope.EraColumn(title: String, s: EraStats) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
         Text(title, fontSize = 9.sp, color = PumpWatchPalette.Muted)
         Text("${s.count} موقعیت", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
