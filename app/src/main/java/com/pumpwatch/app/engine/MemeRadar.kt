@@ -393,7 +393,7 @@ object MemeRadar {
         }
 
         val lpHolders = security.lp_holders
-        val lpLocked = lpHolders?.any { it.is_locked == "1" } ?: false
+        val lpLocked = lpHolders?.any { it.is_locked?.toDoubleOrNull() == 1.0 } ?: false  // "1" or "1.0" after the Map round trip
         if (!lpLocked) {
             score -= 30
             warnings.add("🚨 Liquidity قفل نیست (خطر Rug Pull)")
