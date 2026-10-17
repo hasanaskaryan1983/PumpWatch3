@@ -55,6 +55,7 @@ import com.pumpwatch.app.engine.AlertRule
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.CustomStrategiesStore
 import com.pumpwatch.app.engine.CustomStrategy
+import com.pumpwatch.app.engine.EraStore
 import com.pumpwatch.app.engine.FormulaSide
 import com.pumpwatch.app.engine.RangeMode
 import com.pumpwatch.app.engine.RuleCondition
@@ -126,10 +127,11 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     fun reloadRules() { rules = AlertRulesStore.load(ctx) }
     fun reloadStrategies() { strategies = CustomStrategiesStore.load(ctx) }
 
-    // 🚀 P3-3: helper برای ذخیرهٔ فرمول پس از هر تغییر
+    // 🚀 P3-3 + P4-1: helper برای ذخیرهٔ فرمول و ثبت خودکار نقطهٔ تغییر
     fun updateFormula(newFormula: SignalFormula) {
         formula = newFormula
         SignalFormulaStore.save(ctx, newFormula)
+        EraStore.onConfigChanged(ctx, "تغییر فرمول سیگنال")
     }
 
     LaunchedEffect(Unit) {
@@ -286,6 +288,8 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
                                 onClick = {
                                     SignalFormulaStore.resetToDefault(ctx)
                                     formula = SignalFormula.DEFAULT
+                                    // 🚀 P4-1: ثبت مرز دورهٔ جدید (بدون debounce)
+                                    EraStore.mark(ctx, "بازگشت به بهترین تنظیمات")
                                 },
                                 enabled = formula != SignalFormula.DEFAULT,
                                 colors = ButtonDefaults.buttonColors(containerColor = PumpWatchPalette.Warning.copy(alpha = 0.2f), contentColor = PumpWatchPalette.Text),
