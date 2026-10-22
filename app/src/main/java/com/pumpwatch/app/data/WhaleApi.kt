@@ -304,7 +304,7 @@ object OkxProvider : WhaleProvider {
 private data class GateTrade(
     val price: String?,
     val amount: String?,
-    val create_time_ms: Long?,
+    val create_time_ms: String?,
     val side: String?
 )
 
@@ -333,7 +333,7 @@ object GateProvider : WhaleProvider {
             api.trades(pair, limit).mapNotNull { t ->
                 val p = t.price?.toDoubleOrNull() ?: return@mapNotNull null
                 val q = t.amount?.toDoubleOrNull() ?: return@mapNotNull null
-                val ts = t.create_time_ms ?: return@mapNotNull null
+                val ts = t.create_time_ms?.toDoubleOrNull()?.toLong() ?: return@mapNotNull null
                 AggTradeNormalized(p, q, ts, t.side?.equals("sell", true) == true)
             }
         } catch (e: Exception) {
