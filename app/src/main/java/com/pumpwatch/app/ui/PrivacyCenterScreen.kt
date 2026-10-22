@@ -268,8 +268,7 @@ fun PrivacyCenterScreen() {
                             TradeStore.clearAll(context)
                             SignalLogger.clear(context)
                             try { AlertRulesStore.save(context, emptyList()) } catch (_: Exception) { }
-                            prefs.edit().remove("paper_state").apply()
-                            prefs.edit().remove("paper_alloc").apply()
+                            prefs.edit().clear().apply() // پاک‌سازی کامل همهٔ prefs معمولی برای اطمینان
                             SecureStorage.wipeAll(context)
                             ApiClient.clearMemoryCache()
                             KlineCache.clear()

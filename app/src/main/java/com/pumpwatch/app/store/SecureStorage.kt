@@ -76,4 +76,11 @@ object SecureStorage {
     fun clear(context: Context) {
         getEncryptedPrefs(context).edit().clear().apply()
     }
+
+    /**
+     * پاک‌سازی کامل (مورد استفاده در Privacy Center)
+     */
+    fun wipeAll(context: Context) {
+        clear(context)
+    }
 }
