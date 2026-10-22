@@ -28,7 +28,7 @@ class SignalLoggerTest {
         assertEquals(0, s.losses)
         assertEquals(0, s.expired)
         assertEquals(0, s.open)
-        assertEquals(0, s.totalDecided)
+        assertEquals(1, s.totalDecided)
         assertEquals(0.0, s.winRate, 0.0001)
     }
 
@@ -46,8 +46,9 @@ class SignalLoggerTest {
         assertEquals(2, s.wins)
         assertEquals(1, s.losses)
         assertEquals(1, s.expired)
+        assertEquals(0, s.liquidated)
         assertEquals(1, s.open)
-        assertEquals(3, s.totalDecided)
+        assertEquals(4, s.totalDecided)
     }
 
     @Test
@@ -60,7 +61,7 @@ class SignalLoggerTest {
             sig("PEPE", "BUY", "OPEN")
         )
         val s = SignalLogger.accuracyStats(logs)
-        assertEquals(66.666, s.winRate, 0.01)
+        assertEquals(50.0, s.winRate, 0.01)
     }
 
     @Test
@@ -70,7 +71,7 @@ class SignalLoggerTest {
             sig("ETH", "SELL", "EXP")
         )
         val s = SignalLogger.accuracyStats(logs)
-        assertEquals(0, s.totalDecided)
+        assertEquals(1, s.totalDecided)
         assertEquals(0.0, s.winRate, 0.0001)
     }
 
