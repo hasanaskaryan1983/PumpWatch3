@@ -541,7 +541,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(DarkBackground),
-        contentPadding = PaddingValues(start = 16.dp, top = 17.dp, end = 16.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(15.dp)
     ) {
         item {

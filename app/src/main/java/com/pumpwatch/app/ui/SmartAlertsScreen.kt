@@ -205,7 +205,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             EditorialPageHeader(
                 eyebrow = "RULES · EARLY WARNING",
                 title = "هشدارهای بازار",
@@ -223,7 +223,7 @@ fun SmartAlertsScreen(onCoinClick: (CoinMarket) -> Unit) {
 
             if (insights != null && !isDataStale) {
                 GlassCard(accent = PumpWatchPalette.Info, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(modifier = Modifier.padding(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("📡 وضعیت اسکن بازار", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Text)
                             Spacer(Modifier.weight(1f))

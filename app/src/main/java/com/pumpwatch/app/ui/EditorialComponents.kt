@@ -11,6 +11,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -155,31 +157,23 @@ fun EditorialTabDock(
     )
     Surface(
         modifier = modifier
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
             .fillMaxWidth(),
         color = Color.Transparent
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 3.dp, vertical = 3.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+        Row(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            tabs.chunked(5).forEach { rowTabs ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    val sideWeight = (5 - rowTabs.size) / 2f
-                    if (sideWeight > 0f) Spacer(Modifier.weight(sideWeight))
-                    rowTabs.forEach { tab ->
-                        DockTabItem(
-                            tab = tab,
-                            selected = tab.id == selectedId,
-                            glow = glow,
-                            onClick = { onSelect(tab.id) }
-                        )
-                    }
-                    if (sideWeight > 0f) Spacer(Modifier.weight(sideWeight))
-                }
+            tabs.forEach { tab ->
+                DockTabItem(
+                    tab = tab,
+                    selected = tab.id == selectedId,
+                    glow = glow,
+                    onClick = { onSelect(tab.id) }
+                )
             }
         }
     }
@@ -200,8 +194,8 @@ private fun RowScope.DockTabItem(
     val shape = RoundedCornerShape(16.dp)
     Surface(
         modifier = Modifier
-            .weight(1f)
-            .height(66.dp)
+            .width(72.dp)
+            .height(48.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clickable(onClick = onClick),
         color = tab.accent.copy(alpha = if (selected) 0.17f else 0.07f),
@@ -255,12 +249,12 @@ private fun RowScope.DockTabItem(
                     painter = painterResource(tab.iconRes),
                     contentDescription = null,
                     tint = tab.accent,
-                    modifier = Modifier.size(23.dp)
+                    modifier = Modifier.size(20.dp)
                 )
                 Text(
                     tab.label,
                     color = if (selected) PumpWatchPalette.Text else PumpWatchPalette.Muted,
-                    fontSize = 9.sp,
+                    fontSize = 8.sp,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
