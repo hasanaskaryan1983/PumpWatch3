@@ -28,7 +28,7 @@ class SignalLoggerTest {
         assertEquals(0, s.losses)
         assertEquals(0, s.expired)
         assertEquals(0, s.open)
-        assertEquals(1, s.totalDecided)
+        assertEquals(0, s.totalDecided)
         assertEquals(0.0, s.winRate, 0.0001)
     }
 
