@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.io.File
+import com.pumpwatch.app.store.SecureStorage
 
 /**
  * 🚀 Commit 93: ذخیره نهنگ‌های دنبال‌شده
@@ -24,11 +25,23 @@ object FollowedWhalesStore {
     private const val FILE_NAME = "followed_whales.json"
     private val gson = Gson()
 
-    private fun file(context: Context): File = File(context.filesDir, FILE_NAME)
+    private const val KEY = "followed_whales_encrypted"
 
     fun load(context: Context): List<FollowedWhale> {
         return try {
-            val json = file(context).readText()
+            val json = SecureStorage.getString(context, KEY)
+            if (json.isNullOrEmpty()) {
+                // Migration from old plaintext file
+                val oldFile = java.io.File(context.filesDir, FILE_NAME)
+                if (oldFile.exists()) {
+                    val oldJson = oldFile.readText()
+                    SecureStorage.putString(context, KEY, oldJson)
+                    oldFile.delete()
+                    val type = object : TypeToken<List<FollowedWhale>>() {}.type
+                    return gson.fromJson(oldJson, type) ?: emptyList()
+                }
+                return emptyList()
+            }
             val type = object : TypeToken<List<FollowedWhale>>() {}.type
             gson.fromJson(json, type) ?: emptyList()
         } catch (_: Exception) {
@@ -38,7 +51,7 @@ object FollowedWhalesStore {
 
     fun save(context: Context, whales: List<FollowedWhale>) {
         try {
-            file(context).writeText(gson.toJson(whales))
+            SecureStorage.putString(context, KEY, gson.toJson(whales))
         } catch (_: Exception) {
             // خطای نوشتن نباید اپ را کرش کند
         }

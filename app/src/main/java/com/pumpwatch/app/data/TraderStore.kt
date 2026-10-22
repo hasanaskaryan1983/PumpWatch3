@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.pumpwatch.app.store.SecureStorage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -52,7 +53,7 @@ object TraderStore {
 
     fun load(ctx: Context): List<TraderProfile> {
         if (loaded) return cache
-        val json = ctx.getSharedPreferences(PREF, 0).getString(KEY, null)
+        val json = SecureStorage.getEncryptedPrefs(ctx).getString(KEY, null)
         cache.clear()
         if (!json.isNullOrEmpty()) {
             try {
@@ -66,7 +67,7 @@ object TraderStore {
     }
 
     private fun persist(ctx: Context) {
-        ctx.getSharedPreferences(PREF, 0).edit().putString(KEY, gson.toJson(cache)).apply()
+        SecureStorage.getEncryptedPrefs(ctx).edit().putString(KEY, gson.toJson(cache)).apply()
     }
 
     fun list(ctx: Context): List<TraderProfile> = load(ctx).toList()

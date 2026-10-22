@@ -40,6 +40,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.reflect.TypeToken
 import com.pumpwatch.app.data.GatewayProviders
+import com.pumpwatch.app.store.SecureStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -141,7 +142,7 @@ object FavStore {
     fun load(ctx: Context) {
         if (loaded) return
         loaded = true
-        val p = ctx.getSharedPreferences("pumpwatch_prefs", 0)
+        val p = SecureStorage.getEncryptedPrefs(ctx)
         favs.value = try {
             val j = p.getString("fav_wallets", "") ?: ""
             if (j.isEmpty()) {
@@ -172,7 +173,7 @@ object FavStore {
     }
 
     fun save(ctx: Context) {
-        ctx.getSharedPreferences("pumpwatch_prefs", 0).edit()
+        SecureStorage.getEncryptedPrefs(ctx).edit()
             .putString("fav_wallets", FG2.toJson(favs.value))
             .putString("fav_trash", FG2.toJson(trash.value))
             .putString("fav_alerts", FG2.toJson(alerts.value))
