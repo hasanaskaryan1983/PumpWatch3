@@ -194,7 +194,7 @@ private fun RowScope.DockTabItem(
     val shape = RoundedCornerShape(16.dp)
     Surface(
         modifier = Modifier
-            Modifier.width(72.dp)
+            .width(72.dp)
             .height(48.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clickable(onClick = onClick),
