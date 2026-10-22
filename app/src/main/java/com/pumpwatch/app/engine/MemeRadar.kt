@@ -368,6 +368,10 @@ object MemeRadar {
         val warnings = mutableListOf<String>()
         var score = 100
 
+        if (security.is_honeypot == null) {
+            warnings.add("⚠️ وضعیت Honeypot نامشخص است — داده در دسترس نیست")
+            return Triple(null, warnings, "UNKNOWN")
+        }
         if (security.is_honeypot == "1") { score -= 80; warnings.add("🚨 Honeypot: نمی‌توانید بفروشید!") }
         if (security.is_mintable == "1") { score -= 20; warnings.add("⚠️ Mintable: تیم می‌تواند توکن جدید بسازد") }
         if (security.owner_change_balance == "1") { score -= 30; warnings.add("🚨 Owner می‌تواند balance را تغییر دهد") }

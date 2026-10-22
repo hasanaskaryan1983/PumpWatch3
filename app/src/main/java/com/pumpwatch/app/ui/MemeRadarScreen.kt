@@ -300,8 +300,8 @@ private fun MemeList(items: List<MemeSignal>, lastUpdate: Long, context: Context
                     Text("📡 منبع: GeckoTerminal • 🛡️ امنیت: $securityText", fontSize = 8.sp, color = PumpWatchPalette.Muted)
 
                     val rug = m.rugScore
-                    val rugColor = when { rug == null -> PumpWatchPalette.Muted; rug >= 80 -> PumpWatchPalette.Positive; rug >= 60 -> PumpWatchPalette.Warning; else -> PumpWatchPalette.Negative }
-                    val rugEmoji = when { rug == null -> "❓"; rug >= 80 -> "✅"; rug >= 60 -> "⚠️"; else -> "🚨" }
+                    val rugColor = when { rug == null -> PumpWatchPalette.Warning; rug >= 80 -> PumpWatchPalette.Positive; rug >= 60 -> PumpWatchPalette.Warning; else -> PumpWatchPalette.Negative }
+                    val rugEmoji = when { rug == null -> "⚠️"; rug >= 80 -> "✅"; rug >= 60 -> "⚠️"; else -> "🚨" }
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         val rugLabel = if (rug == null) "$rugEmoji Rug Safety: UNKNOWN" else "$rugEmoji Rug Safety: $rug/100"
@@ -311,11 +311,12 @@ private fun MemeList(items: List<MemeSignal>, lastUpdate: Long, context: Context
 
                     if (rug == null) {
                         val warningText = when (m.securityStatus) {
+                            "UNKNOWN" -> "⚠️ وضعیت امنیتی نامشخص است — داده در دسترس نیست، با احتیاط معامله کنید."
                             "EMPTY" -> "❓ GoPlus این توکن را شناسایی نکرد — ایمن فرض نمی‌شود."
                             "FAILED" -> "❓ بررسی امنیتی انجام نشد — ایمن فرض نمی‌شود."
                             else -> "❓ وضعیت امنیتی نامشخص — ایمن فرض نمی‌شود."
                         }
-                        Text(warningText, fontSize = 9.sp, color = PumpWatchPalette.Muted, fontWeight = FontWeight.Bold)
+                        Text(warningText, fontSize = 9.sp, color = PumpWatchPalette.Warning, fontWeight = FontWeight.Bold)
                     }
 
                     if (m.rugWarnings.isNotEmpty()) {
