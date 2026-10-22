@@ -58,6 +58,7 @@ data class SignalAccuracyStats(
     val wins: Int,
     val losses: Int,
     val expired: Int,
+    val liquidated: Int,  // FIX: added
     val open: Int,
     val winRate: Double,
     val totalDecided: Int
@@ -165,13 +166,15 @@ object SignalLogger {
         val wins = logs.count { it.status == "WIN" }
         val losses = logs.count { it.status == "LOSS" }
         val expired = logs.count { it.status == "EXP" }
-        val decided = wins + losses
-        val winRate = if (decided > 0) wins * 100.0 / decided else 0.0
+        val liquidated = logs.count { it.status == "LIQUIDATED" }
+        val decided = wins + losses + expired + liquidated  // FIX: include all decided
+        val winRate = if (decided > 0) wins * 100.0 / decided else 0.0  // FIX: LIQUIDATED and EXP in denominator
         return SignalAccuracyStats(
             total = logs.size,
             wins = wins,
             losses = losses,
             expired = expired,
+            liquidated = liquidated,
             open = open,
             winRate = winRate,
             totalDecided = decided

@@ -491,7 +491,7 @@ object BacktestEngine {
         
         // 🚀 Commit 106: کارمزد واقعی taker (0.04%) + slippage (0.05%) = 0.09% هر طرف
         // round trip = 2 × 0.09% = 0.18%
-        val feeRoundTrip = 2.0 * (feeRate * 100.0 + 0.05)
+        val feeRoundTrip = 2.0 * (feeRate * 100.0 + 0.05) * leverage  // FIX: fee based on leverage
 
         var inTrade = false
         var pendingEntry = false
