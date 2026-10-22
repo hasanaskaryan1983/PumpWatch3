@@ -29,17 +29,17 @@ data class LoggedSignal(
     fun updateLivePrice(price: Double): LoggedSignal {
         val best = when {
             highestPrice <= 0.0 -> price
-            side == "BUY" -> maxOf(highestPrice, price)
+            SignalLogger.isLongSide(side) -> maxOf(highestPrice, price)
             else -> minOf(highestPrice, price)
         }
-        val trail = if (side == "BUY") best * 0.92 else best * 1.08
+        val trail = if (SignalLogger.isLongSide(side)) best * 0.92 else best * 1.08
         val newStop = when {
             trailingStop <= 0.0 -> trail
-            side == "BUY" -> maxOf(trailingStop, trail)
+            SignalLogger.isLongSide(side) -> maxOf(trailingStop, trail)
             else -> minOf(trailingStop, trail)
         }
         val curT = if (currentTarget > 0) currentTarget else target
-        val newTarget = if (side == "BUY") {
+        val newTarget = if (SignalLogger.isLongSide(side)) {
             if (price >= curT) curT * 1.15 else curT
         } else {
             if (price <= curT) curT * 0.85 else curT
@@ -69,6 +69,9 @@ object SignalLogger {
     private val GSON = Gson()
 
     // 🚀 P1-2: خواندن با مهاجرت + قرنطینه به‌جای حذف بی‌صدا
+    fun isLongSide(side: String): Boolean =
+        side == "BUY" || side == "PUMP" || side == "LONG"
+
     fun load(ctx: Context): List<LoggedSignal> {
         val p = ctx.getSharedPreferences(PREFS, 0)
         val raw = p.getString(KEY, "") ?: ""
@@ -144,9 +147,9 @@ object SignalLogger {
             if (s.status != "OPEN") continue
             val px = livePrice(s.symbol) ?: continue
             val u = s.updateLivePrice(px)
-            val hitStop = if (s.side == "BUY") px <= u.trailingStop else px >= u.trailingStop
+            val hitStop = if (isLongSide(s.side)) px <= u.trailingStop else px >= u.trailingStop
             if (hitStop) {
-                val profit = if (s.side == "BUY") px > s.entry else px < s.entry
+                val profit = if (isLongSide(s.side)) px > s.entry else px < s.entry
                 out[i] = u.copy(status = if (profit) "WIN" else "LOSS", exitPrice = px)
             } else {
                 out[i] = u

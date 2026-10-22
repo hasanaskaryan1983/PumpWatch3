@@ -171,7 +171,7 @@ object QuickScanner {
                 val logged = SignalLogger.log(
                     ctx,
                     LoggedSignal(
-                        symbol = signal.symbol, side = signal.side, score = signal.score,
+                        symbol = signal.symbol, side = if (signal.side == "PUMP") "BUY" else if (signal.side == "DUMP") "SELL" else signal.side, score = signal.score,
                         entry = signal.entry, stop = signal.stopLoss, target = signal.target1,
                         time = if (signal.candleCloseTs > 0L) signal.candleCloseTs else System.currentTimeMillis(),
                         mode = "FUT"
@@ -264,7 +264,7 @@ object QuickScanner {
                 val logged = SignalLogger.log(
                     ctx,
                     LoggedSignal(
-                        symbol = signal.symbol, side = signal.side, score = signal.score,
+                        symbol = signal.symbol, side = if (signal.side == "PUMP") "BUY" else if (signal.side == "DUMP") "SELL" else signal.side, score = signal.score,
                         entry = signal.entry, stop = signal.stopLoss, target = signal.target1,
                         time = if (signal.candleCloseTs > 0L) signal.candleCloseTs else System.currentTimeMillis(),
                         mode = "SPOT"
