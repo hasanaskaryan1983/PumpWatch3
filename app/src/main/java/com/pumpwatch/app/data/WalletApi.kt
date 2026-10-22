@@ -135,13 +135,6 @@ object SolanaRpc2 {
     }
 }
 
-object SolanaRpc3 {
-    val api: SolanaRpcApi by lazy {
-        Retrofit.Builder().baseUrl("https://solana.drpc.org/")
-            .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
-    }
-}
-
 private fun heliusClient(apiKey: String): SolanaRpcApi = Retrofit.Builder()
     .baseUrl("https://mainnet.helius-rpc.com/?api-key=$apiKey")
     .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
@@ -156,9 +149,9 @@ suspend fun solanaRaw(
     val endpoints = mutableListOf<SolanaRpcApi>()
     if (!personalKey.isNullOrEmpty()) endpoints.add(heliusClient(personalKey))
     if (preferAlt) {
-        endpoints.add(SolanaRpc2.api); endpoints.add(SolanaRpc3.api); endpoints.add(SolanaRpc.api)
+        endpoints.add(SolanaRpc2.api); endpoints.add(SolanaRpc.api)
     } else {
-        endpoints.add(SolanaRpc.api); endpoints.add(SolanaRpc2.api); endpoints.add(SolanaRpc3.api)
+        endpoints.add(SolanaRpc.api); endpoints.add(SolanaRpc2.api)
     }
 
     var lastError: Exception? = null
@@ -202,7 +195,6 @@ suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>, ctx: Cont
     if (!personalKey.isNullOrEmpty()) endpoints.add(heliusClient(personalKey))
     endpoints.add(SolanaRpc.api)
     endpoints.add(SolanaRpc2.api)
-    endpoints.add(SolanaRpc3.api)
 
     for (client in endpoints) {
         try {
