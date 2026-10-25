@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نقشهٔ راه مرجع PumpWatch3 — نسخهٔ ۲.۱</title>
+<style>
+:root{--bg:#0f1420;--card:#1a2230;--ink:#e8ecf1;--muted:#9aa4b2;--acc:#4dd0e1;--red:#ff5252;--yel:#ffc107;--grn:#00e676;--blu:#40c4ff;--line:#2a3550}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;background:var(--bg);color:var(--ink);margin:0;line-height:1.9}
+.wrap{max-width:920px;margin:auto;padding:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:19px;color:var(--acc);border-bottom:1px solid var(--line);padding-bottom:6px;margin:22px 0 10px}
+.muted{color:var(--muted);font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12.5px;margin:8px 0}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:right;vertical-align:top}
+th{background:#22304a}
+.ok{color:var(--grn)}.crit{color:var(--red)}.high{color:var(--yel)}.info{color:var(--blu)}
+.badge{display:inline-block;padding:1px 10px;border-radius:999px;font-size:11px;font-weight:700}
+.b-red{background:#3a1a1a;color:var(--red)}.b-yel{background:#3a3010;color:var(--yel)}
+.b-grn{background:#123a24;color:var(--grn)}.b-blu{background:#12303a;color:var(--blu)}
+button{background:var(--acc);color:#06283a;border:0;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:800;cursor:pointer;margin-left:8px}
+button.alt{background:var(--blu)}
+ul,ol{padding-right:22px}
+li{margin:4px 0}
+code{background:#0a0e18;padding:2px 6px;border-radius:6px;font-size:12px}
+.contract{border:2px solid var(--yel)}
+.parking{border:2px dashed var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap" id="report">
+<header class="card">
+<h1>📜 نقشهٔ راه مرجع PumpWatch3 / PumpDump — نسخهٔ ۲.۱</h1>
+<div class="muted">سند حقیقت واحد · اکتبر ۲۰۲۶ · ترکیب سه گزارش ممیزی (کامیت مبنا ebdbf17 + گزارش سوم ۲۰۲۶-۱۰-۲۵) + کارهای انجام‌شده با CI سبز</div>
+<div class="muted">طبقه‌بندی: خصوصی — ویژهٔ مالک پروژه · برنامهٔ فنی است، نه توصیهٔ سرمایه‌گذاری</div>
+<p><button id="copybtn" onclick="copyAll()">کپی کل گزارش</button><button class="alt" onclick="window.print()">ذخیره PDF / چاپ</button></p>
+</header>
+
+<div class="card">
+<h2 style="margin-top:0">تغییرات نسخهٔ ۲.۱ نسبت به ۲.۰</h2>
+<ul>
+<li class="ok">➕ SC1: بهداشت supply-chain (بازرسی/حذف add-wrapper.yml با فاصلهٔ انتهایی + wrapper رسمی با checksum + لاگ NONE در release) → فاز ۱</li>
+<li class="ok">➕ L1: سیاست SNIPER برای UNKNOWN (برچسب «عدم تأیید امنیت»، رتبهٔ زیر READY) → فاز ۲</li>
+<li class="ok">➕ L2: سازگاری دلایل سیگنال (حذف امتیاز روند مخالفِ side) → فاز ۲</li>
+<li class="ok">➕ L3: آستانهٔ ورود اسپات >=۴۰ + بنچمارک buy&amp;hold → فاز ۲</li>
+<li class="ok">➕ S3b: SecureStorage fail-closed و بازرمزنگاری دادهٔ قدیمی → فاز ۲</li>
+<li class="ok">➕ L8: کلید ترکیبی استخرهای بدون id → فاز ۲</li>
+<li class="ok">➕ WF: walk-forward ۷۰/۳۰ + وین‌ریت in-sample/out-of-sample → فاز ۴</li>
+<li class="muted">➖ منسوخ: C2/S1 گزارش سوم (اسکریپت‌های پچ) — قبلاً با کامیت chore حذف شدند</li>
+<li class="muted">🔁 بقیهٔ یافته‌های گزارش سوم در کدهای موجود ادغام شدند (پیوست الف)</li>
+</ul>
+</div>
+
+<div class="card contract">
+<h2 style="margin-top:0">۰) قرارداد کاری ضدانحراف</h2>
+<ol>
+<li><b>یک فاز در هر لحظه:</b> تا همهٔ کدهای فاز جاری تیک نخورند و Gate بسته نشود، کار فاز بعدی شروع نمی‌شود.</li>
+<li><b>هر اصلاح = پچ + تست واحد + CI سبز + کامیت با scope.</b> باگ بدون تست = رفع‌نشده.</li>
+<li><b>قبل از هر کد، کد آیتم اعلام شود:</b> مالک سند را می‌فرستد و می‌گوید «فاز X، آیتم Y»؛ دستیار اول کد را از جدول بخش ۳ تأیید می‌کند.</li>
+<li><b>ایدهٔ جدید = پارکینگ، نه اجرا.</b></li>
+<li><b>ضدتورم:</b> هیچ عدد/ادعایی بدون امکان بازتولید از دفترکل وارد UI/README نمی‌شود؛ HonestyScreensUiTest همیشه سبز.</li>
+<li><b>به‌روزرسانی سند:</b> پس از هر کامیت موفق تیک زده می‌شود؛ نسخهٔ سند فقط با تصمیم مالک بالا می‌رود.</li>
+</ol>
+<div class="parking card" style="margin:8px 0">
+<b>🅿️ پارکینگ (اجرا ممنوع تا اطلاع بعدی):</b>
+<ul>
+<li>لایهٔ ML تأیید (RegimeGate + kNN لورنتزی clean-room) — فقط پس از Gate 3 با دفترکل وین‌ریت جداگانه</li>
+<li>WebSocket / جریان زندهٔ mempool — فاز ۴</li>
+<li>Indexer و backend چندزنجیره‌ای — فاز ۴</li>
+<li>اندیکاتورهای تریدینگ‌ویو (Lorentzian / kNN / Adaptive SuperTrend) — فقط به‌عنوان مفهوم، کپی ممنوع</li>
+<li>انتشار v2.0 و هر ادعای «بهترین اپ» — فقط پس از Gate 4</li>
+</ul>
+</div>
+</div>
+
+<h2>۱) وضعیت فعلی</h2>
+<table>
+<tr><th>حوزه</th><th>نمره</th><th>توضیح</th></tr>
+<tr><td>امنیت ذخیره‌سازی و حریم خصوصی</td><td class="ok">۸/۱۰</td><td>AES-256-GCM + Keystore + wipe کامل‌شده + رمزنگاری آدرس‌ها</td></tr>
+<tr><td>صداقت داده و UI</td><td class="ok">۸/۱۰</td><td>Provenance/DataEnvelope + HonestyScreensUiTest + rug سه‌حالته</td></tr>
+<tr><td>صحت منطق سیگنال</td><td class="crit">۴/۱۰</td><td>MTF مرده، Kelly بدون گارد، EMA با دادهٔ ناکافی، PumpDetector خاموش، دلایل متناقض (L2)</td></tr>
+<tr><td>حسابداری مالی</td><td class="high">۵/۱۰</td><td>کارمزد×اهرم و مخرج وین‌ریت اصلاح شد؛ PnL فیوچرز، funding و بنچمارک اسپات ناقص</td></tr>
+<tr><td>کامل‌بودن قابلیت‌های وعده‌داده‌شده</td><td class="crit">۳/۱۰</td><td>رهگیری ولت، leaderboard واقعی، کشف پیش‌از‌پامپ هنوز پیش‌نمایش</td></tr>
+<tr><td>زیرساخت build/CI</td><td class="high">۷/۱۰</td><td>CI سبز؛ wrapper رسمی/minify/امضا و بهداشت workflow ناقص (SC1)</td></tr>
+</table>
+
+<h2>۲) انجام‌شده (تیک‌خورده، با CI سبز)</h2>
+<ul>
+<li class="ok">✅ یکسان‌سازی PUMP/DUMP با BUY/SELL در مرز ژورنال + isLongSide تحمل‌پذیر</li>
+<li class="ok">✅ رمزنگاری آدرس‌های کیف‌پول با EncryptedSharedPreferences + مهاجرت خودکار</li>
+<li class="ok">✅ تکمیل «حذف همهٔ داده‌ها» در Privacy Center (همهٔ storeها)</li>
+<li class="ok">✅ Rug Pull سه‌حالته: PASS / FAIL / UNKNOWN</li>
+<li class="ok">✅ کارمزد بک‌تست بر اساس اهرم: feeRoundTrip × leverage</li>
+<li class="ok">✅ وین‌ریت واقعی: EXP و LIQUIDATED در مخرج + فیلد liquidated + اصلاح ۴ تست</li>
+<li class="ok">✅ UI: نوار پایین تک‌ردیفهٔ اسکرول‌دار (72×48dp) + فشرده‌سازی هدر بازار و هشدارها</li>
+<li class="ok">✅ حذف همهٔ اسکریپت‌های موقت پچ از ریشهٔ مخزن (کامیت chore)</li>
+</ul>
+<p class="high">⚠️ بازراستی‌سنجی در فاز ۲: wipe باید <code>RpcKeyStore.clear(context)</code> و preference قدیمی <code>pumpwatch_rpc_prefs</code> و کش static را هم پاک کند (RPC-WIPE).</p>
+
+<h2>۳) فهرست یکپارچهٔ یافته‌های باقی‌مانده + فاز مسئول</h2>
+<table>
+<tr><th>کد</th><th>عنوان</th><th>فایل:خط</th><th>شدت</th><th>فاز</th></tr>
+<tr><td>SC1</td><td>workflow با نام دارای فاصلهٔ انتهایی + wrapper غیررسمی + لاگ release</td><td>.github/workflows/add-wrapper.yml ؛ gradlew ؛ build.gradle.kts</td><td><span class="badge b-red">بحرانی (supply-chain)</span></td><td>۱</td></tr>
+<tr><td>C2</td><td>Kelly به استراتژی بدون برد سایز کامل می‌دهد</td><td>PositionSizer.kt:72-81</td><td><span class="badge b-red">بحرانی</span></td><td>۱</td></tr>
+<tr><td>C3</td><td>سیگنال طلایی/MTF هرگز فعال نمی‌شود + سقف امتیاز پنهان + lookback ناهم‌خوان</td><td>UnifiedSignalEngine.kt:83-92؛ BatchScanner.kt:138؛ QuickScanner.kt:114,211</td><td><span class="badge b-red">بحرانی</span></td><td>۱</td></tr>
+<tr><td>H-FUT</td><td>مسیر Futures و بک‌تست FUT از کندل Spot تغذیه می‌شود</td><td>MonitorWorker.kt:101-118؛ BatchScanner.kt:128-180؛ BinanceApi.kt:227-255</td><td><span class="badge b-red">بحرانی</span></td><td>۱</td></tr>
+<tr><td>H-EMA</td><td>کمبود سابقهٔ 4H به‌اشتباه «روند صعودی» (EMA200=0)</td><td>QuickScanner.kt:101-137؛ Indicators.kt:54-73</td><td><span class="badge b-yel">بالا</span></td><td>۱</td></tr>
+<tr><td>S1</td><td>کلید Helius در URL (نشت راز در لاگ)</td><td>WalletApi.kt:143-147</td><td><span class="badge b-yel">بالا</span></td><td>۱</td></tr>
+<tr><td>S2</td><td>استخر اشتباه به نماد می‌چسبد + کش بی‌کران poolCache</td><td>WhaleApi.kt:348,364-417</td><td><span class="badge b-yel">بالا</span></td><td>۱</td></tr>
+<tr><td>S3</td><td>خطای شبکه = «بدون فعالیت نهنگ» (catch→emptyList)</td><td>WhaleApi.kt (۵ نقطه)؛ WhaleFlowEngine.kt:101-105</td><td><span class="badge b-yel">بالا</span></td><td>۱</td></tr>
+<tr><td>H-WAL</td><td>هشدار «نهنگ دنبال‌شده» تراکنش همان آدرس را نمی‌بیند</td><td>WhaleMemeWorker.kt:94-115</td><td><span class="badge b-yel">بالا</span></td><td>۱</td></tr>
+<tr><td>H-PNL</td><td>P&amp;L کیف‌پول دفترکلی نیست؛ coverage همیشه 100%</td><td>WalletScan.kt:496-539؛ WalletHoldings.kt:47-60</td><td><span class="badge b-yel">بالا</span></td><td>۱</td></tr>
+<tr><td>S4</td><td>پاک‌شدن خاموش نهنگ‌های دنبال‌شده</td><td>FollowedWhalesStore.kt:36-82</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>S5</td><td>کرش/رقابت در TraderStore</td><td>TraderStore.kt:51-71</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>S6</td><td>دادهٔ کهنهٔ بی‌کران fallback + سن با ساعت دیواری</td><td>CoinApi.kt؛ DataEnvelope.kt:40-42</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>F1</td><td>آلودگی کش top-1000 با ۲۵۰ نماد</td><td>CoinApi.kt:249-283</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>F2</td><td>PnL فیوچرز بدون اهرم/فاندینگ + NaN</td><td>Trade.kt:54-93</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>F3</td><td>پرشدن کاغذی با قیمت سیگنال</td><td>PaperTradingEngine.kt:57,103</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>F4b</td><td>funding با شمارش کندل نه timestamp واقعی</td><td>BacktestEngine.kt:426-441,536-549</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>F5</td><td>PumpDetector مرده (fractal همیشه false)</td><td>PumpDetector.kt:38,117-133</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>F6</td><td>تجزیهٔ سن توکن روی میلی‌ثانیه شکست می‌خورد</td><td>MemeRadar.kt:112-122</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>L1</td><td>SNIPER توکن با امنیت نامشخص را قبول می‌کند</td><td>MemeRadar.kt (allowUnknownSecurity + سقف ۵۰)</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>L2</td><td>دلایل متناقض در یک سیگنال (روند صعودی + DUMP)</td><td>SignalEngine.kt</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>L3</td><td>آستانهٔ ورود اسپات صفر = buy&amp;hold با استاپ</td><td>BacktestEngine.kt (score &gt;= 0)</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>S3b</td><td>SecureStorage fallback به plaintext (fail-open)</td><td>SecureStorage.kt (getString)</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>L8</td><td>استخرهای بدون id در یک کلید خالی جمع می‌شوند</td><td>MemeRadar.kt (seen.add(p.id ?: ""))</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>H-DOJI</td><td>Trigger فیوچرز کندل باز را می‌بیند؛ doji جهت‌دار</td><td>FuturesScannerScreen.kt:90-112؛ FuturesScannerEngine.kt:100-105,177-188</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>H-WIN2</td><td>برچسب WIN با PnL خالص منفی؛ stop/target از close سیگنال</td><td>BacktestEngine.kt:279-323,359-404</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>S7</td><td>release بدون minify/امضا + نام فایل نامرئی</td><td>build.gradle.kts؛ workflows</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>S8</td><td>مهاجرت واچ‌لیست داده را می‌بُرد</td><td>WatchlistMigration.kt:56-149</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>F7</td><td>normalizeSymbol نمادهای stETH/JITOSOL/USDC را می‌شکند</td><td>WhaleApi.kt:103-119</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>F8</td><td>صدک ۹۹ به ترید خرد برچسب نهنگ می‌زند</td><td>WhaleFlowEngine.kt:199-235</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>F9</td><td>ATR نامیزه، OBV نسبی، هفتهٔ ناهم‌تراز</td><td>ScoringEngine.kt:252,298-318</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>F10</td><td>recomputeCash سرمایهٔ کاربر را نادیده می‌گیرد</td><td>PaperRules.kt:118-135</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>H-DEDUP</td><td>هشدار بدون تحویل dedup/مصرف می‌شود</td><td>SignalScannerWorker.kt:53-60؛ MonitorWorker.kt:120-149</td><td><span class="badge b-blu">متوسط</span></td><td>۲</td></tr>
+<tr><td>RPC-WIPE</td><td>کلید RPC و preference قدیمی پس از wipe می‌مانند</td><td>RpcKeyStore.kt:31-50,72-79</td><td><span class="badge b-yel">بالا</span></td><td>۲</td></tr>
+<tr><td>M-LP</td><td>درصد واقعی قفل نقدینگی سنجیده نمی‌شود</td><td>GoPlusClient.kt:36-62</td><td><span class="badge b-blu">متوسط</span></td><td>۳</td></tr>
+<tr><td>M-PRIV</td><td>آدرس به provider می‌رود ولی سیاست حریم خصوصی ناقص</td><td>WalletScan.kt:346-358؛ PRIVACY_POLICY.md</td><td><span class="badge b-blu">متوسط</span></td><td>۳</td></tr>
+<tr><td>M-SRC</td><td>برچسب منبع Whale Radar همیشه DEX حتی وقتی CEX</td><td>WhaleRadarScreen.kt:69-74,138-153</td><td><span class="badge b-blu">متوسط</span></td><td>۳</td></tr>
+<tr><td>P1..P6</td><td>طوفان درخواست میم، sleep درون قفل/interceptor، RPC سولانا، O(n²)، نگاشت بی‌کران</td><td>MainActivity.kt:205؛ BinanceApi.kt:119؛ WalletApi.kt:144-214؛ Indicators.kt:349</td><td><span class="badge b-blu">متوسط/پایین</span></td><td>۳</td></tr>
+<tr><td>G1</td><td>رهگیری واقعی ولت + رمزگشای خرید/فروش + هشدار پوش</td><td>wallet/؛ WhaleMemeWorker.kt</td><td><span class="badge b-grn">قابلیت</span></td><td>۳</td></tr>
+<tr><td>G2</td><td>Leaderboard واقعی از دفترکل SignalLogger</td><td>TraderStore.kt:78-82</td><td><span class="badge b-grn">قابلیت</span></td><td>۳</td></tr>
+<tr><td>G3</td><td>اسکن سراسری نهنگ روی top-1000 + جریان زنده</td><td>WhaleFlowEngine.kt</td><td><span class="badge b-grn">قابلیت</span></td><td>۴</td></tr>
+<tr><td>G4</td><td>کشف میم پیش‌از‌پامپ (stream به‌جای polling)</td><td>MemeRadar.kt</td><td><span class="badge b-grn">قابلیت</span></td><td>۴</td></tr>
+<tr><td>G5</td><td>Room + Hilt (پایان کلاس باگ‌های S4/S5/F10)</td><td>store/، data/</td><td><span class="badge b-grn">معماری</span></td><td>۴</td></tr>
+<tr><td>G6</td><td>تست FuturesScannerEngine/MemeRadar + اصلاح WalletDomainTest.k + JaCoCo در CI</td><td>test/، ci.yml</td><td><span class="badge b-grn">تست</span></td><td>۲</td></tr>
+<tr><td>WF</td><td>وین‌ریت out-of-sample سیم‌کشی نشده (inSample/outOfSample=null)</td><td>BacktestMetrics؛ BacktestEngine</td><td><span class="badge b-blu">متوسط</span></td><td>۴</td></tr>
+</table>
+
+<h2>۴) فاز ۱ — بحرانی و supply-chain (۷۲ ساعت کاری)</h2>
+<p class="muted">هدف: هیچ سیگنال کاذب ساختاری، هیچ مسیر پول‌سوز و هیچ ابهام supply-chain باقی نماند.</p>
+<table>
+<tr><th>کد</th><th>اقدام</th><th>راه‌حل فنی</th><th>تست/شرط بسته‌شدن</th></tr>
+<tr><td>SC1</td><td>بهداشت supply-chain</td><td>بازرسی محتوای add-wrapper.yml (واکشی با نام URL-encoded)؛ حذف یا rename به ASCII؛ کامیت gradle wrapper رسمی با checksum؛ HttpLoggingInterceptor سطح NONE در release</td><td>فهرست workflowها تمیز؛ wrapper در مخزن؛ هیچ کلید در لاگ</td></tr>
+<tr><td>C2</td><td>گارد Kelly</td><td>avgWin&lt;=0 → sizeUsd=0 با برچسب «بدون مزیت آماری»؛ مسیر محتاط فقط وقتی avgLoss&lt;=0 و سابقه&gt;=۲۰</td><td>۳ تست: همه‌برد/همه‌باخت/ترکیبی</td></tr>
+<tr><td>C3</td><td>زنده‌کردن MTF/طلایی + lookback مرکزی</td><td>۱۵۰ کندل 1h صفحه‌بندی‌شده یا کندل بومی 4h/1d؛ شرط اندازه با دادهٔ موجود تطبیق یابد؛ یک constant مرکزی برای lookback هر mode</td><td>mtfAligned با دادهٔ کافی true؛ تست سکوی ۱۰۰/۱۵۰/۲۴۰/۴۰۰</td></tr>
+<tr><td>H-FUT</td><td>جداسازی Spot/Perpetual</td><td>InstrumentId (venue+symbol+marketType)؛ cache key شامل market-type؛ FUT فقط کندل قرارداد + mark/index</td><td>بک‌تست FUT هرگز کندل spot نخواند</td></tr>
+<tr><td>H-EMA</td><td>گارد EMA دادهٔ ناکافی</td><td>حداقل ۲۰۰ کندل معتبر برای EMA200؛ وگرنه UNKNOWN بدون امتیاز روند</td><td>سری کوتاه → امتیاز روند صفر</td></tr>
+<tr><td>S1</td><td>کلید Helius به هدر</td><td>Interceptor با x-api-key + redact کردن URL در همهٔ لاگ‌ها</td><td>لاگ حاوی کلید نباشد</td></tr>
+<tr><td>S2</td><td>تطابق base_token استخر + TTL</td><td>مقایسهٔ آدرس base_token با قرارداد توکن؛ کش TTL+سقف؛ عدم تطابق → EMPTY</td><td>PEPE به استخر غلط نچسبد</td></tr>
+<tr><td>S3</td><td>خطای نوع‌دار providerها</td><td>حذف catch→emptyList؛ DataEnvelope با FAILURE/EMPTY؛ UI و Worker روی FAILURE تصمیم نگیرند</td><td>شبیه‌سازی قطعی صرافی</td></tr>
+<tr><td>H-WAL</td><td>حذف هشدار کاذب نهنگ دنبال‌شده</td><td>تا پیاده‌سازی G1 عنوان «جریان بازار نماد»؛ dedup بر اساس chain+tx hash</td><td>معاملهٔ غریبه به نام ولت ثبت نشود</td></tr>
+<tr><td>H-PNL</td><td>برچسب/مخفی‌سازی P&amp;L کیف‌پول</td><td>تا بازسازی دفترکل: «برآورد قیمت از اولین مشاهده» + درصد unpriced</td><td>coverage غیرواقعی نمایش داده نشود</td></tr>
+</table>
+<p class="ok"><b>Gate 1:</b> همهٔ کدهای بالا تست دارند + CI سبز + بررسی دستی: هیچ صفحه‌ای روی دادهٔ FAILURE عدد تصمیم‌ساز نشان نمی‌دهد و فهرست workflowها تمیز است. → سپس فاز ۲ مجاز است.</p>
+
+<h2>۵) فاز ۲ — حسابداری، ضد‌سیگنال‌کاذب و fail-closed (۱ تا ۲ هفته)</h2>
+<table>
+<tr><th>کد</th><th>اقدام</th><th>نکتهٔ کلیدی</th></tr>
+<tr><td>F2</td><td>PnL فیوچرز مارجین‌محور</td><td>فیلد leverage و fundingPaid در Trade؛ گارد entryPrice&lt;=0؛ کسر کارمزد یکسان در دو مسیر</td></tr>
+<tr><td>F3</td><td>پرشدن کاغذی با قیمت بازار</td><td>ticker لحظهٔ ثبت + ثبت slippage جداگانه</td></tr>
+<tr><td>F4b</td><td>funding بر اساس timestamp</td><td>مرزهای پرداخت UTC + نرخ تاریخی قرارداد؛ تست 15m و 4h</td></tr>
+<tr><td>H-WIN2</td><td>تعریف واحد trade outcome + سطوح پس از fill</td><td>WIN فقط اگر PnL خالص&gt;0؛ stop/target بر مبنای fill/ATR؛ تست gap</td></tr>
+<tr><td>L3</td><td>آستانه ورود اسپات + بنچمارک</td><td>آستانه &gt;=۴۰ تنظیم‌پذیر؛ خروجی relative performance نسبت به buy&amp;hold</td></tr>
+<tr><td>L2</td><td>سازگاری دلایل سیگنال</td><td>side==DUMP → امتیاز روند صعودی صفر و بالعکس؛ تست واحد سازگاری دلایل</td></tr>
+<tr><td>L1</td><td>سیاست SNIPER برای UNKNOWN</td><td>برچسب «عدم تأیید امنیت — ریسک بالا»؛ رتبهٔ نمایش زیر READY؛ risk flag کنار هر آیتم؛ رفتار ویژه برای زنجیره‌های Unsupported گوپلاس</td></tr>
+<tr><td>S3b</td><td>SecureStorage fail-closed</td><td>فقط دادهٔ با prefix متفاوت plaintext خوانده شود؛ بازرمزنگاری دادهٔ قدیمی پس از بازگشت Keystore؛ تست fallback</td></tr>
+<tr><td>L8</td><td>کلید ترکیبی استخرها</td><td>id ?: "${chain}_${baseToken}_${pool}"؛ تست عدم حذف استخرهای بدون id</td></tr>
+<tr><td>F5</td><td>زنده‌کردن PumpDetector</td><td>فراکتال روی index=size-1-bars؛ تست قطعی BUY/SELL</td></tr>
+<tr><td>F6</td><td>الگوی زمان ISO با میلی‌ثانیه</td><td>java.time.Instant.parse؛ خطا → UNKNOWN نه ۹۹۹۹</td></tr>
+<tr><td>H-DOJI</td><td>کندل باز و doji</td><td>حذف کندل باز بر اساس closeTime؛ body حداقلی</td></tr>
+<tr><td>S4/S5</td><td>فروشگاه‌های fail-closed</td><td>الگوی WatchlistStore برای FollowedWhales/TraderStore (null در خطا، قفل، پرچم lastLoadFailed)</td></tr>
+<tr><td>RPC-WIPE</td><td>wipe کامل کلید RPC</td><td>RpcKeyStore.clear(context) + legacy prefs + کش static؛ تست پس از wipe</td></tr>
+<tr><td>S6</td><td>سقف سنی fallback + سن مونوتونیک</td><td>۱۰ دقیقه قیمت / ۶ ساعت متادیتا؛ elapsedRealtime در DataEnvelope</td></tr>
+<tr><td>F1</td><td>جداسازی کش quick/top-1000</td><td>دو TtlCache مستقل با کلید دیسک جدا</td></tr>
+<tr><td>S8</td><td>مهاجرت واچ‌لیست امن</td><td>حذف کلید قدیمی فقط پس از موفقیت کامل؛ کلید قرنطینه؛ قفل</td></tr>
+<tr><td>F7/F8/F9/F10</td><td>اصلاحات کمّی</td><td>normalizeSymbol set-based؛ کف نهنگ مشروط به نقدینگی؛ True Range و OBV تفاضلی و هفتهٔ تقویمی؛ baseCapital از PaperState</td></tr>
+<tr><td>H-DEDUP</td><td>تحویل مطمئن هشدار</td><td>pending/delivered durable؛ کلید hash(symbol,side,close,mode)؛ permission denied به UI</td></tr>
+<tr><td>G6</td><td>پوشش تست و CI</td><td>تست FuturesScannerEngine و MemeRadar؛ اصلاح پسوند WalletDomainTest.k؛ JaCoCo در CI</td></tr>
+<tr><td>S7</td><td>minify + امضا + نام ASCII</td><td>signing از متغیر محیطی؛ حذف نویسه‌های نامرئی U+2009/U+00A0</td></tr>
+</table>
+<p class="ok"><b>Gate 2:</b> اعداد بک‌تست و ژورنال از یک تعریف واحد و قابل بازتولید؛ تست‌های 15m/4h funding سبز؛ SNIPER هرگز UNKNOWN را READY نشان نمی‌دهد؛ بک‌تست اسپات بنچمارک buy&amp;hold دارد؛ release امضاشده و minify‌شده ساخته شد. → اپ برچسب «کاغذی قابل‌اتکا» می‌گیرد و فاز ۳ مجاز است.</p>
+
+<h2>۶) فاز ۳ — قابلیت‌های وعده‌داده‌شده (۲ تا ۸ هفته)</h2>
+<table>
+<tr><th>کد</th><th>قابلیت</th><th>طراحی</th></tr>
+<tr><td>G1</td><td>رهگیری واقعی ولت</td><td>getSignaturesForAddress دوره‌ای یا وب‌هوک Helius + رمزگشای swap با شواهد (SolanaEventDecoder موجود) + هشدار پوش BUY/SELL</td></tr>
+<tr><td>G1b</td><td>کشف «تجمیع در کف سپس dump»</td><td>موتور پیوسته روی ولت‌های رصدشده: خرید کف → شروع خروج → هشدار</td></tr>
+<tr><td>G2</td><td>Leaderboard واقعی</td><td>دفترکل SignalLogger: نرخ برد، PnL، maxDrawdown با حداقل نمونه؛ حذف هیوریستیک pumps×20</td></tr>
+<tr><td>M-SRC</td><td>شفافیت منبع</td><td>نمایش venue واقعی (CEX/DEX/wallet)؛ عنوان «جریان معاملات بزرگ»</td></tr>
+<tr><td>M-PRIV</td><td>حریم خصوصی</td><td>به‌روزرسانی PRIVACY_POLICY + ماسک آدرس در لاگ + تست redaction</td></tr>
+<tr><td>P1..P6</td><td>عملکرد</td><td>کش Empty گوپلاس؛ بازهٔ کارگر میم ۱ ساعت؛ حذف sleep درون قفل/interceptor؛ LRU برای نگاشت‌های بی‌کران؛ throttle per-host</td></tr>
+<tr><td>M-LP</td><td>مدل قفل نقدینگی</td><td>سهم LP قفل‌شده/کل عرضه + انقضا + can_take_back_ownership</td></tr>
+</table>
+<p class="ok"><b>Gate 3:</b> هشدار ولت فقط با شواهد swap؛ leaderboard از دفترکل با n&gt;=۲۰؛ بودجهٔ درخواست قابل‌نمایش در UI. → فاز ۴ مجاز است.</p>
+
+<h2>۷) فاز ۴ — مقیاس، تمایز و اعتبارسنجی (۱ تا ۳ ماه)</h2>
+<table>
+<tr><th>کد</th><th>مورد</th><th>توضیح</th></tr>
+<tr><td>G5</td><td>Room + Hilt</td><td>پایان ساختاری کلاس باگ‌های ذخیره‌سازی؛ کوئری آماری رایگان</td></tr>
+<tr><td>G3/G4</td><td>جریان زنده</td><td>WebSocket صرافی‌ها + استریم GeckoTerminal؛ معماری قیفی: قوانین اول، تحلیل سنگین بعد</td></tr>
+<tr><td>G4b</td><td>Indexer کیف‌پول چندزنجیره‌ای</td><td>دفترکل immutable + cost basis + price-at-event (نیازمند backend)</td></tr>
+<tr><td>BT2</td><td>بک‌تست نسل دوم</td><td>دادهٔ delisted، funding تاریخی، mark/index، liquidation venue-specific</td></tr>
+<tr><td>WF</td><td>walk-forward و out-of-sample</td><td>سیم‌کشی BacktestMetrics.inSample/outOfSample (۷۰/۳۰ زمانی)؛ UI: «وین‌ریت in-sample / out-of-sample»؛ تست overfitting</td></tr>
+<tr><td>ML</td><td>لایهٔ تأیید ML (از پارکینگ)</td><td>RegimeGate + kNN لورنتزی clean-room و causal؛ فقط فیلتر تأیید با دفترکل «با ML / بدون ML»</td></tr>
+<tr><td>V2</td><td>انتشار v2.0</td><td>فقط پس از Gate 4</td></tr>
+</table>
+<p class="ok"><b>Gate 4:</b> KPIهای بخش ۸ روی paper tracking حداقل ۳۰ روز پیوسته برقرار باشد و وین‌ریت out-of-sample در بازهٔ قابل‌قبول in-sample بماند. → ادعای عمومی و انتشار v2.0 مجاز است.</p>
+
+<h2>۸) معیارهای موفقیت (تعریف عملیاتی «بهترین اپ»)</h2>
+<table>
+<tr><th>معیار</th><th>هدف</th><th>روش اندازه‌گیری</th></tr>
+<tr><td>وین‌ریت واقعی سیگنال‌ها</td><td>&gt;۵۵٪ با n&gt;۳۰</td><td>دفترکل SignalLogger + بازهٔ اطمینان نمایش‌داده‌شده</td></tr>
+<tr><td>وین‌ریت out-of-sample</td><td>فاصله &lt;۱۰ واحد درصد با in-sample</td><td>walk-forward ۷۰/۳۰ (WF)</td></tr>
+<tr><td>Profit factor</td><td>&gt;۱.۵ و بهتر از buy&amp;hold</td><td>بک‌تست با کارمزد/فاندینگ/لیکوئیدیشن واقعی + بنچمارک</td></tr>
+<tr><td>تأخیر سیگنال</td><td>&lt;۵ ثانیه (فاز ۴: &lt;۱ ثانیه)</td><td>برچسب observedAt تا صدور</td></tr>
+<tr><td>صفر سیگنال روی دادهٔ خطا</td><td>۱۰۰٪</td><td>تست‌های FAILURE/EMPTY + گیت CI</td></tr>
+<tr><td>پوشش نهنگ</td><td>top-1000 هم‌زمان</td><td>فاز ۴</td></tr>
+<tr><td>رهگیری ولت</td><td>۱۰۰ ولت با هشدار خرید/فروش واقعی</td><td>فاز ۳</td></tr>
+<tr><td>کشف میم</td><td>اعلام پیش از پامپ با جریان زنده</td><td>فاز ۴</td></tr>
+<tr><td>رضایت تریدر</td><td>«دقیقاً همان چیزی که می‌خواستم»</td><td>بازخورد واقعی + نرخ نگهداشت</td></tr>
+</table>
+<p class="high">قاعدهٔ ضدتورم: هر عدد تبلیغاتی باید در اپ با همان فرمول و همان دفترکل قابل بازتولید باشد؛ وگرنه منتشر نمی‌شود.</p>
+
+<h2>۹) معماری هدف (چکیدهٔ سه گزارش)</h2>
+<ol>
+<li>domain تایپ‌شده: AssetId/ChainId/InstrumentId؛ ticker هرگز هویت نیست؛ lookback مرکزی per-mode.</li>
+<li>یک DataGateway: adapter per venue، quote با (price, source, observedAt, cacheAge, confidence)، پاسخ PASS/FAIL/UNKNOWN و status PARTIAL/STALE.</li>
+<li>خطای نوع‌دار همه‌جا: حذف الگوی «لیست خالی یعنی خطا».</li>
+<li>دفترکل immutable کیف‌پول: رویداد → decode با شواهد → price-at-event → cost basis جدا از موجودی.</li>
+<li>جریان هشدار state-machine: detected → validated → pending → delivered/failed + صف retry + dedup بر اساس chain+txHash.</li>
+<li>مرز سخت engine/UI: محاسبه فقط در engine؛ UI فقط نمایش.</li>
+<li>کش‌های محدود (LRU+TTL) و بودجهٔ درخواست قابل‌نمایش به کاربر.</li>
+<li>خط تولید سالم: wrapper رسمی با checksum، actionهای پین‌شده به SHA، job dependency-check.</li>
+</ol>
+
+<h2>۱۰) گیت‌های کیفیت (برای هر کامیت)</h2>
+<ul>
+<li>gradle assembleDebug + testDebugUnitTest سبز</li>
+<li>تست جدید برای هر باگ رفع‌شده (باگ بدون تست = رفع‌نشده)</li>
+<li>HonestyScreensUiTest سبز</li>
+<li>هیچ کلید/آدرسی در لاگ (تست redaction)</li>
+<li>JaCoCo: حداقل ۴۰٪ روی engine و data (از فاز ۲)</li>
+<li>detekt/ktlint بدون خطای جدید</li>
+</ul>
+
+<h2>۱۱) چک‌لیست انتشار هر نسخه</h2>
+<ul>
+<li>minify + shrinkResources با قواعد keep تست‌شده</li>
+<li>امضا از متغیر محیطی (هرگز داخل مخزن)</li>
+<li>نام فایل‌ها ASCII بدون نویسهٔ نامرئی</li>
+<li>DATA_SAFETY.md و PRIVACY_POLICY با کد واقعی منطبق</li>
+<li>RELEASE_CHECKLIST اجرا و ثبت شود</li>
+<li>نسخهٔ آزمایشی ۷ روز paper trading بدون مغایرت عدد</li>
+</ul>
+
+<h2>۱۲) خط قرمزهای برند (صداقت)</h2>
+<ol>
+<li>ادعای «سود تضمینی» یا «وین‌ریت تضمینی» ممنوع؛ فقط آمار با نمونه و بازهٔ اطمینان.</li>
+<li>عبارت «هوش مصنوعی» فقط وقتی مجاز است که لایهٔ ML با دفترکل جداگانه اندازه‌گیری شود (فاز ۴).</li>
+<li>هر دادهٔ ناقص = UNKNOWN با رنگ هشدار، هرگز PASS خاموش (شامل حالت SNIPER).</li>
+<li>ترید واقعی با پول واقعی تا پایان فاز ۲ ممنوع؛ اپ فعلاً پژوهشی/کاغذی معرفی شود.</li>
+<li>هر قابلیت وعده‌داده‌شده یا پیاده است یا برچسب «به‌زودی/پیش‌نمایش»؛ وضعیت پنهان ممنوع.</li>
+</ol>
+
+<h2>۱۳) ریتم هفتگی</h2>
+<ul>
+<li><b>شنبه:</b> انتخاب ۳ آیتم از فاز جاری + نوشتن تست‌های شکست‌خورده اول (TDD)</li>
+<li><b>دوشنبه:</b> پیاده‌سازی + CI سبز + کامیت fix(scope)/feat(scope)</li>
+<li><b>چهارشنبه:</b> بازبینی اعداد UI با دفترکل (ضدتورم)</li>
+<li><b>پنج‌شنبه:</b> تیک‌زدن همین سند + پاک‌سازی کد مرده</li>
+<li><b>جمعه:</b> استراحت یا آزمایش دستی روی دستگاه واقعی 📱</li>
+</ul>
+
+<h2>پیوست الف — نگاشت کدهای سه گزارش به این سند</h2>
+<ul>
+<li>گزارش MD: کدهای C1..C3، S1..S8، F1..F10، P1..P6 عیناً حفظ شده‌اند؛ C1 (خرابی کامپایل) رفع و سبز شده است.</li>
+<li>گزارش HTML: یافته‌ها با پیشوند H-، M-، RPC-WIPE، WF افزوده شده‌اند.</li>
+<li>گزارش سوم: C1→(H-WAL فاز۱ + G1/G2 فاز۳)؛ C2/S1→منسوخ (اسکریپت‌ها حذف شدند) + باقی‌مانده SC1؛ C3→C3/H-EMA؛ S2→S1؛ S3→S3b؛ S4→پذیرفته‌شده با ریسک کم (paper، اختیاری فاز۲)؛ S5→داخل راه‌حل S2؛ S6→P1..P6؛ S7→پذیرفته‌شده (گیت آینده)؛ S8→SC1؛ L1,L2,L3,L8→جدید فاز۲؛ L4→F2/F4b؛ L5→S3؛ L6→داخل C3؛ L7→F7؛ L9→F5؛ L10→F9؛ پیشنهاد §8-4→WF.</li>
+</ul>
+
+<h2>پیوست ب — آیین‌نامهٔ جلسه‌ها (ضدانحراف)</h2>
+<ol>
+<li>هر جلسه با ارسال همین فایل و جملهٔ «فاز X، آیتم Y» شروع می‌شود.</li>
+<li>دستیار اول کد آیتم را از جدول بخش ۳ بلند می‌خواند و تأیید می‌کند، بعد پچ می‌نویسد.</li>
+<li>هر پیشنهاد خارج از فاز → پارکینگ بخش ۰، بدون اجرا.</li>
+<li>پس از هر کامیت موفق، تیک آیتم زده می‌شود و سند ذخیره/پوش می‌شود.</li>
+<li>بستن هر Gate فقط با evidence (تست سبز + اسکرین‌شات CI + بررسی دستی)، نه با اعلام زبانی.</li>
+</ol>
+
+<div class="card muted">
+پایان سند مرجع · نسخهٔ ۲.۱ · این سند زنده است؛ فقط با تصمیم مالک و همراه با evidence به‌روز می‌شود.
+</div>
+</div>
+<script>
+function copyAll(){
+  var el = document.getElementById('report');
+  var txt = el.innerText;
+  function done(){ document.getElementById('copybtn').textContent = '✅ کپی شد'; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done, done);
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+    done();
+  }
+}
+</script>
+</body>
+</html>
