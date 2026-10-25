@@ -80,16 +80,26 @@ object UnifiedSignalEngine {
         val t1hUp = Indicators.emaLast(closes, 20) > Indicators.emaLast(closes, 50) && Indicators.supertrend(closed).direction > 0
         val t1hDn = Indicators.emaLast(closes, 20) < Indicators.emaLast(closes, 50) && Indicators.supertrend(closed).direction < 0
 
-        val t4hUp = closes4h.size >= 60 && Indicators.emaLast(closes4h, 50) > Indicators.emaLast(closes4h, 200)
-        val t4hDn = closes4h.size >= 60 && Indicators.emaLast(closes4h, 50) < Indicators.emaLast(closes4h, 200)
+        // تطبیق با دادهٔ موجود: با ۵۰۰ کندل ۱ساعته، حداکثر ~۲۰ کندل ۴ساعته و ~۸ کندل روزانه داریم.
+        // استفاده از EMAهای کوتاه‌تر برای دادهٔ محدود، همراه با برچسب شفاف.
+        val t4hUp = closes4h.size >= 20 && Indicators.emaLast(closes4h, 10) > Indicators.emaLast(closes4h, 20)
+        val t4hDn = closes4h.size >= 20 && Indicators.emaLast(closes4h, 10) < Indicators.emaLast(closes4h, 20)
 
-        val tDUp = closesD.size >= 60 && Indicators.emaLast(closesD, 50) > Indicators.emaLast(closesD, 200)
-        val tDDn = closesD.size >= 60 && Indicators.emaLast(closesD, 50) < Indicators.emaLast(closesD, 200)
+        val tDUp = closesD.size >= 10 && Indicators.emaLast(closesD, 5) > Indicators.emaLast(closesD, 10)
+        val tDDn = closesD.size >= 10 && Indicators.emaLast(closesD, 5) < Indicators.emaLast(closesD, 10)
 
         val mtfUp = t1hUp && t4hUp && tDUp
         val mtfDn = t1hDn && t4hDn && tDDn
         val mtfAligned = mtfUp || mtfDn
-        val mtfTrend = if (mtfUp) "UP" else if (mtfDn) "DOWN" else "MIX"
+        
+        val hasEnough4h = closes4h.size >= 20
+        val hasEnoughD = closesD.size >= 10
+        val mtfTrend = when {
+            mtfUp -> "UP"
+            mtfDn -> "DOWN"
+            !hasEnough4h || !hasEnoughD -> "MIX(دادهٔ ناکافی)"
+            else -> "MIX"
+        }
 
         // ۲. لایه تشخیص Setup و اندیکاتورها — همه روی closed
         val rsi = Indicators.rsi(closes, params.rsiPeriod)
