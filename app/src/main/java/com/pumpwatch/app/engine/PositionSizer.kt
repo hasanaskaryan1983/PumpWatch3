@@ -69,12 +69,14 @@ object PositionSizer {
         val avgWin = if (wins.isEmpty()) 0.0 else wins.average()
         val avgLoss = if (losses.isEmpty()) 0.0 else abs(losses.average())
 
-        val kelly = if (avgLoss <= 0.0 || avgWin <= 0.0) {
-            // هنوز ضرر ثبت نشده → نمی‌توان R را تخمین زد؛ محتاطانه نصف سقف
-            MAX_KELLY * 0.5
-        } else {
-            val r = avgWin / avgLoss
-            (w - (1.0 - w) / r).coerceIn(0.0, MAX_KELLY)
+        val kelly = when {
+            avgWin <= 0.0 && avgLoss <= 0.0 -> 0.0
+            avgWin <= 0.0 -> 0.0
+            avgLoss <= 0.0 -> if (closed >= 20) MAX_KELLY * 0.5 else 0.0
+            else -> {
+                val r = avgWin / avgLoss
+                (w - (1.0 - w) / r).coerceIn(0.0, MAX_KELLY)
+            }
         }
 
         val half = kelly / 2.0
