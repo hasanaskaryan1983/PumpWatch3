@@ -345,7 +345,14 @@ object GateProvider : WhaleProvider {
 
 // -------- 🟢 کف بدون‌مجوز: GeckoTerminal DEX (با کش بهینه) --------
 
-private val poolCache = ConcurrentHashMap<String, Pair<String, String>>()
+// 🚀 S2: کش محدود با TTL (۱۰ دقیقه) و سقف ۵۰۰ ورودی برای جلوگیری از نشت حافظه
+object PoolCache {
+    private const val TTL_MS = 10 * 60 * 1000L
+    private const val MAX_ENTRIES = 500
+    private val cache = TtlCache<Pair<String, String>>(TTL_MS, MAX_ENTRIES)
+    fun get(symbol: String) = cache.get(symbol)
+    fun put(symbol: String, value: Pair<String, String>) = cache.put(symbol, value)
+}
 
 /**
  * 🚀 Commit 82 + 83-fix: GeckoDexProvider با مدل دقیق مطابق مستندات رسمی.
@@ -363,23 +370,27 @@ object GeckoDexProvider : WhaleProvider {
 
     override suspend fun fetchNormalized(symbol: String, limit: Int): List<AggTradeNormalized> {
         return try {
-            var networkAndPool = poolCache[symbol]
+            var networkAndPool = PoolCache.get(symbol)
 
             if (networkAndPool == null) {
                 val pools = GeckoTerminal.api.searchPools(symbol).data?.filter { it.attributes != null } ?: emptyList()
                 val bestPool = pools.maxByOrNull { it.attributes?.volume?.h24 ?: 0.0 }
 
-                if (bestPool == null) {
+                // 🚀 S2: بررسی تطابق نماد برای جلوگیری از چسبیدن استخر اشتباه (مثلاً PEPE به استخر غلط)
+                val isValid = bestPool?.attributes?.name?.contains(symbol, ignoreCase = true) == true || bestPool?.id?.contains(symbol, ignoreCase = true) == true
+                val safePool = if (bestPool != null && isValid) bestPool else null
+
+                if (safePool == null) {
                     throw TerminalError("No pool found for $symbol on GeckoTerminal")
                 }
 
-                val net = bestPool.relationships?.network?.data?.id
+                val net = safePool.relationships?.network?.data?.id
                     ?: throw TerminalError("Network ID missing")
-                val poolAddr = bestPool.id?.substringAfter('_')
+                val poolAddr = safePool.id?.substringAfter('_')
                     ?: throw TerminalError("Pool Address missing")
 
                 networkAndPool = Pair(net, poolAddr)
-                poolCache[symbol] = networkAndPool
+                PoolCache.put(symbol, networkAndPool)
             }
 
             val (net, poolAddr) = networkAndPool
