@@ -100,7 +100,8 @@ object WhaleFlowEngine {
         for (provider in WhaleProviders.all) {
             val trades: List<AggTradeNormalized> = try {
                 provider.fetchNormalized(symbol, limit)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w("WhaleFlowEngine", "${provider.name} failed: ${e.message}")
                 emptyList()
             }
             if (trades.isEmpty()) continue

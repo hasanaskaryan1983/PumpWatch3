@@ -191,6 +191,7 @@ object BinanceProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.buyerIsMaker ?: false)
             }
         } catch (e: Exception) {
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -243,6 +244,7 @@ object BybitProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.side?.equals("Sell", true) == true)
             } ?: emptyList()
         } catch (e: Exception) {
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -293,6 +295,7 @@ object OkxProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.side?.equals("sell", true) == true)
             } ?: emptyList()
         } catch (e: Exception) {
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -337,6 +340,7 @@ object GateProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.side?.equals("sell", true) == true)
             }
         } catch (e: Exception) {
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -422,6 +426,7 @@ object GeckoDexProvider : WhaleProvider {
                 AggTradeNormalized(px, qty, tsMs, isSell)
             }.take(limit)
         } catch (e: Exception) {
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
