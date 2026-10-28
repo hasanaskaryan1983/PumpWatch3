@@ -1,4 +1,5 @@
 package com.pumpwatch.app.data
+import android.util.Log
 
 import com.google.gson.annotations.SerializedName
 import retrofit2.Retrofit
@@ -133,7 +134,7 @@ private fun handleProviderError(e: Exception, providerName: String) {
             android.util.Log.e("WhaleProvider", "[$providerName] Terminal: ${e.message}")
         }
         is TransientError -> {
-            android.util.android.util.android.util.Log.w("WhaleProvider", "[$providerName] Transient: ${e.message}")
+            Log.w("WhaleProvider", "[$providerName] Transient: ${e.message}")
         }
         else -> {
             val msg = e.message ?: ""
@@ -149,7 +150,7 @@ private fun handleProviderError(e: Exception, providerName: String) {
                 cls.contains("Connect")
             try {
                 if (isTransient) {
-                    android.util.android.util.android.util.Log.w("WhaleProvider", "[$providerName] Likely Transient ($cls): ${e.message}")
+                    Log.w("WhaleProvider", "[$providerName] Likely Transient ($cls): ${e.message}")
                 } else {
                     android.util.Log.e("WhaleProvider", "[$providerName] Error ($cls): ${e.message}", e)
                 }
@@ -191,7 +192,7 @@ object BinanceProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.buyerIsMaker ?: false)
             }
         } catch (e: Exception) {
-            android.util.android.util.Log.w("WhaleProvider", "${name}: network error — ${e.message}")
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -244,7 +245,7 @@ object BybitProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.side?.equals("Sell", true) == true)
             } ?: emptyList()
         } catch (e: Exception) {
-            android.util.android.util.Log.w("WhaleProvider", "${name}: network error — ${e.message}")
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -295,7 +296,7 @@ object OkxProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.side?.equals("sell", true) == true)
             } ?: emptyList()
         } catch (e: Exception) {
-            android.util.android.util.Log.w("WhaleProvider", "${name}: network error — ${e.message}")
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -340,7 +341,7 @@ object GateProvider : WhaleProvider {
                 AggTradeNormalized(p, q, ts, t.side?.equals("sell", true) == true)
             }
         } catch (e: Exception) {
-            android.util.android.util.Log.w("WhaleProvider", "${name}: network error — ${e.message}")
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }
@@ -426,7 +427,7 @@ object GeckoDexProvider : WhaleProvider {
                 AggTradeNormalized(px, qty, tsMs, isSell)
             }.take(limit)
         } catch (e: Exception) {
-            android.util.android.util.Log.w("WhaleProvider", "${name}: network error — ${e.message}")
+            Log.w("WhaleProvider", "${name}: network error — ${e.message}")
             handleProviderError(e, name)
             emptyList()
         }

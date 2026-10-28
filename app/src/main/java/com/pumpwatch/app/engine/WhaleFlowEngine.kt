@@ -1,4 +1,5 @@
 package com.pumpwatch.app.engine
+import android.util.Log
 
 import com.pumpwatch.app.data.AggTradeNormalized
 import com.pumpwatch.app.data.WhaleProviders
@@ -101,7 +102,7 @@ object WhaleFlowEngine {
             val trades: List<AggTradeNormalized> = try {
                 provider.fetchNormalized(symbol, limit)
             } catch (e: Exception) {
-                android.util.android.util.android.util.Log.w("WhaleFlowEngine", "${provider.name} failed: ${e.message}")
+                android.util.android.util.Log.w("WhaleFlowEngine", "${provider.name} failed: ${e.message}")
                 emptyList()
             }
             if (trades.isEmpty()) continue
