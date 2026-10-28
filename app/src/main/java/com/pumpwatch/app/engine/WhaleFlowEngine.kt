@@ -102,7 +102,7 @@ object WhaleFlowEngine {
             val trades: List<AggTradeNormalized> = try {
                 provider.fetchNormalized(symbol, limit)
             } catch (e: Exception) {
-                android.util.android.util.Log.w("WhaleFlowEngine", "${provider.name} failed: ${e.message}")
+                Log.w("WhaleFlowEngine", "${provider.name} failed: ${e.message}")
                 emptyList()
             }
             if (trades.isEmpty()) continue
