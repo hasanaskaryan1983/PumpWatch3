@@ -200,8 +200,8 @@ object MultiExchange {
      *    - truncate به limit
      *    - cache
      */
-    suspend fun fetchKlines(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
-        val key = "$symbolUpper|$interval|$limit"
+    suspend fun fetchKlines(symbolUpper: String, interval: String, limit: Int, marketType: String = "SPOT"): List<BinanceCandle> {
+        val key = "$symbolUpper|$interval|$limit|$marketType"
         GlobalKlineCache.get(key)?.let { return it }
 
         // 🚀 Commit 117 (M5): Mutex per key (coroutine-safe، اجازه suspend function)
@@ -210,7 +210,7 @@ object MultiExchange {
             // double-check: ممکن است coroutine دیگر در این فاصله cache کرده باشد
             GlobalKlineCache.get(key)?.let { return@withLock it }
 
-            val raw = fetchKlinesNetwork(symbolUpper, interval, limit)
+            val raw = fetchKlinesNetwork(symbolUpper, interval, limit, marketType)
             if (raw.isEmpty()) return@withLock emptyList()
 
             // 🚀 Commit 117 (M5): dedup + sort + truncate
@@ -224,10 +224,11 @@ object MultiExchange {
         }
     }
 
-    private suspend fun fetchKlinesNetwork(symbolUpper: String, interval: String, limit: Int): List<BinanceCandle> {
+    private suspend fun fetchKlinesNetwork(symbolUpper: String, interval: String, limit: Int, marketType: String = "SPOT"): List<BinanceCandle> {
         // 1) Bybit
         try {
-            val r = bybit.kline("spot", "${symbolUpper}USDT", bybitInterval(interval), limit)
+            val category = if (isFut(marketType)) "linear" else "spot"
+            val r = bybit.kline(category, "${symbolUpper}USDT", bybitInterval(interval), limit)
             val list = r.result?.list
             if (!list.isNullOrEmpty()) {
                 val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
@@ -237,7 +238,7 @@ object MultiExchange {
 
         // 2) OKX
         try {
-            val r = okx.candles("${symbolUpper}-USDT", okxBar(interval), limit)
+            val r = okx.candles(if (isFut(marketType)) "${symbolUpper}-USDT-SWAP" else "${symbolUpper}-USDT", okxBar(interval), limit)
             val list = r.data
             if (!list.isNullOrEmpty()) {
                 val out = list.reversed().mapNotNull { a -> candle(a, 0, 1, 2, 3, 4, 5, true) }
@@ -247,6 +248,7 @@ object MultiExchange {
 
         // 3) Gate
         try {
+            if (isFut(marketType)) return emptyList()
             val list = gate.candlesticks("${symbolUpper}_USDT", gateInterval(interval), limit)
             if (list.isNotEmpty()) {
                 val out = list.mapNotNull { a -> candle(a, 0, 5, 3, 4, 2, 1, false) }
@@ -256,6 +258,9 @@ object MultiExchange {
 
         return emptyList()
     }
+
+    internal fun isFut(marketType: String): Boolean =
+        marketType == "FUT" || marketType == "FUTURES"
 
     internal fun candle(
         a: List<String>,
@@ -315,10 +320,10 @@ object BinanceClient {
     val api: KlineCompat = KlineCompat
 
     object KlineCompat {
-        suspend fun klines(symbol: String, interval: String, limit: Int): List<JsonArray> {
+        suspend fun klines(symbol: String, interval: String, limit: Int, marketType: String = "SPOT"): List<JsonArray> {
             val sym = symbol.uppercase().removeSuffix("USDT")
             val step = intervalMs(interval)
-            return MultiExchange.fetchKlines(sym, interval, limit).map { c -> toJsonArray(c, step) }
+            return MultiExchange.fetchKlines(sym, interval, limit, marketType).map { c -> toJsonArray(c, step) }
         }
 
         fun lastSource(symbol: String): String =

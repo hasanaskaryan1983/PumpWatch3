@@ -127,6 +127,8 @@ object BatchScanner {
 
     // ---------- تحلیل کامل یک ارز: فقط UnifiedSignalEngine ----------
 
+    internal fun marketTypeOf(mode: String): String = if (mode == "FUT") "FUTURES" else "SPOT"
+
     private suspend fun analyze(
         m: ScanMarket,
         mode: String,
@@ -135,7 +137,8 @@ object BatchScanner {
     ): SignalResult? {
         // ۱) منبع اصلی و یکپارچه: Binance klines 1h — از cache مرکزی (P1-1)
         val binanceCandles: List<Candle>? = try {
-            val klines = KlineCache.klines("${m.symbol.uppercase()}USDT", "1h", 300)
+            val marketType = marketTypeOf(mode)
+            val klines = KlineCache.klines("${m.symbol.uppercase()}USDT", "1h", 300, marketType)
             if (klines.size >= 60) {
                 klines.map { k ->
                     Candle(
@@ -155,7 +158,7 @@ object BatchScanner {
         }
 
         // ۲) مسیر fallback: نمودار CoinGecko + buildCandlesChecked (تابع pure و تست‌شده)
-        val candles: List<Candle> = binanceCandles ?: run {
+        val candles: List<Candle> = binanceCandles ?: if (mode == "FUT") emptyList() else run {
             val chart = ScanClient.api.chart(m.id, days = 30)
             val build = buildCandlesChecked(chart.prices, chart.volumes)
             if (build.gapCount > 0) {

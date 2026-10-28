@@ -79,16 +79,16 @@ object KlineCache {
     private const val MAX_ENTRIES = 300
     private val cache = TtlCache<List<JsonArray>>(TTL_MS, MAX_ENTRIES)
 
-    suspend fun klines(symbol: String, interval: String, limit: Int): List<JsonArray> {
-        val key = "$symbol|$interval|$limit"
+    suspend fun klines(symbol: String, interval: String, limit: Int, marketType: String = "SPOT"): List<JsonArray> {
+        val key = "$symbol|$interval|$limit|$marketType"
         cache.get(key)?.let { return it }
-        val fresh = BinanceClient.api.klines(symbol, interval, limit)
+        val fresh = BinanceClient.api.klines(symbol, interval, limit, marketType)
         cache.put(key, fresh)
         return fresh
     }
 
-    fun invalidate(symbol: String, interval: String, limit: Int) {
-        cache.invalidate("$symbol|$interval|$limit")
+    fun invalidate(symbol: String, interval: String, limit: Int, marketType: String = "SPOT") {
+        cache.invalidate("$symbol|$interval|$limit|$marketType")
     }
 
     fun clear() = cache.clear()
