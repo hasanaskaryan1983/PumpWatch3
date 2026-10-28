@@ -70,7 +70,7 @@ object Indicators {
     }
 
     fun emaLast(values: List<Double>, period: Int): Double =
-        emaSeries(values, period).lastOrNull() ?: 0.0
+        if (values.size < period) Double.NaN else emaSeries(values, period).lastOrNull() ?: Double.NaN
 
     // ---------- RSI (Wilder) ----------
 

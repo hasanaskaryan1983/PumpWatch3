@@ -58,7 +58,7 @@ object FuturesScannerEngine {
         val closes = candles.map { it.close }
         if (closes.size < 60) return Regime.RANGE
         val e50 = ema(closes, 50).last()
-        val e200 = ema(closes, minOf(200, closes.size)).last()
+        val e200 = if (closes.size >= 200) ema(closes, 200).last() else Double.NaN
         val last = closes.last()
         return when {
             e50 > e200 && last > e50 -> Regime.BULL
