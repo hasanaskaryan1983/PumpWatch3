@@ -142,10 +142,24 @@ object SolanaRpc3 {
     }
 }
 
-private fun heliusClient(apiKey: String): SolanaRpcApi = Retrofit.Builder()
-    .baseUrl("https://mainnet.helius-rpc.com/?api-key=$apiKey")
-    .addConverterFactory(GsonConverterFactory.create()).build().create(SolanaRpcApi::class.java)
 
+
+internal fun heliusClient(apiKey: String): SolanaRpcApi {
+    val client = okhttp3.OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .addHeader("x-api-key", apiKey)
+                .build()
+            chain.proceed(request)
+        }
+        .build()
+    return Retrofit.Builder()
+        .baseUrl("https://mainnet.helius-rpc.com/")
+        .client(client)
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+        .create(SolanaRpcApi::class.java)
+}
 suspend fun solanaRaw(
     body: Map<String, @JvmSuppressWildcards Any?>,
     preferAlt: Boolean = false,
