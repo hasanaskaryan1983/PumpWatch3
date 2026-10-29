@@ -234,7 +234,7 @@ object MemeRadar {
         data class Rejected(val reason: String) : AnalyzeResult()
     }
 
-    private suspend fun analyzeWithReason(p: GeckoPool, policy: ScanPolicy): AnalyzeResult {
+    internal suspend fun analyzeWithReason(p: GeckoPool, policy: ScanPolicy): AnalyzeResult {
         val a = p.attributes ?: return AnalyzeResult.Rejected("score")
         val price = a.priceUsd?.toDoubleOrNull() ?: return AnalyzeResult.Rejected("score")
         if (price <= 0) return AnalyzeResult.Rejected("score")
@@ -305,7 +305,7 @@ object MemeRadar {
 
         // در حالت اسنایپر، UNKNOWN قبول است ولی با سقف امتیاز ۵۰
         val finalScore = if (rugScore == null) {
-            reasons.add("⚠️ امنیت نامشخص — حداکثر امتیاز ۵۰")
+            reasons.add("⚠️ عدم تأیید امنیت — ریسک بالا (سقف امتیاز ۵۰)")
             score.coerceAtMost(50)
         } else {
             score
@@ -338,7 +338,7 @@ object MemeRadar {
         )
     }
 
-    private suspend fun checkRugSafety(
+    internal suspend fun checkRugSafety(
         chain: String,
         contractAddress: String?
     ): Triple<Int?, List<String>, String> {
