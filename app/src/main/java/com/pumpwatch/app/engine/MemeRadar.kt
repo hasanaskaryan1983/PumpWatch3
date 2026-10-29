@@ -229,7 +229,7 @@ object MemeRadar {
     }
 
     // 🚀 Commit 97: نتیجهٔ تحلیل با دلیل رد
-    private sealed class AnalyzeResult {
+    internal sealed class AnalyzeResult {
         data class Success(val signal: MemeSignal) : AnalyzeResult()
         data class Rejected(val reason: String) : AnalyzeResult()
     }
