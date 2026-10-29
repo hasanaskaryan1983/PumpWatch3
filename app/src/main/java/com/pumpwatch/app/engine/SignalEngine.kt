@@ -44,12 +44,15 @@ data class SignalResult(
 
 object SignalEngine {
 
+
     // 🚀 L2: تابع خالص برای تضمین سازگاری دلایل با جهت سیگنال
     internal fun enforceSignalConsistency(side: String, reasons: MutableList<String>) {
         if (side == "PUMP") {
             reasons.removeAll { it.contains("نزولی") || it.contains("DOWN") }
         } else if (side == "DUMP") {
             reasons.removeAll { it.contains("صعودی") || it.contains("UP") }
+        }
+    }
 
     fun analyze(
         coinId: String,
