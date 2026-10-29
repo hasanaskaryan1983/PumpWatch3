@@ -163,7 +163,6 @@ object SignalEngine {
 
         // 🚀 L2: اعمال سازگاری دلایل
         enforceSignalConsistency(side, reasons)
-        }
 
         val golden = score >= params.goldenScore && mtfAligned && adx >= params.adxMin
 
