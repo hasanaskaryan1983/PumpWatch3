@@ -44,6 +44,13 @@ data class SignalResult(
 
 object SignalEngine {
 
+    // 🚀 L2: تابع خالص برای تضمین سازگاری دلایل با جهت سیگنال
+    internal fun enforceSignalConsistency(side: String, reasons: MutableList<String>) {
+        if (side == "PUMP") {
+            reasons.removeAll { it.contains("نزولی") || it.contains("DOWN") }
+        } else if (side == "DUMP") {
+            reasons.removeAll { it.contains("صعودی") || it.contains("UP") }
+
     fun analyze(
         coinId: String,
         symbol: String,
@@ -107,7 +114,7 @@ object SignalEngine {
             reasons.add("هم‌جهتی ۳ تایم‌فریم (Daily/4H/1H)")
         } else {
             if (t4hUp || tDUp) { score += 15; reasons.add("روند بلندمدت صعودی") }
-            if (t4hDn || tDDn) { score += 15; reasons.add("روند بلندمدت نزولی") }
+            else if (t4hDn || tDDn) { score += 15; reasons.add("روند بلندمدت نزولی") }
         }
 
         val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0
@@ -152,6 +159,10 @@ object SignalEngine {
             isBullishSetup && score >= params.minScore -> "PUMP"
             isBearishSetup && score >= params.minScore -> "DUMP"
             else -> "NONE"
+        }
+
+        // 🚀 L2: اعمال سازگاری دلایل
+        enforceSignalConsistency(side, reasons)
         }
 
         val golden = score >= params.goldenScore && mtfAligned && adx >= params.adxMin
