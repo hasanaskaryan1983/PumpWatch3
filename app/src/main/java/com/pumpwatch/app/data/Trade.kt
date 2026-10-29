@@ -2,16 +2,11 @@ package com.pumpwatch.app.data
 
 /**
  * 🚀 Sprint 15 (فاز ۱ / Commit 11): Take-profit پله‌ای
+ * 🚀 Sprint 16 (F2): PnL فیوچرز مارجین‌محور
  *
- * فیلدهای جدید:
- *  - partialClose: آیا نیمی از معامله در +1R بسته شده؟
- *  - partialClosePrice/Time/Reason: جزئیات بستن نیمی
- *  - ledgerVersion = 3
- *
- * توابع جدید:
- *  - realizedPnlPartial(): PnL بخش ۵۰٪ اول
- *  - realizedPnlFinal(): PnL بخش ۵۰٪ دوم (اگر بسته شود)
- *  - totalRealizedPnl(): مجموع
+ * فیلدهای جدید F2:
+ *  - leverage: اهرم برای فیوچرز (پیش‌فرض 1.0 برای اسپات)
+ *  - fundingPaid: مبلغ فاندینگ پرداختی/دریافتی به USD
  *
  * backward compatible: همهٔ فیلدهای جدید default دارند.
  */
@@ -43,6 +38,9 @@ data class Trade(
     val slippagePct: Double = 0.1,
     val feePct: Double = 0.1,
     val fillTime: Long? = null,
+    // 🚀 Sprint 16 (F2): PnL فیوچرز مارجین‌محور
+    val leverage: Double = 1.0,           // اهرم (پیش‌فرض 1.0 برای اسپات)
+    val fundingPaid: Double = 0.0,        // فاندینگ پرداختی/دریافتی به USD
     // 🚀 Sprint 15 (Commit 11): partial close در +1R
     val partialClose: Boolean = false,
     val partialClosePrice: Double? = null,
@@ -53,30 +51,44 @@ data class Trade(
     // ---------- PnL لحظه‌ای ----------
     fun unrealizedPnl(): Double {
         if (status != "OPEN") return 0.0
+        if (entryPrice <= 0.0) return 0.0  // 🛡️ گارد NaN
+        
         val diff = currentPrice - entryPrice
-        val pct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
-        return pct - feePct
+        val basePct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
+        val leveragedPct = basePct * leverage
+        return leveragedPct - feePct
     }
 
     /**
      * 🚀 Commit 11: PnL بخش ۵۰٪ اول (partial close)
-     * اگر partialClose نشده باشد → 0.0
+     * 🚀 F2: با اهرم و فاندینگ
      */
     fun realizedPnlPartial(): Double {
         if (!partialClose || partialClosePrice == null) return 0.0
+        if (entryPrice <= 0.0) return 0.0  // 🛡️ گارد NaN
+        
         val diff = partialClosePrice - entryPrice
-        val pct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
-        return 0.5 * (pct - (feePct * 2) - slippagePct)
+        val basePct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
+        val leveragedPct = basePct * leverage
+        val partialPnl = 0.5 * (leveragedPct - (feePct * 2) - slippagePct)
+        // کسر نیمی از فاندینگ (چون فقط نیمی از پوزیشن بسته شده)
+        return partialPnl - (fundingPaid * 0.5 * 100.0 / sizeUsd)
     }
 
     /**
      * 🚀 Commit 11: PnL بخش ۵۰٪ دوم (فقط اگر ترید کامل بسته شده باشد)
+     * 🚀 F2: با اهرم و فاندینگ
      */
     fun realizedPnlFinal(): Double {
         if (status != "CLOSED" || exitPrice == null) return 0.0
+        if (entryPrice <= 0.0) return 0.0  // 🛡️ گارد NaN
+        
         val diff = exitPrice - entryPrice
-        val pct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
-        return 0.5 * (pct - (feePct * 2) - slippagePct)
+        val basePct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
+        val leveragedPct = basePct * leverage
+        val finalPnl = 0.5 * (leveragedPct - (feePct * 2) - slippagePct)
+        // کسر نیمی از فاندینگ
+        return finalPnl - (fundingPaid * 0.5 * 100.0 / sizeUsd)
     }
 
     /**
@@ -87,9 +99,14 @@ data class Trade(
     // Backward-compatible: realizedPnl قدیمی (روی exitPrice)
     fun realizedPnl(): Double {
         if (status != "CLOSED" || exitPrice == null) return 0.0
+        if (entryPrice <= 0.0) return 0.0  // 🛡️ گارد NaN
+        
         val diff = exitPrice - entryPrice
-        val pct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
-        return pct - (feePct * 2) - slippagePct
+        val basePct = if (side == "PUMP") diff / entryPrice * 100 else -diff / entryPrice * 100
+        val leveragedPct = basePct * leverage
+        val pnl = leveragedPct - (feePct * 2) - slippagePct
+        // کسر کل فاندینگ
+        return pnl - (fundingPaid * 100.0 / sizeUsd)
     }
 
     fun realizedPnlUsd(): Double = sizeUsd * realizedPnl() / 100.0
