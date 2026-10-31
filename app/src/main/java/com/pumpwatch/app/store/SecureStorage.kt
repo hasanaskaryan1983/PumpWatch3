@@ -99,6 +99,25 @@ object SecureStorage {
         }
     }
 
+    fun putLong(context: Context, key: String, value: Long): Boolean {
+        return try {
+            getSafeEncryptedPrefs(context)?.edit()?.putLong(key, value)?.apply()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Write Long failed for $key (fail-closed)", e)
+            false
+        }
+    }
+
+    fun getLong(context: Context, key: String, default: Long = 0L): Long {
+        return try {
+            getSafeEncryptedPrefs(context)?.getLong(key, default) ?: default
+        } catch (e: Exception) {
+            Log.e(TAG, "Read Long failed for $key (fail-closed)", e)
+            default
+        }
+    }
+
     fun wipeAll(context: Context) {
         clear(context)
     }
