@@ -172,15 +172,27 @@ object SignalEngine {
 
         val golden = score >= params.goldenScore && mtfAligned && adx >= params.adxMin
 
-        return UnifiedSignalResult(
+                return SignalResult(
             coinId = coinId,
             symbol = symbol,
             name = name,
             price = price,
+            mode = mode,
             side = side,
             score = score,
-            isGolden = golden,
+            golden = golden,
+            mtfAligned = mtfAligned,
+            mtfTrend = mtfTrend,
+            adx = adx,
+            rsi = rsi,
+            volumeRatio = volRatio,
+            funding = funding,
+            entry = entry,
+            stopLoss = stopLoss,
+            target1 = target1,
+            target2 = target2,
             reasons = reasons,
             candleCloseTs = candles1h.lastOrNull()?.time ?: 0L
         )
     }
+}
