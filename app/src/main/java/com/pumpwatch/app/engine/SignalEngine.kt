@@ -124,5 +124,5 @@ object SignalEngine {
             else if (t4hDn || tDDn) { score += 15; reasons.add("روند بلندمدت نزولی") }
         }
 
-        val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0 && changePct >= params.momentumMin
-        val isBearishSetup = breakdown && volRatio >= params.volumeMin && rsi in 30.0..50.0 && changePct <= -params.momentumMin
+        val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0 && changePct >= 1.5
+        val isBearishSetup = breakdown && volRatio >= params.volumeMin && rsi in 30.0..50.0 && changePct <= -1.5
