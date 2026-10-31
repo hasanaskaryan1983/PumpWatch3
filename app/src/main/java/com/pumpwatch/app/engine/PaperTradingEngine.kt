@@ -18,6 +18,7 @@ data class FutSignalForPaper(
     val stopLoss: Double,
     val target: Double,
     val score: Int
+    val price: Double = entry // 🚀 F3: قیمت لحظه‌ای بازار
 )
 
 object PaperTradingEngine {
@@ -47,6 +48,10 @@ object PaperTradingEngine {
         val venue = BinanceClient.api.lastSource(sig.symbol)
         val fillTime = System.currentTimeMillis()
 
+        // 🚀 F3: استفاده از قیمت بازار لحظه‌ای و محاسبه slippage واقعی
+        val fillPrice = sig.price
+        val slippagePctCalc = if (sig.entry > 0) kotlin.math.abs(fillPrice - sig.entry) / sig.entry * 100.0 else 0.0
+
         val trade = Trade(
             id = UUID.randomUUID().toString(),
             coinId = sig.coinId,
@@ -54,8 +59,8 @@ object PaperTradingEngine {
             name = sig.name,
             side = sig.side,
             mode = sig.mode,
-            entryPrice = sig.entry,
-            currentPrice = sig.price,
+            entryPrice = fillPrice,
+            currentPrice = fillPrice,
             entryTime = System.currentTimeMillis(),
             exitTime = null,
             exitPrice = null,
@@ -68,7 +73,7 @@ object PaperTradingEngine {
             source = "scanner",
             venue = venue,
             fillTime = fillTime,
-            slippagePct = 0.1,
+            slippagePct = slippagePctCalc,
             feePct = 0.1,
             sizeUsd = sizing.sizeUsd,
             ledgerVersion = 3
@@ -91,6 +96,10 @@ object PaperTradingEngine {
 
         val venue = try { BinanceClient.api.lastSource(sig.symbol) } catch (_: Exception) { "binance" }
         val fillTime = System.currentTimeMillis()
+
+        // 🚀 F3: استفاده از قیمت بازار لحظه‌ای و محاسبه slippage واقعی
+        val fillPrice = sig.price
+        val slippagePctCalc = if (sig.entry > 0) kotlin.math.abs(fillPrice - sig.entry) / sig.entry * 100.0 else 0.0
         val side = if (sig.direction == "LONG") "PUMP" else "DUMP"
 
         val trade = Trade(
@@ -100,8 +109,8 @@ object PaperTradingEngine {
             name = sig.base,
             side = side,
             mode = "FUT",
-            entryPrice = sig.entry,
-            currentPrice = sig.entry,
+            entryPrice = fillPrice,
+            currentPrice = fillPrice,
             entryTime = fillTime,
             exitTime = null,
             exitPrice = null,
@@ -114,7 +123,7 @@ object PaperTradingEngine {
             source = "dashboard",
             venue = venue,
             fillTime = fillTime,
-            slippagePct = 0.1,
+            slippagePct = slippagePctCalc,
             feePct = 0.1,
             sizeUsd = sizing.sizeUsd,
             ledgerVersion = 3
