@@ -53,7 +53,7 @@ object TraderStore {
 
     fun load(ctx: Context): List<TraderProfile> {
         if (loaded) return cache
-        val json = SecureStorage.getEncryptedPrefs(ctx).getString(KEY, null)
+        val json = SecureStorage.getString(ctx, KEY)
         cache.clear()
         if (!json.isNullOrEmpty()) {
             try {
@@ -67,7 +67,7 @@ object TraderStore {
     }
 
     private fun persist(ctx: Context) {
-        SecureStorage.getEncryptedPrefs(ctx).edit().putString(KEY, gson.toJson(cache)).apply()
+        SecureStorage.putString(ctx, KEY, gson.toJson(cache))
     }
 
     fun list(ctx: Context): List<TraderProfile> = load(ctx).toList()

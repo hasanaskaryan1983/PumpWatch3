@@ -142,11 +142,10 @@ object FavStore {
     fun load(ctx: Context) {
         if (loaded) return
         loaded = true
-        val p = SecureStorage.getEncryptedPrefs(ctx)
-        favs.value = try {
-            val j = p.getString("fav_wallets", "") ?: ""
+                favs.value = try {
+            val j = SecureStorage.getString(ctx, "fav_wallets", "") ?: ""
             if (j.isEmpty()) {
-                val old = p.getString("top_traders", "") ?: ""
+                val old = SecureStorage.getString(ctx, "top_traders", "") ?: ""
                 if (old.isNotEmpty()) {
                     val olds: MutableList<SavedTraderOld>? = FG2.fromJson(old, object : TypeToken<MutableList<SavedTraderOld>>() {}.type)
                     olds?.map {
@@ -164,21 +163,19 @@ object FavStore {
             }
         } catch (_: Exception) { mutableListOf() }
         trash.value = try {
-            val tj = p.getString("fav_trash", "") ?: ""
+            val tj = SecureStorage.getString(ctx, "fav_trash", "") ?: ""
             if (tj.isEmpty()) mutableListOf()
             else { val ta = FG2.fromJson(tj, JsonArray::class.java); if (ta != null) normalizeFavsArray(ta) else mutableListOf() }
         } catch (_: Exception) { mutableListOf() }
-        alerts.value = try { FG2.fromJson(p.getString("fav_alerts", "") ?: "", object : TypeToken<MutableList<WalletAlert>>() {}.type) ?: mutableListOf() } catch (_: Exception) { mutableListOf() }
-        lastScanTs = p.getLong("fav_lastscan", 0L)
+        alerts.value = try { FG2.fromJson(SecureStorage.getString(ctx, "fav_alerts", "") ?: "", object : TypeToken<MutableList<WalletAlert>>() {}.type) ?: mutableListOf() } catch (_: Exception) { mutableListOf() }
+        lastScanTs = SecureStorage.getLong(ctx, "fav_lastscan", 0L)
     }
 
     fun save(ctx: Context) {
-        SecureStorage.getEncryptedPrefs(ctx).edit()
-            .putString("fav_wallets", FG2.toJson(favs.value))
-            .putString("fav_trash", FG2.toJson(trash.value))
-            .putString("fav_alerts", FG2.toJson(alerts.value))
-            .putLong("fav_lastscan", lastScanTs)
-            .apply()
+        SecureStorage.putString(ctx, "fav_wallets", FG2.toJson(favs.value))
+        SecureStorage.putString(ctx, "fav_trash", FG2.toJson(trash.value))
+        SecureStorage.putString(ctx, "fav_alerts", FG2.toJson(alerts.value))
+        SecureStorage.putLong(ctx, "fav_lastscan", lastScanTs)
     }
 
     fun unread(): Int = alerts.value.count { !it.read }
