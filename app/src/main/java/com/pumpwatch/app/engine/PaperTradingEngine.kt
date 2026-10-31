@@ -17,7 +17,7 @@ data class FutSignalForPaper(
     val entry: Double,
     val stopLoss: Double,
     val target: Double,
-    val score: Int
+    val score: Int,
     val price: Double = entry // 🚀 F3
 )
 
