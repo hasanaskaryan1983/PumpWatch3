@@ -12,7 +12,9 @@ data class UnifiedSignalParams(
     val minScore: Int = 70,
     val goldenScore: Int = 85,
     val atrMult: Double = 1.5,
-    val rr: Double = 1.5)
+    val rr: Double = 1.5,
+    val momentumMin: Double = 1.5
+)
 
 data class UnifiedSignalResult(
     val coinId: String,
