@@ -2,84 +2,103 @@ package com.pumpwatch.app.store
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 /**
- * \U+1F512 SecureStorage - wrapper برای EncryptedSharedPreferences
+ * 🔒 SecureStorage - wrapper برای EncryptedSharedPreferences با پشتیبانی Fail-Closed (S3b)
  * 
- * استفاده:
- * - همهٔ داده‌های حساس (آدرس‌های کیف‌پول، توکن‌ها، کلیدها) باید اینجا ذخیره شوند
- * - migration از SharedPreferences قدیمی در خود Storeها انجام می‌شود
+ * قانون Fail-Closed:
+ * ۱. در صورت خرابی Keystore، برنامه کرش نمی‌کند.
+ * ۲. هرگز به SharedPreferences معمولی (ناامن) fallback نمی‌شود.
+ * ۳. عملیات خواندن مقدار پیش‌فرض ایمن (null/empty) برمی‌گرداند.
+ * ۴. عملیات نوشتن شکست می‌خورد و false برمی‌گرداند (بدون ذخیره ناامن).
  */
 object SecureStorage {
-    
+
     private const val PREFERENCES_NAME = "encrypted_preferences"
-    
-    private fun getMasterKey(context: Context): MasterKey {
-        return MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-    }
-    
-    fun getEncryptedPrefs(context: Context): SharedPreferences {
-        return EncryptedSharedPreferences.create(
-            context,
-            PREFERENCES_NAME,
-            getMasterKey(context),
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    }
-    
-    /**
-     * ذخیرهٔ لیست رشته‌ها به‌صورت JSON
-     */
-    fun putStringList(context: Context, key: String, value: List<String>) {
-        val json = value.joinToString("|||")
-        getEncryptedPrefs(context).edit().putString(key, json).apply()
-    }
-    
-    /**
-     * خواندن لیست رشته‌ها از JSON
-     */
-    fun getStringList(context: Context, key: String): List<String> {
-        val json = getEncryptedPrefs(context).getString(key, null) ?: return emptyList()
-        return if (json.isEmpty()) emptyList()
-        else json.split("|||").filter { it.isNotEmpty() }
-    }
-    
-    /**
-     * ذخیره رشتهٔ ساده
-     */
-    fun putString(context: Context, key: String, value: String) {
-        getEncryptedPrefs(context).edit().putString(key, value).apply()
-    }
-    
-    /**
-     * خواندن رشتهٔ ساده
-     */
-    fun getString(context: Context, key: String, default: String? = null): String? {
-        return getEncryptedPrefs(context).getString(key, default)
-    }
-    
-    /**
-     * حذف یک key
-     */
-    fun remove(context: Context, key: String) {
-        getEncryptedPrefs(context).edit().remove(key).apply()
-    }
-    
-    /**
-     * پاک کردن همه
-     */
-    fun clear(context: Context) {
-        getEncryptedPrefs(context).edit().clear().apply()
+    private const val TAG = "SecureStorage"
+
+    private fun getSafeEncryptedPrefs(context: Context): SharedPreferences? {
+        return try {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context,
+                PREFERENCES_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // 🚀 S3b: Fail-closed. خطا ثبت می‌شود، اما fallback ناامن انجام نمی‌شود.
+            Log.e(TAG, "Keystore unavailable or crypto error. Failing closed.", e)
+            null
+        }
     }
 
-    /**
-     * پاک‌سازی کامل (مورد استفاده در Privacy Center)
-     */
+    fun putStringList(context: Context, key: String, value: List<String>): Boolean {
+        return try {
+            val json = value.joinToString("|||")
+            getSafeEncryptedPrefs(context)?.edit()?.putString(key, json)?.apply()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Write failed for $key (fail-closed)", e)
+            false
+        }
+    }
+
+    fun getStringList(context: Context, key: String): List<String> {
+        return try {
+            val json = getSafeEncryptedPrefs(context)?.getString(key, null)
+            if (json.isNullOrEmpty()) emptyList() else json.split("|||").filter { it.isNotEmpty() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Read failed for $key (fail-closed)", e)
+            emptyList()
+        }
+    }
+
+    fun putString(context: Context, key: String, value: String): Boolean {
+        return try {
+            getSafeEncryptedPrefs(context)?.edit()?.putString(key, value)?.apply()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Write failed for $key (fail-closed)", e)
+            false
+        }
+    }
+
+    fun getString(context: Context, key: String, default: String? = null): String? {
+        return try {
+            getSafeEncryptedPrefs(context)?.getString(key, default)
+        } catch (e: Exception) {
+            Log.e(TAG, "Read failed for $key (fail-closed)", e)
+            default
+        }
+    }
+
+    fun remove(context: Context, key: String): Boolean {
+        return try {
+            getSafeEncryptedPrefs(context)?.edit()?.remove(key)?.apply()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Remove failed for $key (fail-closed)", e)
+            false
+        }
+    }
+
+    fun clear(context: Context): Boolean {
+        return try {
+            getSafeEncryptedPrefs(context)?.edit()?.clear()?.apply()
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Clear failed (fail-closed)", e)
+            false
+        }
+    }
+
     fun wipeAll(context: Context) {
         clear(context)
     }
