@@ -126,3 +126,61 @@ object SignalEngine {
 
         val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0 && changePct >= 1.5
         val isBearishSetup = breakdown && volRatio >= params.volumeMin && rsi in 30.0..50.0 && changePct <= -1.5
+
+        if (isBullishSetup) {
+            score += 20
+            reasons.add("Setup شکست مقاومت با حجم")
+        } else if (isBearishSetup) {
+            score += 20
+            reasons.add("Setup شکست حمایت با حجم")
+        }
+
+        if (volRatio >= params.volumeMin) {
+            score += 15
+            reasons.add("حجم ${String.format(Locale.US, "%.1f", volRatio)}x میانگین")
+        }
+
+        val macdUp = macd.macd > macd.signal && macd.histogram > macdPrev.histogram
+        val macdDn = macd.macd < macd.signal && macd.histogram < macdPrev.histogram
+
+        if (isBullishSetup && macdUp) {
+            score += 10
+            reasons.add("تأیید مومنتوم MACD صعودی")
+        } else if (isBearishSetup && macdDn) {
+            score += 10
+            reasons.add("تأیید مومنتوم MACD نزولی")
+        }
+
+        if (adx >= params.adxMin) {
+            score += 10
+            reasons.add("قدرت روند تأییدشده (ADX)")
+        }
+
+        if (funding != null) {
+            if (isBullishSetup && funding <= -0.0003) { score += 10; reasons.add("فاندینگ منفی (فرصت Long)") }
+            if (isBearishSetup && funding >= 0.0005) { score += 10; reasons.add("فاندینگ مثبت شدید (فرصت Short)") }
+        }
+
+        score = min(100, score)
+        val side = when {
+            isBullishSetup && score >= params.minScore -> "PUMP"
+            isBearishSetup && score >= params.minScore -> "DUMP"
+            else -> "NONE"
+        }
+
+        enforceSignalConsistency(side, reasons)
+
+        val golden = score >= params.goldenScore && mtfAligned && adx >= params.adxMin
+
+        return UnifiedSignalResult(
+            coinId = coinId,
+            symbol = symbol,
+            name = name,
+            price = price,
+            side = side,
+            score = score,
+            isGolden = golden,
+            reasons = reasons,
+            candleCloseTs = candles1h.lastOrNull()?.time ?: 0L
+        )
+    }
