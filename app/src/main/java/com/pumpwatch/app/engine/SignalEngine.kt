@@ -107,11 +107,10 @@ object SignalEngine {
         val prevLow = candles1h.dropLast(1).takeLast(lookback).minOf { it.low }
         val breakout = price > prevHigh
         val breakdown = price < prevLow
-        
+
         // 🚀 L3: محاسبه شتاب قیمت کندل جاری برای جلوگیری از شکست‌های کاذب (Fakeout)
         val prevClose = candles1h.dropLast(1).lastOrNull()?.close ?: price
         val changePct = if (prevClose > 0) ((price - prevClose) / prevClose) * 100.0 else 0.0
-        val breakdown = price < prevLow
 
         // ۳. لایه امتیازدهی ساختاریافته
         var score = 0
@@ -127,64 +126,3 @@ object SignalEngine {
 
         val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0 && changePct >= params.momentumMin
         val isBearishSetup = breakdown && volRatio >= params.volumeMin && rsi in 30.0..50.0 && changePct <= -params.momentumMin
-
-        if (isBullishSetup) {
-            score += 20
-            reasons.add("Setup شکست مقاومت با حجم")
-        } else if (isBearishSetup) {
-            score += 20
-            reasons.add("Setup شکست حمایت با حجم")
-        }
-
-        if (volRatio >= params.volumeMin) {
-            score += 15
-            reasons.add("حجم ${String.format(Locale.US, "%.1f", volRatio)}x میانگین")
-        }
-
-        val macdUp = macd.macd > macd.signal && macd.histogram > macdPrev.histogram
-        val macdDn = macd.macd < macd.signal && macd.histogram < macdPrev.histogram
-        
-        if (isBullishSetup && macdUp) {
-            score += 10
-            reasons.add("تأیید مومنتوم MACD صعودی")
-        } else if (isBearishSetup && macdDn) {
-            score += 10
-            reasons.add("تأیید مومنتوم MACD نزولی")
-        }
-
-        if (adx >= params.adxMin) {
-            score += 10
-            reasons.add("قدرت روند تأییدشده (ADX)")
-        }
-
-        if (funding != null) {
-            if (isBullishSetup && funding <= -0.0003) { score += 10; reasons.add("فاندینگ منفی (فرصت Long)") }
-            if (isBearishSetup && funding >= 0.0005) { score += 10; reasons.add("فاندینگ مثبت شدید (فرصت Short)") }
-        }
-
-        score = min(100, score)
-        val side = when {
-            isBullishSetup && score >= params.minScore -> "PUMP"
-            isBearishSetup && score >= params.minScore -> "DUMP"
-            else -> "NONE"
-        }
-
-        // 🚀 L2: اعمال سازگاری دلایل
-        enforceSignalConsistency(side, reasons)
-
-        val golden = score >= params.goldenScore && mtfAligned && adx >= params.adxMin
-
-        // ۴. مدیریت ریسک و خروجی
-        val risk = atr * params.atrMult
-        val entry = price
-        val stopLoss = if (side == "DUMP") price + risk else price - risk
-        val target1 = if (side == "DUMP") price - risk * params.rr else price + risk * params.rr
-        val target2 = if (side == "DUMP") price - risk * params.rr * 2.0 else price + risk * params.rr * 2.0
-
-        return SignalResult(
-            coinId, symbol, name, price, mode, side, score, golden,
-            mtfAligned, mtfTrend, adx, rsi, volRatio, funding,
-            entry, stopLoss, target1, target2, reasons, candleCloseTs
-        )
-    }
-}
