@@ -40,6 +40,7 @@ data class Trade(
     val fillTime: Long? = null,
     // 🚀 Sprint 16 (F2): PnL فیوچرز مارجین‌محور
     val leverage: Double = 1.0,           // اهرم (پیش‌فرض 1.0 برای اسپات)
+    val fundingRate: Double = 0.0001,   // 🚀 F4b: نرخ فاندینگ هر ۸ ساعت (پیش‌فرض ۰.۰۱٪)
     val fundingPaid: Double = 0.0,        // فاندینگ پرداختی/دریافتی به USD
     // 🚀 Sprint 15 (Commit 11): partial close در +1R
     val partialClose: Boolean = false,

@@ -124,6 +124,19 @@ object PaperTradingEngine {
         return true
     }
 
+    /**
+     * 🚀 F4b: محاسبه هزینه فاندینگ انباشته بر اساس بازه‌های زمانی واقعی (هر ۸ ساعت)
+     */
+    private fun calculateAccruedFunding(t: Trade, currentTime: Long): Double {
+        if (t.mode != "FUT") return 0.0
+        val durationHours = (currentTime - t.entryTime) / (1000.0 * 60.0 * 60.0)
+        val fundingPeriods = (durationHours / 8.0).toInt()
+        if (fundingPeriods <= 0) return 0.0
+        
+        val notionalUsd = t.sizeUsd * t.leverage
+        return fundingPeriods * (notionalUsd * t.fundingRate)
+    }
+
     suspend fun checkAndClose(ctx: Context): List<Trade> {
         val trades = TradeStore.load(ctx).filter { it.status == "OPEN" }
         if (trades.isEmpty()) return emptyList()
@@ -162,13 +175,17 @@ object PaperTradingEngine {
             )
         )
 
+        val currentTime = System.currentTimeMillis()
+        val accruedFunding = calculateAccruedFunding(t, currentTime)
+
         if (dec.action == "PARTIAL") {
             return t.copy(
                 currentPrice = price,
                 partialClose = true,
                 partialClosePrice = dec.exitPrice ?: price,
-                partialCloseTime = System.currentTimeMillis(),
-                partialCloseReason = dec.reason ?: "TP1"
+                partialCloseTime = currentTime,
+                partialCloseReason = dec.reason ?: "TP1",
+                fundingPaid = accruedFunding
             )
         }
 
@@ -183,24 +200,28 @@ object PaperTradingEngine {
             t.copy(
                 currentPrice = price,
                 currentStop = newStop,
-                exitTime = System.currentTimeMillis(),
+                exitTime = currentTime,
                 exitPrice = dec.exitPrice ?: price,
                 exitReason = dec.reason ?: "STOP",
-                status = "CLOSED"
+                status = "CLOSED",
+                fundingPaid = accruedFunding
             )
         } else {
-            t.copy(currentPrice = price, currentStop = newStop)
+            t.copy(currentPrice = price, currentStop = newStop, fundingPaid = accruedFunding)
         }
     }
 
     fun closeManual(ctx: Context, id: String, price: Double) {
         val t = TradeStore.load(ctx).find { it.id == id } ?: return
+        val currentTime = System.currentTimeMillis()
+        val accruedFunding = calculateAccruedFunding(t, currentTime)
         val closed = t.copy(
             currentPrice = price,
-            exitTime = System.currentTimeMillis(),
+            exitTime = currentTime,
             exitPrice = price,
             exitReason = "MANUAL",
-            status = "CLOSED"
+            status = "CLOSED",
+            fundingPaid = accruedFunding
         )
         TradeStore.upsert(ctx, closed)
     }
