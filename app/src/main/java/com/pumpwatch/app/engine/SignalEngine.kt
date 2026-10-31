@@ -107,6 +107,11 @@ object SignalEngine {
         val prevLow = candles1h.dropLast(1).takeLast(lookback).minOf { it.low }
         val breakout = price > prevHigh
         val breakdown = price < prevLow
+        
+        // 🚀 L3: محاسبه شتاب قیمت کندل جاری برای جلوگیری از شکست‌های کاذب (Fakeout)
+        val prevClose = candles1h.dropLast(1).lastOrNull()?.close ?: price
+        val changePct = if (prevClose > 0) ((price - prevClose) / prevClose) * 100.0 else 0.0
+        val breakdown = price < prevLow
 
         // ۳. لایه امتیازدهی ساختاریافته
         var score = 0
@@ -120,8 +125,8 @@ object SignalEngine {
             else if (t4hDn || tDDn) { score += 15; reasons.add("روند بلندمدت نزولی") }
         }
 
-        val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0
-        val isBearishSetup = breakdown && volRatio >= params.volumeMin && rsi in 30.0..50.0
+        val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0 && changePct >= params.momentumMin
+        val isBearishSetup = breakdown && volRatio >= params.volumeMin && rsi in 30.0..50.0 && changePct <= -params.momentumMin
 
         if (isBullishSetup) {
             score += 20
