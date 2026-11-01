@@ -9,7 +9,7 @@ data class UnifiedSignalParams(
     val adxMin: Double = 25.0,
     val volumeMin: Double = 1.5,
     val breakoutLookback: Int = 20,
-    val minScore: Int = 70,
+    val minScore: Int = 40,  // 🚀 L3: آستانه تنظیم‌پذیر >= ۴۰
     val goldenScore: Int = 85,
     val atrMult: Double = 1.5,
     val rr: Double = 1.5,

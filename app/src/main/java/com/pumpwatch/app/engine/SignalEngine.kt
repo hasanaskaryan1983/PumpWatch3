@@ -39,7 +39,8 @@ data class SignalResult(
     val target1: Double,
     val target2: Double,
     val reasons: List<String>,
-    val candleCloseTs: Long = 0L
+    val candleCloseTs: Long = 0L,
+    val buyAndHoldPct: Double = 0.0  // 🚀 L3: بازده buy&hold
 )
 
 object SignalEngine {
@@ -68,6 +69,11 @@ object SignalEngine {
         val closes = Indicators.closes(candles1h)
         val volumes = candles1h.map { it.volume }
         val price = closes.last()
+        // 🚀 L3: محاسبه بازده buy&hold (مقایسه با 20 کندل قبل)
+        val buyAndHoldPct = if (closes.size >= 21) {
+            val pastPrice = closes[closes.size - 21]
+            if (pastPrice > 0) ((price - pastPrice) / pastPrice) * 100.0 else 0.0
+        } else 0.0
 
         // 🚀 Sprint 3: استخراج candleCloseTs از آخرین کندل (اگر time > 0 باشد).
         // در موتورهای P0-6-compliant فراخوانی‌کننده آخرین کندل forming را drop می‌کند،
@@ -192,7 +198,8 @@ object SignalEngine {
             target1 = 0.0,
             target2 = 0.0,
             reasons = reasons,
-            candleCloseTs = candleCloseTs
+            candleCloseTs = candleCloseTs,
+            buyAndHoldPct = buyAndHoldPct
         )
     }
 }

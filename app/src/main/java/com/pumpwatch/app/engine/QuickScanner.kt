@@ -142,7 +142,7 @@ object QuickScanner {
                                     val closeText = if (signal.candleCloseTs > 0L) {
                                         closeTimeFmt.format(Date(signal.candleCloseTs))
                                     } else "?"
-                                    "$symbol | ${signal.side} | Score: ${signal.score} | $closeText | ${signal.reasons.firstOrNull() ?: "Setup فعال"}"
+                                    "$symbol | ${signal.side} | Score: ${signal.score} | B&H: ${String.format("%.1f", signal.buyAndHoldPct)}% | $closeText | ${signal.reasons.firstOrNull() ?: "Setup فعال"}"
                                 } else {
                                     "$symbol | NONE"
                                 },
@@ -235,7 +235,7 @@ object QuickScanner {
                                     val closeText = if (signal.candleCloseTs > 0L) {
                                         closeTimeFmt.format(Date(signal.candleCloseTs))
                                     } else "?"
-                                    "$symbol | ${signal.side} | Score: ${signal.score} | $closeText | ${signal.reasons.firstOrNull() ?: "Setup فعال"}"
+                                    "$symbol | ${signal.side} | Score: ${signal.score} | B&H: ${String.format("%.1f", signal.buyAndHoldPct)}% | $closeText | ${signal.reasons.firstOrNull() ?: "Setup فعال"}"
                                 } else {
                                     "$symbol | NONE"
                                 },
