@@ -40,7 +40,6 @@ data class SignalResult(
     val target2: Double,
     val reasons: List<String>,
     val candleCloseTs: Long = 0L,
-    val buyAndHoldPct: Double = 0.0  // 🚀 L3: بازده buy&hold
 )
 
 object SignalEngine {
@@ -199,7 +198,6 @@ object SignalEngine {
             target2 = 0.0,
             reasons = reasons,
             candleCloseTs = candleCloseTs,
-            buyAndHoldPct = buyAndHoldPct
         )
     }
 }

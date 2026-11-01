@@ -36,7 +36,8 @@ data class UnifiedSignalResult(
     val target1: Double,
     val target2: Double,
     val reasons: List<String>,
-    val candleCloseTs: Long = 0L
+    val candleCloseTs: Long = 0L,
+    val buyAndHoldPct: Double = 0.0  // 🚀 L3: بازده buy&hold
 )
 
 object UnifiedSignalEngine {
@@ -70,7 +71,12 @@ object UnifiedSignalEngine {
 
         val closes = Indicators.closes(closed)
         val volumes = closed.map { it.volume }
-        val price = closes.last()  // آخرین close بسته‌شده (نه کندل forming)
+        val price = closes.last()
+        // 🚀 L3: محاسبه بازده buy&hold (مقایسه با 20 کندل قبل)
+        val buyAndHoldPct = if (closes.size >= 21) {
+            val pastPrice = closes[closes.size - 21]
+            if (pastPrice > 0) ((price - pastPrice) / pastPrice) * 100.0 else 0.0
+        } else 0.0  // آخرین close بسته‌شده (نه کندل forming)
 
         // ۱. لایه تشخیص رژیم بازار (Daily/4H)
         val c4h = Indicators.aggregate(closed, 4)
@@ -202,7 +208,8 @@ object UnifiedSignalEngine {
             coinId, symbol, name, price, mode, side, score, golden,
             mtfAligned, mtfTrend, adx, rsi, volRatio, funding,
             entry, stopLoss, target1, target2, reasons,
-            candleCloseTs = candleCloseTs
+            candleCloseTs = candleCloseTs,
+            buyAndHoldPct = buyAndHoldPct
         )
     }
 }
