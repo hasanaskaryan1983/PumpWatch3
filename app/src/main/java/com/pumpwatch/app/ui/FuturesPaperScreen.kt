@@ -195,6 +195,12 @@ private fun PaperTradeCard(t: Trade, onClose: (Double) -> Unit) {
                 Text("استاپ: ${String.format(Locale.US, "$%.4f", t.currentStop)}", fontSize = 10.sp, color = PumpWatchPalette.Negative)
                 Text("تارگت: ${t.target2?.let { String.format(Locale.US, "$%.4f", it) } ?: "—"}", fontSize = 10.sp, color = PumpWatchPalette.Positive)
             }
+            // 🚀 UI-T1: نمایش اهرم و هزینه فاندینگ
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("اهرم: ${String.format(Locale.US, "%.1fx", t.leverage)}", fontSize = 10.sp, color = PumpWatchPalette.Info)
+                val fundingText = if (t.fundingPaid != 0.0) String.format(Locale.US, "$%.2f", t.fundingPaid) else "—"
+                Text("فاندینگ: $fundingText", fontSize = 10.sp, color = if (t.fundingPaid < 0) PumpWatchPalette.Positive else PumpWatchPalette.Negative)
+            }
             
             // 🚀 P0 Tab 14: هشدار صریح NotComputed و بررسی دستی
             Surface(color = PumpWatchPalette.Warning.copy(alpha = 0.1f), shape = RoundedCornerShape(6.dp)) {
