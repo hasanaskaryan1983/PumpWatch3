@@ -121,16 +121,25 @@ object SignalEngine {
         var score = 0
         val reasons = mutableListOf<String>()
 
-        if (mtfAligned) {
-            score += 30
-            reasons.add("هم‌جهتی ۳ تایم‌فریم (Daily/4H/1H)")
-        } else {
-            if (t4hUp || tDUp) { score += 15; reasons.add("روند بلندمدت صعودی") }
-            else if (t4hDn || tDDn) { score += 15; reasons.add("روند بلندمدت نزولی") }
-        }
-
         val isBullishSetup = breakout && volRatio >= params.volumeMin && rsi in 50.0..70.0 && changePct >= 1.5
         val isBearishSetup = breakdown && volRatio >= params.volumeMin && rsi in 30.0..50.0 && changePct <= -1.5
+
+        // 🚀 L2: سازگاری دلایل سیگنال (حذف تناقض روند با جهت سیگنال)
+        if (mtfAligned) {
+            val isContradiction = (mtfUp && isBearishSetup) || (mtfDn && isBullishSetup)
+            if (!isContradiction) {
+                score += 30
+                reasons.add("هم‌جهتی ۳ تایم‌فریم (Daily/4H/1H)")
+            }
+        } else {
+            if ((t4hUp || tDUp) && !isBearishSetup) {
+                score += 15
+                reasons.add("روند بلندمدت صعودی")
+            } else if ((t4hDn || tDDn) && !isBullishSetup) {
+                score += 15
+                reasons.add("روند بلندمدت نزولی")
+            }
+        }
 
         if (isBullishSetup) {
             score += 20
