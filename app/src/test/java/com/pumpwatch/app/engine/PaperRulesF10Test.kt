@@ -35,7 +35,7 @@ class PaperRulesF10Test {
         // هزینه = 100 * (0.3 / 100) = 0.3
         // سود خالص = (100 * 0.10) - 0.3 = 9.7
         // وجه نقد = 1000 (اولیه) - 100 (قفل‌شده، که حالا آزاد شده) + 100 (اصل) + 9.7 (سود خالص) = 1009.7
-        val expectedCash = 1009.7
+        val expectedCash = 1009.7 // 1000 (initial) + 9.7 (net pnl) - 0 (open)
         
         assertEquals("وجه نقد نهایی باید سود خالص پس از کسر هزینه را منعکس کند", expectedCash, finalCash, 0.01)
     }
@@ -54,7 +54,7 @@ class PaperRulesF10Test {
         // ضرر ناخالص = 200 * -0.10 = -20
         // ضرر خالص = -20 - 0.6 = -20.6
         // وجه نقد = 1000 - 20.6 = 979.4
-        val expectedCash = 979.4
+        val expectedCash = 979.4 // 1000 (initial) + (-20.6 net pnl) - 0 (open)
         
         assertEquals("وجه نقد باید ضرر خالص (شامل هزینه) را کسر کند", expectedCash, finalCash, 0.01)
     }
