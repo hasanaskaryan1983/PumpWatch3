@@ -69,13 +69,23 @@ object RpcKeyStore {
         }
     }
 
-    /** حذف کلید (SecureStorage + کش + ردپای legacy). */
+    /**
+     * 🚀 RPC-WIPE: حذف کامل کلید (SecureStorage + کش + کل فایل preferences قدیمی).
+     * این تابع تضمین می‌کند که پس از wipe، هیچ ردپایی از کلید RPC در دستگاه باقی نماند.
+     */
     fun clear(ctx: Context) {
+        // ۱. پاک‌سازی کش استاتیک
         cached = null
+        
+        // ۲. پاک‌سازی از SecureStorage (EncryptedSharedPreferences)
         SecureStorage.remove(ctx, KEY)
+        
+        // ۳. 🚀 RPC-WIPE: پاک‌سازی کامل فایل preferences قدیمی (نه فقط یک کلید)
         try {
-            legacyPrefs(ctx).edit().remove(LEGACY_KEY).apply()
-        } catch (_: Exception) { }
+            legacyPrefs(ctx).edit().clear().apply()  // 👈 .clear() به جای .remove()
+        } catch (e: Exception) {
+            logWarning("Failed to clear legacy RPC prefs", e)
+        }
     }
 
     /**
