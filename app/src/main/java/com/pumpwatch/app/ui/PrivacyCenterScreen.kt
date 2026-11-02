@@ -36,6 +36,7 @@ import com.google.gson.Gson
 import com.pumpwatch.app.data.ApiClient
 import com.pumpwatch.app.data.KlineCache
 import com.pumpwatch.app.data.SecureStorage
+import com.pumpwatch.app.store.SecureStorage as StoreSecureStorage
 import com.pumpwatch.app.data.WhaleExporter
 import com.pumpwatch.app.engine.AlertRulesStore
 import com.pumpwatch.app.engine.SignalLogger
@@ -269,7 +270,8 @@ fun PrivacyCenterScreen() {
                             SignalLogger.clear(context)
                             try { AlertRulesStore.save(context, emptyList()) } catch (_: Exception) { }
                             prefs.edit().clear().apply() // پاک‌سازی کامل همهٔ prefs معمولی برای اطمینان
-                            SecureStorage.wipeAll(context)
+                            SecureStorage.wipeAll(context) // پاک‌سازی نسخه data (AES-GCM)
+                            StoreSecureStorage.clear(context) // 🚀 S3b: پاک‌سازی نسخه store (EncryptedSharedPreferences) برای جلوگیری از نشت داده
                             ApiClient.clearMemoryCache()
                             KlineCache.clear()
                             confirmWipe = false
