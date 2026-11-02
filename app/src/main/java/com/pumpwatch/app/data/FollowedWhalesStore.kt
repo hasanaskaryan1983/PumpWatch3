@@ -25,35 +25,66 @@ object FollowedWhalesStore {
     private const val FILE_NAME = "followed_whales.json"
     private val gson = Gson()
 
+    // 🚀 S4: متغیرهای حالت برای الگوی fail-closed و ایمنی رشته‌ای
+    @Volatile
+    private var loaded = false
+
+    @Volatile
+    var lastLoadFailed = false
+
+    private val cache = mutableListOf<FollowedWhale>()
+    private val lock = Any()
+
     private const val KEY = "followed_whales_encrypted"
 
     fun load(context: Context): List<FollowedWhale> {
-        return try {
-            val json = SecureStorage.getString(context, KEY)
-            if (json.isNullOrEmpty()) {
-                // Migration from old plaintext file
-                val oldFile = java.io.File(context.filesDir, FILE_NAME)
-                if (oldFile.exists()) {
-                    val oldJson = oldFile.readText()
-                    SecureStorage.putString(context, KEY, oldJson)
-                    oldFile.delete()
-                    val type = object : TypeToken<List<FollowedWhale>>() {}.type
-                    return gson.fromJson(oldJson, type) ?: emptyList()
+        synchronized(lock) {
+            if (loaded) return cache.toList()
+
+            lastLoadFailed = false
+            cache.clear()
+
+            try {
+                var json = SecureStorage.getString(context, KEY)
+                
+                // Migration from old plaintext file (ایمن‌سازی شده)
+                if (json.isNullOrEmpty()) {
+                    val oldFile = java.io.File(context.filesDir, FILE_NAME)
+                    if (oldFile.exists()) {
+                        val oldJson = oldFile.readText()
+                        SecureStorage.putString(context, KEY, oldJson)
+                        oldFile.delete()
+                        json = oldJson
+                    }
                 }
-                return emptyList()
+
+                if (!json.isNullOrEmpty()) {
+                    val type = object : TypeToken<List<FollowedWhale>>() {}.type
+                    val parsed: List<FollowedWhale>? = gson.fromJson(json, type)
+                    if (parsed != null) {
+                        cache.addAll(parsed)
+                    }
+                }
+            } catch (e: Exception) {
+                // 🚀 S4: الگوی fail-closed: ثبت خطا و بازگشت لیست خالی
+                lastLoadFailed = true
             }
-            val type = object : TypeToken<List<FollowedWhale>>() {}.type
-            gson.fromJson(json, type) ?: emptyList()
-        } catch (_: Exception) {
-            emptyList()
+
+            loaded = true
+            return cache.toList()
         }
     }
 
     fun save(context: Context, whales: List<FollowedWhale>) {
-        try {
-            SecureStorage.putString(context, KEY, gson.toJson(whales))
-        } catch (_: Exception) {
-            // خطای نوشتن نباید اپ را کرش کند
+        synchronized(lock) {
+            try {
+                SecureStorage.putString(context, KEY, gson.toJson(whales))
+                // به‌روزرسانی کش پس از ذخیره موفق
+                cache.clear()
+                cache.addAll(whales)
+            } catch (e: Exception) {
+                // 🚀 S4: جلوگیری از کرش هنگام ذخیره‌سازی (fail-closed)
+            }
         }
     }
 
