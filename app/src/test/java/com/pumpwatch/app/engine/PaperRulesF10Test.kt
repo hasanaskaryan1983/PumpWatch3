@@ -1,5 +1,8 @@
 package com.pumpwatch.app.engine
 
+import com.pumpwatch.app.ui.PaperState
+import com.pumpwatch.app.ui.PaperTrade
+
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
