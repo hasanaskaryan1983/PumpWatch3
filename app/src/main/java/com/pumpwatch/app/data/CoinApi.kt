@@ -249,14 +249,14 @@ object ApiClient {
     suspend fun getQuickCoins(): List<CoinMarket> {
         val memCache = cache1000Ref.get()
         val memTime = cache1000TimeRef.get()
-        if (memCache.isNotEmpty() && System.currentTimeMillis() - memTime < MEM_CACHE_TTL) {
+        if (memCache.isNotEmpty() && android.os.SystemClock.elapsedRealtime() - memTime < MEM_CACHE_TTL) {
             val elapsed = cache1000ElapsedRef.get().takeIf { it > 0 }
             setMeta(memTime, ServedFrom.MEM_CACHE, memCache.size, elapsed)
             return memCache
         }
 
         val diskTime = OfflineCache.time(app, "m250")
-        if (diskTime > 0 && System.currentTimeMillis() - diskTime < DISK_FRESH_MS) {
+        if (diskTime > 0 && android.os.SystemClock.elapsedRealtime() - diskTime < DISK_FRESH_MS) {
             loadList("m250")?.let { disk ->
                 cache1000Ref.set(disk)
                 cache1000TimeRef.set(diskTime)
@@ -268,11 +268,11 @@ object ApiClient {
 
         GlobalHostLimiter.acquire("api.coingecko.com")
         val p1 = api.getMarkets(perPage = 250, page = 1)
-        val nowMs = System.currentTimeMillis()
+        val nowMs = android.os.SystemClock.elapsedRealtime()
         val nowElapsed = SystemClock.elapsedRealtime()
 
         cache1000Ref.set(p1)
-        cache1000TimeRef.set(nowMs)
+        cache1000TimeRef.set(android.os.SystemClock.elapsedRealtime())
         cache1000ElapsedRef.set(nowElapsed)
         setMeta(nowMs, ServedFrom.NETWORK, p1.size, nowElapsed)
 
@@ -296,7 +296,7 @@ object ApiClient {
             val disk = loadList("m1000")
             val diskTime = OfflineCache.time(app, "m1000")
             if (disk != null &&
-                System.currentTimeMillis() - diskTime < DISK_FRESH_MS
+                android.os.SystemClock.elapsedRealtime() - diskTime < DISK_FRESH_MS
             ) {
                 cache1000Ref.set(disk)
                 cache1000TimeRef.set(diskTime)
@@ -315,11 +315,11 @@ object ApiClient {
                     if (page < 4) delay(2000)
                 }
                 val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
-                val nowMs = System.currentTimeMillis()
+                val nowMs = android.os.SystemClock.elapsedRealtime()
                 val nowElapsed = SystemClock.elapsedRealtime()
 
                 cache1000Ref.set(sorted)
-                cache1000TimeRef.set(nowMs)
+                cache1000TimeRef.set(android.os.SystemClock.elapsedRealtime())
                 cache1000ElapsedRef.set(nowElapsed)
                 setMeta(nowMs, ServedFrom.NETWORK, sorted.size, nowElapsed)
 
@@ -360,7 +360,7 @@ object ApiClient {
             val disk = loadList("m100")
             val diskTime = OfflineCache.time(app, "m100")
             if (disk != null &&
-                System.currentTimeMillis() - diskTime < DISK_FRESH_MS
+                android.os.SystemClock.elapsedRealtime() - diskTime < DISK_FRESH_MS
             ) {
                 cache100Ref.set(disk)
                 cache100TimeRef.set(diskTime)
@@ -374,11 +374,11 @@ object ApiClient {
             try {
                 GlobalHostLimiter.acquire("api.coingecko.com")
                 val fresh = api.getMarkets(perPage = 100, page = 1)
-                val nowMs = System.currentTimeMillis()
+                val nowMs = android.os.SystemClock.elapsedRealtime()
                 val nowElapsed = SystemClock.elapsedRealtime()
 
                 cache100Ref.set(fresh)
-                cache100TimeRef.set(nowMs)
+                cache100TimeRef.set(android.os.SystemClock.elapsedRealtime())
                 cache100ElapsedRef.set(nowElapsed)
                 setMeta(nowMs, ServedFrom.NETWORK, fresh.size, nowElapsed)
 
