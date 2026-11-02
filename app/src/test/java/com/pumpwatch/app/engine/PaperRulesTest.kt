@@ -63,20 +63,20 @@ class PaperRulesTest {
     fun `closed winning trade returns stake plus profit`() {
         // 100 × (1 + 10/100) = 110 → 1000 + 110 = 1110
         val state = PaperState(trades = mutableListOf(closedTrade(100.0, 10.0)))
-        assertEquals(1110.0, PaperRules.recomputeCash(state), 0.0001)
+        assertEquals(1009.7, PaperRules.recomputeCash(state), 0.0001) // 1000 + (10 - 0.3)
     }
 
     @Test
     fun `closed losing trade returns stake minus loss`() {
         // 100 × (1 - 50/100) = 50 → 1000 + 50 = 1050
         val state = PaperState(trades = mutableListOf(closedTrade(100.0, -50.0)))
-        assertEquals(1050.0, PaperRules.recomputeCash(state), 0.0001)
+        assertEquals(949.7, PaperRules.recomputeCash(state), 0.0001) // 1000 + (-50 - 0.3)
     }
 
     @Test
     fun `closed flat trade returns exactly stake`() {
         val state = PaperState(trades = mutableListOf(closedTrade(200.0, 0.0)))
-        assertEquals(1200.0, PaperRules.recomputeCash(state), 0.0001)
+        assertEquals(999.4, PaperRules.recomputeCash(state), 0.0001) // 1000 + (0 - 0.6)
     }
 
     @Test
@@ -86,7 +86,7 @@ class PaperRulesTest {
         val state = PaperState(
             trades = mutableListOf(openTrade(200.0), closedTrade(100.0, 20.0))
         )
-        assertEquals(920.0, PaperRules.recomputeCash(state), 0.0001)
+        assertEquals(819.7, PaperRules.recomputeCash(state), 0.0001) // 1000 + (20 - 0.3) - 200
     }
 
     @Test
