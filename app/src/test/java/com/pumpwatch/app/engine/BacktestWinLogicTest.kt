@@ -6,8 +6,8 @@ import org.junit.Test
 class BacktestWinLogicTest {
 
     @Test
-    fun `H-WIN2: trade hitting target but with negative net pnl must NOT be WIN`() {
-        // شبیه‌سازی: سود ناخالص 0.5٪، اما کارمزد رفت و برگشت 0.6٪
+    fun testHWin2TargetWithNegativeNetPnlIsNotWin() {
+        // شبیه‌سازی: سود ناخالص 0.5 درصد، اما کارمزد رفت و برگشت 0.6 درصد
         val pnlRaw = 0.5
         val feeRoundTrip = 0.6
         val pnl = pnlRaw - feeRoundTrip // نتیجه: -0.1
@@ -21,11 +21,11 @@ class BacktestWinLogicTest {
         }
         
         // اثبات: با وجود رسیدن به تارگت، چون سود خالص منفی است، WIN نیست
-        assertEquals("EXP", result) // یا LOSS، بسته به طراحی، اما قطعاً WIN نیست
+        assertEquals("EXP", result)
     }
 
     @Test
-    fun `H-WIN2: trade with positive net pnl must be WIN`() {
+    fun testHWin2PositiveNetPnlMustBeWin() {
         val pnlRaw = 2.0
         val feeRoundTrip = 0.6
         val pnl = pnlRaw - feeRoundTrip // نتیجه: 1.4
