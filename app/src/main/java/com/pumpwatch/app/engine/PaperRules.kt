@@ -25,13 +25,28 @@ object PaperRules {
      * باز محاسبهٔ cash از روی تریدها:
      * cash = سرمایهٔ پایه − سرمایهٔ درگیر در تریدهای باز + برگشتی تریدهای بسته
      */
+    /**
+     * 🚀 F10: بازمحاسبهٔ دقیق وجه نقد در دسترس (Available Buying Power)
+     * فرمول: سرمایه اولیه - حجم قفل‌شده در معاملات باز + (اصل سرمایه + سود خالص پس از کسر هزینه) معاملات بسته
+     */
     fun recomputeCash(state: PaperState): Double {
+        val initial = state.initialCapital
+        
+        // وجهی که در معاملات باز قفل شده است
         val openStake = state.trades
             .filter { it.status == "OPEN" }
             .sumOf { it.sizeUsd }
-        val closedBack = state.trades
+            
+        // بازگشت سرمایه از معاملات بسته (شامل اصل پول + سود/زیان خالص پس از کسر کارمزد و اسلیپج)
+        val closedNetReturn = state.trades
             .filter { it.status == "CLOSED" }
-            .sumOf { it.sizeUsd * (1.0 + it.pnl / 100.0) }
-        return DEFAULT_CAPITAL - openStake + closedBack
+            .sumOf { trade ->
+                val grossPnlUsd = trade.sizeUsd * (trade.pnl / 100.0)
+                val costUsd = trade.sizeUsd * (roundTripCostPct() / 100.0)
+                val netPnlUsd = grossPnlUsd - costUsd
+                trade.sizeUsd + netPnlUsd // بازگشت اصل پول به اضافه سود خالص
+            }
+            
+        return initial - openStake + closedNetReturn
     }
 }

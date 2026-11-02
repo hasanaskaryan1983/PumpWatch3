@@ -87,7 +87,7 @@ data class PaperTrade(
     var pnl: Double = 0.0, var closeTime: Long = 0L, var trailing: Boolean? = null
 )
 
-data class PaperState(var cash: Double = 1000.0, var trades: MutableList<PaperTrade> = mutableListOf())
+data class PaperState(var initialCapital: Double = 1000.0, var cash: Double = 1000.0, var trades: MutableList<PaperTrade> = mutableListOf())
 
 private data class ConsensusPick(
     val symbol: String, val rank: Int?, val price: Double, val chain: String?,
