@@ -220,6 +220,11 @@ object ApiClient {
     private val cache100TimeRef = AtomicLong(0L)
     private val cache100ElapsedRef = AtomicLong(0L)
 
+    // 🚀 F1: کش جداگانه برای ۲۵۰ ارز برتر جهت جلوگیری از آلودگی کش ۱۰۰۰ تایی
+    private val cache250Ref = AtomicReference<List<CoinMarket>>(emptyList())
+    private val cache250TimeRef = AtomicLong(0L)
+    private val cache250ElapsedRef = AtomicLong(0L)
+
     private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
     private val platformsTimeRef = AtomicLong(0L)
 
@@ -247,10 +252,10 @@ object ApiClient {
     }
 
     suspend fun getQuickCoins(): List<CoinMarket> {
-        val memCache = cache1000Ref.get()
-        val memTime = cache1000TimeRef.get()
+        val memCache = cache250Ref.get()
+        val memTime = cache250TimeRef.get()
         if (memCache.isNotEmpty() && android.os.SystemClock.elapsedRealtime() - memTime < MEM_CACHE_TTL) {
-            val elapsed = cache1000ElapsedRef.get().takeIf { it > 0 }
+            val elapsed = cache250ElapsedRef.get().takeIf { it > 0 }
             setMeta(memTime, ServedFrom.MEM_CACHE, memCache.size, elapsed)
             return memCache
         }
@@ -258,9 +263,9 @@ object ApiClient {
         val diskTime = OfflineCache.time(app, "m250")
         if (diskTime > 0 && android.os.SystemClock.elapsedRealtime() - diskTime < DISK_FRESH_MS) {
             loadList("m250")?.let { disk ->
-                cache1000Ref.set(disk)
-                cache1000TimeRef.set(diskTime)
-                cache1000ElapsedRef.set(0L)
+                cache250Ref.set(disk)
+                cache250TimeRef.set(diskTime)
+                cache250ElapsedRef.set(0L)
                 setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 return disk
             }
@@ -271,9 +276,9 @@ object ApiClient {
         val nowMs = android.os.SystemClock.elapsedRealtime()
         val nowElapsed = SystemClock.elapsedRealtime()
 
-        cache1000Ref.set(p1)
-        cache1000TimeRef.set(android.os.SystemClock.elapsedRealtime())
-        cache1000ElapsedRef.set(nowElapsed)
+        cache250Ref.set(p1)
+        cache250TimeRef.set(android.os.SystemClock.elapsedRealtime())
+        cache250ElapsedRef.set(nowElapsed)
         setMeta(nowMs, ServedFrom.NETWORK, p1.size, nowElapsed)
 
         OfflineCache.save(app, "m250", gson.toJson(p1))
@@ -487,6 +492,10 @@ object ApiClient {
         cache1000Ref.set(emptyList())
         cache1000TimeRef.set(0L)
         cache1000ElapsedRef.set(0L)
+
+        cache250Ref.set(emptyList())
+        cache250TimeRef.set(0L)
+        cache250ElapsedRef.set(0L)
 
         cache100Ref.set(emptyList())
         cache100TimeRef.set(0L)
