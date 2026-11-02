@@ -374,9 +374,10 @@ object BacktestEngine {
                     val pnlRaw = if (side == "BUY") (ev.exitPrice - entryPrice) / entryPrice * 100
                                  else (entryPrice - ev.exitPrice) / entryPrice * 100
                     val pnl = pnlRaw - feeRoundTrip
-                    val result = when (ev.reason) {
-                        "TARGET" -> "WIN"
-                        "STOP" -> "LOSS"
+                    // 🚀 H-WIN2: برچسب WIN فقط اگر سود خالص > 0 باشد
+                    val result = when {
+                        pnl > 0.0 -> "WIN"
+                        ev.reason == "STOP" -> "LOSS"
                         else -> "EXP"
                     }
                     trades.add(Trade(symbol, side, result, pnl, entryScore))
@@ -548,12 +549,12 @@ object BacktestEngine {
                         pnlRaw - feeRoundTrip - fundingCostPct
                     }
                     
-                    // 🚀 Commit 106: تعیین نتیجه
+                    // 🚀 H-WIN2: تعیین نتیجه (WIN فقط اگر pnl > 0)
                     val result = when {
                         ev.liquidated -> "LIQUIDATED"
-                        ev.reason == "TARGET" -> "WIN"
+                        pnl > 0.0 -> "WIN"
                         ev.reason == "STOP" -> "LOSS"
-                        ev.reason == "TIMEOUT" -> "EXP"  // 🚀 Commit 106: اصلاح از WIN/LOSS به EXP
+                        ev.reason == "TIMEOUT" -> "EXP"
                         else -> "EXP"
                     }
                     
