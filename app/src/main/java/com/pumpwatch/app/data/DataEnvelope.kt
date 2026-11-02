@@ -1,6 +1,7 @@
 package com.pumpwatch.app.data
 
 import java.util.concurrent.TimeUnit
+import android.os.SystemClock
 
 /**
  * وضعیت اعتبار داده
@@ -16,6 +17,10 @@ enum class DataStatus {
     FAILURE           // خطا در دریافت یا پردازش داده
 }
 
+// 🚀 S6: سقف سنی مجاز برای داده‌های fallback (جلوگیری از داده کهنه بی‌کران)
+const val MAX_AGE_PRICE_SEC = 600L       // ۱۰ دقیقه برای قیمت
+const val MAX_AGE_METADATA_SEC = 21600L  // ۶ ساعت برای متادیتا
+
 /**
  * پوشش استاندارد برای بسته‌بندی داده‌ها همراه با متادیتای تازگی و منشأ
  * 
@@ -30,7 +35,7 @@ data class DataEnvelope<T>(
     val data: T?,
     val source: String,                  // نام منبع (مثلاً "coingecko", "binance")
     val observedAtMs: Long,              // زمانی که داده در منبع تولید/مشاهده شده
-    val receivedAtMs: Long = System.currentTimeMillis(), // زمانی که توسط اپ دریافت شده
+    val receivedAtMs: Long = android.os.SystemClock.elapsedRealtime(), // زمانی که توسط اپ دریافت شده
     val servedFrom: ServedFrom = ServedFrom.NETWORK,
     val status: DataStatus = if (data != null) DataStatus.SUCCESS else DataStatus.EMPTY_VALID
 ) {
@@ -38,7 +43,7 @@ data class DataEnvelope<T>(
      * محاسبه سن داده به ثانیه (بر اساس زمان مشاهده)
      */
     fun ageSec(): Long {
-        return TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - observedAtMs)
+        return TimeUnit.MILLISECONDS.toSeconds(android.os.SystemClock.elapsedRealtime() - receivedAtMs)
     }
 
     /**
