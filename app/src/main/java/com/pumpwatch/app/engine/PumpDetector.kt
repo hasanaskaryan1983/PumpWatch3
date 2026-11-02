@@ -35,8 +35,12 @@ object PumpDetector {
 
         val adx = calculateADX(highs, lows, closes, 14)
         val (stochK, stochD) = calculateStochastic(highs, lows, closes, 14, 3)
-        val isFractalHigh = detectFractalHigh(highs, closes.size - 1, 2)
-        val isFractalLow = detectFractalLow(lows, closes.size - 1, 2)
+        // 🚀 F5: زنده‌کردن PumpDetector - استفاده از اندیس صحیح برای تأیید فراکتال
+        // بررسی کندل باز (size - 1) همیشه false برمی‌گرداند. باید bars کندل به عقب برگردیم.
+        val bars = 2
+        val fractalIndex = closes.size - 1 - bars
+        val isFractalHigh = detectFractalHigh(highs, fractalIndex, bars)
+        val isFractalLow = detectFractalLow(lows, fractalIndex, bars)
 
         var signal = "NEUTRAL"
         var strength = 0
