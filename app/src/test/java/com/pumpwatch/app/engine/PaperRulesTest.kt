@@ -5,15 +5,6 @@ import com.pumpwatch.app.ui.PaperTrade
 import org.junit.Assert.*
 import org.junit.Test
 
-/**
- * 🚀 Commit 124: تست مدل هزینهٔ واحد و باز محاسبهٔ cash (کامیت ۱۰۷).
- *
- * چرا مهم؟
- * - roundTripCostPct تنها جای مجاز برای تعریف هزینهٔ رفت‌وبرگشت است (۰.۳٪)
- * - recomputeCash تنها منبع حقیقت برای cash است (نه مقدار ذخیره‌شده)
- *
- * اگر این دو بشکنند، کل ledger کاغذی اشتباه می‌شود.
- */
 class PaperRulesTest {
 
     private fun openTrade(sizeUsd: Double): PaperTrade =
@@ -21,8 +12,6 @@ class PaperRulesTest {
 
     private fun closedTrade(sizeUsd: Double, pnlPct: Double): PaperTrade =
         PaperTrade(symbol = "ETH", sizeUsd = sizeUsd, pnl = pnlPct, status = "CLOSED")
-
-    // ========== ثابت‌ها ==========
 
     @Test
     fun `fee constant is 0_1 percent`() {
@@ -41,11 +30,8 @@ class PaperRulesTest {
 
     @Test
     fun `round trip cost is 0_3 percent`() {
-        // 2 × (0.1 + 0.05) = 0.3
         assertEquals(0.3, PaperRules.roundTripCostPct(), 0.0001)
     }
-
-    // ========== recomputeCash ==========
 
     @Test
     fun `empty state returns default capital`() {
@@ -60,33 +46,34 @@ class PaperRulesTest {
     }
 
     @Test
-    fun `closed winning trade returns stake plus profit`() {
-        // 100 × (1 + 10/100) = 110 → 1000 + 110 = 1110
+    fun `closed winning trade returns stake plus profit minus fees`() {
+        // 100 size, 10% pnl -> gross 10. cost 0.3. net 9.7. initial 1000 + 9.7 = 1009.7
         val state = PaperState(trades = mutableListOf(closedTrade(100.0, 10.0)))
-        assertEquals(1009.7, PaperRules.recomputeCash(state), 0.0001) // 1000 + (10 - 0.3)
+        assertEquals(1009.7, PaperRules.recomputeCash(state), 0.0001)
     }
 
     @Test
-    fun `closed losing trade returns stake minus loss`() {
-        // 100 × (1 - 50/100) = 50 → 1000 + 50 = 1050
+    fun `closed losing trade returns stake minus loss minus fees`() {
+        // 100 size, -50% pnl -> gross -50. cost 0.3. net -50.3. initial 1000 - 50.3 = 949.7
         val state = PaperState(trades = mutableListOf(closedTrade(100.0, -50.0)))
-        assertEquals(949.7, PaperRules.recomputeCash(state), 0.0001) // 1000 + (-50 - 0.3)
+        assertEquals(949.7, PaperRules.recomputeCash(state), 0.0001)
     }
 
     @Test
-    fun `closed flat trade returns exactly stake`() {
+    fun `closed flat trade returns exactly stake minus fees`() {
+        // 200 size, 0% pnl -> gross 0. cost 0.6. net -0.6. initial 1000 - 0.6 = 999.4
         val state = PaperState(trades = mutableListOf(closedTrade(200.0, 0.0)))
-        assertEquals(999.4, PaperRules.recomputeCash(state), 0.0001) // 1000 + (0 - 0.6)
+        assertEquals(999.4, PaperRules.recomputeCash(state), 0.0001)
     }
 
     @Test
     fun `mixed open and closed trades combine correctly`() {
-        // open 200 → -200 ; closed 100 @ +20% → +120
-        // 1000 - 200 + 120 = 920
+        // open 200 -> -200. closed 100 @ 20% -> gross 20, cost 0.3, net 19.7.
+        // 1000 + 19.7 - 200 = 819.7
         val state = PaperState(
             trades = mutableListOf(openTrade(200.0), closedTrade(100.0, 20.0))
         )
-        assertEquals(819.7, PaperRules.recomputeCash(state), 0.0001) // 1000 + (20 - 0.3) - 200
+        assertEquals(819.7, PaperRules.recomputeCash(state), 0.0001)
     }
 
     @Test
@@ -99,7 +86,6 @@ class PaperRulesTest {
 
     @Test
     fun `recomputeCash ignores stored cash value`() {
-        // حتی اگر cash ذخیره‌شده غلط باشد، recompute از روی تریدها حساب می‌کند
         val state = PaperState(cash = 99999.0, trades = mutableListOf(openTrade(100.0)))
         assertEquals(900.0, PaperRules.recomputeCash(state), 0.0001)
     }

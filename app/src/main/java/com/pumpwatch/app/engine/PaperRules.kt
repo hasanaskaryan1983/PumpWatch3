@@ -31,22 +31,19 @@ object PaperRules {
      */
     fun recomputeCash(state: PaperState): Double {
         val initial = state.initialCapital
-        
-        // وجهی که در معاملات باز قفل شده است
+
         val openStake = state.trades
             .filter { it.status == "OPEN" }
             .sumOf { it.sizeUsd }
-            
-        // بازگشت سرمایه از معاملات بسته (شامل اصل پول + سود/زیان خالص پس از کسر کارمزد و اسلیپج)
-        val closedNetReturn = state.trades
+
+        val totalClosedNetPnl = state.trades
             .filter { it.status == "CLOSED" }
             .sumOf { trade ->
                 val grossPnlUsd = trade.sizeUsd * (trade.pnl / 100.0)
                 val costUsd = trade.sizeUsd * (roundTripCostPct() / 100.0)
-                val netPnlUsd = grossPnlUsd - costUsd
-                trade.sizeUsd + netPnlUsd // بازگشت اصل پول به اضافه سود خالص
+                grossPnlUsd - costUsd // فقط سود/زیان خالص (اصل سرمایه از قبل در initial وجود دارد)
             }
-            
-        return initial - openStake + closedNetReturn
+
+        return initial + totalClosedNetPnl - openStake
     }
 }
