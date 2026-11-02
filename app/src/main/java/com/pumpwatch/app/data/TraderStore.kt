@@ -49,25 +49,50 @@ object TraderStore {
     private const val KEY = "traders"
     private val gson = Gson()
     private val cache = mutableListOf<TraderProfile>()
+
+    @Volatile
     private var loaded = false
 
+    // 🚀 S5: پرچم وضعیت خطا برای الگوی fail-closed
+    @Volatile
+    var lastLoadFailed = false
+
+    private val lock = Any()
+
     fun load(ctx: Context): List<TraderProfile> {
-        if (loaded) return cache
-        val json = SecureStorage.getString(ctx, KEY)
-        cache.clear()
-        if (!json.isNullOrEmpty()) {
+        synchronized(lock) {
+            if (loaded) return cache.toList()
+            
+            lastLoadFailed = false
+            cache.clear()
+            
             try {
-                val type = object : TypeToken<MutableList<TraderProfile>>() {}.type
-                val list: MutableList<TraderProfile>? = gson.fromJson(json, type)
-                if (list != null) cache.addAll(list)
-            } catch (_: Exception) { }
+                val json = SecureStorage.getString(ctx, KEY)
+                if (!json.isNullOrEmpty()) {
+                    val type = object : TypeToken<MutableList<TraderProfile>>() {}.type
+                    val list: MutableList<TraderProfile>? = gson.fromJson(json, type)
+                    if (list != null) {
+                        cache.addAll(list)
+                    }
+                }
+            } catch (e: Exception) {
+                // 🚀 S5: الگوی fail-closed: ثبت خطا و بازگشت لیست خالی به جای کرش یا داده خراب
+                lastLoadFailed = true
+            }
+            
+            loaded = true
+            return cache.toList()
         }
-        loaded = true
-        return cache
     }
 
     private fun persist(ctx: Context) {
-        SecureStorage.putString(ctx, KEY, gson.toJson(cache))
+        synchronized(lock) {
+            try {
+                SecureStorage.putString(ctx, KEY, gson.toJson(cache))
+            } catch (e: Exception) {
+                // 🚀 S5: جلوگیری از کرش هنگام ذخیره‌سازی
+            }
+        }
     }
 
     fun list(ctx: Context): List<TraderProfile> = load(ctx).toList()
