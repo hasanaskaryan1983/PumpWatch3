@@ -162,7 +162,12 @@ object SecureStorage {
     }
 
     fun remove(ctx: Context, key: String) {
-        prefs(ctx).edit().remove(key).apply()
+        try {
+            prefs(ctx).edit().remove(key).apply()
+        } catch (e: Exception) {
+            // 🚀 S3b: Fail-closed: جلوگیری از کرش در صورت خرابی SharedPreferences
+            Log.e(TAG, "Failed to remove key from SecureStorage", e)
+        }
     }
 
     fun wipeAll(ctx: Context) {
@@ -183,6 +188,13 @@ object SecureStorage {
     fun getSecret(ctx: Context, key: String): String? =
         getString(ctx, key)
 
-    fun hasSecret(ctx: Context, key: String): Boolean =
-        prefs(ctx).getString(key, null) != null
+    fun hasSecret(ctx: Context, key: String): Boolean {
+        return try {
+            prefs(ctx).getString(key, null) != null
+        } catch (e: Exception) {
+            // 🚀 S3b: Fail-closed: در صورت خطا، فرض بر عدم وجود کلید است
+            Log.e(TAG, "Failed to check hasSecret", e)
+            false
+        }
+    }
 }
