@@ -142,7 +142,7 @@ fun normalizeSymbol(symbol: String, exchange: String): String {
         "BYBIT" -> "$base$quote"
         "OKX" -> "$base-$quote"
         "GATE" -> "${base}_${quote}"
-        else -> "$base$quote"
+        else -> cleaned // 🚀 F7: برای صرافی ناشناخته، ورودی تمیزشده را برمی‌گردانیم
     }
 }
 
