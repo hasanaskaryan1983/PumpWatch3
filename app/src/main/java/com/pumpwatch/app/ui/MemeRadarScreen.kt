@@ -335,7 +335,9 @@ private fun MemeList(items: List<MemeSignal>, lastUpdate: Long, context: Context
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("💧 نقدینگی: ${compact(m.liquidity)}", fontSize = 9.sp, color = PumpWatchPalette.Info)
                         Text("FDV: ${compact(m.fdv)}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
-                        Text("سن: ${m.ageHours?.let { ageText(it) } ?: \"نامشخص\"}", fontSize = 9.sp, color = PumpWatchPalette.Muted)
+                        val ageDisplay = m.ageHours?.let { ageText(it) } ?: "نامشخص"
+
+                        Text("سن: $ageDisplay", fontSize = 9.sp, color = PumpWatchPalette.Muted)
                     }
 
                     val (exitText, exitColor) = liquidityStatus(m.liquidity)
