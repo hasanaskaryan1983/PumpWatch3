@@ -534,12 +534,14 @@ object BacktestEngine {
                         (entryPrice - ev.exitPrice) / entryPrice * 100 * leverage
                     }
                     
-                    // 🚀 Commit 106: کسر فاندینگ اگر پوزیشن بیش از ۸ ساعت باز بوده
-                    // فرض: هر کندل = ۱ ساعت (برای simplicity)
-                    val holdHours = held
+                    // 🚀 F4b: کسر فاندینگ بر اساس عبور واقعی از مرزهای زمانی ۸ ساعته UTC
+                    // دیگر وابسته به تعداد کندل یا فرض ۱ ساعته نیست
+                    val entryTimeMs = entryTime // زمان ورود (باید در اسکوپ موجود باشد)
+                    val exitTimeMs = ev.exitTime // زمان خروج
                     val notionalUsd = 100.0 * leverage  // فرض margin = 100$
-                    val fundingCost = fundingCostForHold(notionalUsd, fundingRate, holdHours, side)
-                    val fundingCostPct = (fundingCost / notionalUsd) * 100.0 * leverage
+                    
+                    val fundingCost = fundingCostForHold(notionalUsd, fundingRate, entryTimeMs, exitTimeMs, side)
+                    val fundingCostPct = (fundingCost / notionalUsd) * 100.0
                     
                     // 🚀 Commit 106: PnL نهایی = خام - کارمزد - فاندینگ
                     val pnl = if (ev.liquidated) {
