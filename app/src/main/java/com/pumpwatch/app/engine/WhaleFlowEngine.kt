@@ -201,28 +201,38 @@ object WhaleFlowEngine {
      * @return آستانهٔ محاسبه‌شده (دلار)
      */
     internal fun computeAdaptiveThreshold(
-        trades: List<AggTradeNormalized>,
+        trades: List<AggTradeNormalized>, 
         volume24h: Double?,
-        userThreshold: Double?
+        userThreshold: Double?,
+        liquidityUsd: Double? = null // 🚀 F8: نقدینگی استخر
     ): Double {
         // ۱. Override دستی (اگر کاربر مشخص کرده)
         if (userThreshold != null && userThreshold > 0) {
             return userThreshold
         }
-
+        
+        // 🚀 F8: کف شناور بر اساس نقدینگی (حداقل MIN_THRESHOLD برای استخرهای خیلی کوچک)
+        // این کف تضمین می‌کند در استخرهای بزرگ، تریدهای متوسط به‌اشتباه "نهنگ" برچسب نخورند.
+        val liquidityFloor = if (liquidityUsd != null && liquidityUsd > 0) {
+            (liquidityUsd * LIQUIDITY_FLOOR_RATIO).coerceAtLeast(MIN_THRESHOLD)
+        } else {
+            MIN_THRESHOLD
+        }
+        
         // ۲. Volume-based: ۰.۱٪ از حجم ۲۴ ساعته
         if (volume24h != null && volume24h > 0) {
             val volumeBased = volume24h * VOLUME_RATIO
-            return volumeBased.coerceIn(MIN_THRESHOLD, MAX_THRESHOLD)
+            return volumeBased.coerceIn(liquidityFloor, MAX_THRESHOLD)
         }
-
+        
         // ۳. Percentile-based: صدک ۹۹ اندازهٔ تریدها
         if (trades.size >= MIN_TRADES_FOR_PERCENTILE) {
-            return percentile99(trades)
+            val p99 = percentile99(trades)
+            return p99.coerceAtLeast(liquidityFloor)
         }
 
         // ۴. Fallback: 100K
-        return DEFAULT_WHALE_THRESHOLD
+        return DEFAULT_WHALE_THRESHOLD.coerceAtLeast(liquidityFloor)
     }
 
     /**
