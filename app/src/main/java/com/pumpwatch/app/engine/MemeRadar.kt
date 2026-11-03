@@ -25,7 +25,7 @@ data class MemeSignal(
     val volumeH1: Double,
     val volumeH24: Double, // 🚀 Commit 104: حجم ۲۴س واقعی
     val buyRatio: Double,
-    val ageHours: Double,
+    val ageHours: Double?, // 🚀 F6: nullable برای پشتیبانی از وضعیت UNKNOWN
     val changeH1: Double,
     val changeH6: Double,
     val changeH24: Double,
@@ -109,15 +109,15 @@ object MemeRadar {
     var lastPolicy: ScanPolicy = ScanPolicy.NORMAL
         private set
 
-    private fun ageHours(createdAt: String?): Double {
-        if (createdAt == null) return 9999.0
+    private fun ageHours(createdAt: String?): Double? {
+        if (createdAt.isNullOrBlank()) return null
         return try {
-            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-            sdf.timeZone = TimeZone.getTimeZone("UTC")
-            val t = sdf.parse(createdAt) ?: return 9999.0
-            (System.currentTimeMillis() - t.time) / 3_600_000.0
-        } catch (_: Exception) {
-            9999.0
+            // 🚀 F6: استفاده از Instant.parse که به‌طور بومی از میلی‌ثانیه ISO پشتیبانی می‌کند
+            val instant = java.time.Instant.parse(createdAt)
+            val now = java.time.Instant.now()
+            java.time.Duration.between(instant, now).toMillis() / 3_600_000.0
+        } catch (e: Exception) {
+            null // 🚀 F6: خطا → UNKNOWN (به جای ۹۹۹۹.۰)
         }
     }
 
@@ -248,6 +248,10 @@ object MemeRadar {
         val h6 = a.priceChange?.h6 ?: 0.0
         val h24 = a.priceChange?.h24 ?: 0.0
         val age = ageHours(a.createdAt)
+        if (age == null) {
+            Log.w(TAG, "⚠️ ${a.symbol}: سن توکن نامعتبر (UNKNOWN) — رد شد")
+            return AnalyzeResult.Rejected("age_UNKNOWN")
+        }
         val fdv = a.fdvUsd ?: 0.0
 
         if (liq < policy.minLiquidityUsd) return AnalyzeResult.Rejected("liquidity")
