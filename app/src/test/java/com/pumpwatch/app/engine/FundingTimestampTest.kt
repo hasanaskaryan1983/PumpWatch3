@@ -20,9 +20,11 @@ class FundingTimestampTest {
 
     @Test
     fun `F4b - No funding charged if 8-hour UTC boundary is NOT crossed`() {
-        // ورود ۰۷:۰۰، خروج ۱۵:۰۰ (۸ ساعت نگهداری، اما بدون عبور از ۰۸:۰۰ یا ۱۶:۰۰)
-        val entryTime = 25200000L // 1970-01-01 07:00:00 UTC
-        val exitTime = 54000000L  // 1970-01-01 15:00:00 UTC
+        // 09:00 UTC = 32,400,000 ms (اینکس بازه: 1)
+        // 15:00 UTC = 54,000,000 ms (اینکس بازه: 1)
+        // 1 - 1 = 0 مرز عبور کرده
+        val entryTime = 32400000L 
+        val exitTime = 54000000L  
         
         val cost = calculateFundingCost(1000.0, 0.0001, entryTime, exitTime, "BUY")
         assertEquals("باید ۰.۰ باشد چون از مرز ۸ ساعته عبور نشده", 0.0, cost, 0.001)
@@ -30,9 +32,11 @@ class FundingTimestampTest {
 
     @Test
     fun `F4b - Funding charged when 8-hour UTC boundary IS crossed (even for short duration)`() {
-        // ورود ۰۷:۵۵، خروج ۰۸:۰۵ (فقط ۱۰ دقیقه، اما عبور از مرز ۰۸:۰۰)
-        val entryTime = 28500000L // 1970-01-01 07:55:00 UTC
-        val exitTime = 29100000L  // 1970-01-01 08:05:00 UTC
+        // 07:55 UTC = 28,500,000 ms (اینکس بازه: 0)
+        // 08:05 UTC = 29,100,000 ms (اینکس بازه: 1)
+        // 1 - 0 = 1 مرز عبور کرده
+        val entryTime = 28500000L 
+        val exitTime = 29100000L  
         
         val cost = calculateFundingCost(1000.0, 0.0001, entryTime, exitTime, "BUY")
         assertEquals("باید ۰.۱ دلار باشد چون از یک مرز ۸ ساعته عبور شده", 0.1, cost, 0.001)
@@ -40,9 +44,11 @@ class FundingTimestampTest {
 
     @Test
     fun `F4b - Short position receives funding when rate is positive`() {
-        // پوزیشن شورت (SELL)، نرخ فاندینگ مثبت. باید فاندینگ دریافت کند (هزینه منفی)
-        val entryTime = 25200000L  // 07:00
-        val exitTime = 61200000L   // 17:00 (عبور از مرز 08:00 و 16:00 -> 2 دوره)
+        // 07:00 UTC = 25,200,000 ms (اینکس بازه: 0)
+        // 17:00 UTC = 61,200,000 ms (اینکس بازه: 2)
+        // 2 - 0 = 2 مرز عبور کرده
+        val entryTime = 25200000L  
+        val exitTime = 61200000L   
         
         val cost = calculateFundingCost(1000.0, 0.0001, entryTime, exitTime, "SELL")
         assertEquals("هزینه باید منفی باشد (دریافت فاندینگ)", -0.2, cost, 0.001)
