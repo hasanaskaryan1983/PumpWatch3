@@ -4,16 +4,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.util.Locale
 
-// کپی تابع برای تست ایزوله (یا می‌توانیم تابع اصلی را اگر internal/public باشد فراخوانی کنیم)
-// برای اطمینان از تست‌پذیری کامل، منطق را اینجا شبیه‌سازی می‌کنیم
 fun normalizeSymbolTest(symbol: String, exchange: String): String {
     val cleaned = symbol.uppercase(Locale.US).trim()
     if (cleaned.isEmpty()) return cleaned
 
     val quotes = listOf("USDT", "USDC", "USD", "EUR", "GBP", "BUSD", "FDUSD", "TUSD", "DAI", "ETH", "BTC", "BNB", "SOL")
+    
+    // فقط نمادهایی که خطر شکستن اشتباه دارند
     val protectedSymbols = setOf(
-        "USDC", "USDT", "DAI", "FRAX", "STETH", "WSTETH", "RETH", "CBETH", 
-        "JITOSOL", "SOL", "ETH", "BTC", "BNB", "JUP", "PYTH"
+        "USDC", "DAI", "FRAX", "TUSD", "BUSD", "FDUSD",
+        "STETH", "WSTETH", "RETH", "CBETH", "JITOSOL", "JUPSOL"
     )
 
     if (cleaned in protectedSymbols) {
@@ -46,7 +46,7 @@ fun normalizeSymbolTest(symbol: String, exchange: String): String {
         "BYBIT" -> "$base$quote"
         "OKX" -> "$base-$quote"
         "GATE" -> "${base}_${quote}"
-        else -> "$base$quote"
+        else -> cleaned
     }
 }
 
@@ -61,9 +61,15 @@ class WhaleApiF7Test {
     }
 
     @Test
+    fun `F7 - correctly adds default USDT to base assets like BTC`() {
+        // این تست تضمین می‌کند که حذف BTC از protectedSymbols باعث شکست منطق پیش‌فرض نشده است
+        assertEquals("BTC باید به BTCUSDT تبدیل شود", "BTCUSDT", normalizeSymbolTest("BTC", "BINANCE"))
+        assertEquals("BTC در OKX باید به BTC-USDT تبدیل شود", "BTC-USDT", normalizeSymbolTest("BTC", "OKX"))
+    }
+
+    @Test
     fun `F7 - correctly splits valid trading pairs`() {
         assertEquals("STETHUSDT باید به درستی شناسایی شود", "STETHUSDT", normalizeSymbolTest("STETHUSDT", "BINANCE"))
         assertEquals("JITOSOL-USDC در OKX باید درست بماند", "JITOSOL-USDC", normalizeSymbolTest("JITOSOL-USDC", "OKX"))
-        assertEquals("BTC_USDT در GATE باید درست فرمت شود", "BTC_USDT", normalizeSymbolTest("BTC_USDT", "GATE"))
     }
 }

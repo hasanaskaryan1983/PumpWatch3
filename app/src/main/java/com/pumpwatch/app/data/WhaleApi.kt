@@ -105,8 +105,10 @@ fun normalizeSymbol(symbol: String, exchange: String): String {
     
     // 🚀 F7: مجموعه نمادهای محافظت‌شده که نباید به‌صورت کور شکسته شوند (جلوگیری از شکستن stETH, JITOSOL, USDC)
     val protectedSymbols = setOf(
-        "USDC", "USDT", "DAI", "FRAX", "STETH", "WSTETH", "RETH", "CBETH", 
-        "JITOSOL", "SOL", "ETH", "BTC", "BNB", "JUP", "PYTH"
+        // 🚀 F7: فقط نمادهایی که خطر شکستن اشتباه دارند (مثلاً USDC به C و USD، یا STETH به ST و ETH)
+        // BTC, ETH, SOL حذف شدند تا منطق پیش‌فرض افزودن USDT برای آن‌ها کار کند.
+        "USDC", "DAI", "FRAX", "TUSD", "BUSD", "FDUSD",
+        "STETH", "WSTETH", "RETH", "CBETH", "JITOSOL", "JUPSOL"
     )
 
     // اگر نماد دقیقاً یکی از موارد محافظت‌شده است، آن را نشکن
