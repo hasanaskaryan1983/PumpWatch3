@@ -5,7 +5,7 @@ import org.junit.Test
 
 class WhaleFlowEngineF8Test {
 
-    // کپی دقیق منطق تابع جدید برای تست ایزوله (بدون نیاز به Reflection)
+    // کپی دقیق منطق تابع جدید برای تست ایزوله
     private fun computeThreshold(
         trades: List<Double>,
         volume24h: Double?,
@@ -44,25 +44,19 @@ class WhaleFlowEngineF8Test {
 
     @Test
     fun `F8 - high liquidity pool prevents small trades from being flagged as whales via percentile`() {
-        // سناریو: استخر بزرگ (۱۰ میلیون دلار نقدینگی) با تریدهای کوچک (۱۰۰ تا ۲۰,۰۰۰ دلار)
-        // ۱٪ نقدینگی = ۱۰۰,۰۰۰ دلار. پس کف آستانه باید ۱۰۰,۰۰۰ دلار باشد.
-        // صدک ۹۹ تریدها حدود ۲۰,۰۰۰ دلار است. بدون F8، آستانه ۲۰,۰۰۰ می‌شد (باگ!).
-        // با F8، آستانه باید به ۱۰۰,۰۰۰ دلار (کف نقدینگی) محدود شود.
-        
-        val trades = List(1000) { (it * 20.0) } // تریدهایی از ۰ تا ۲۰,۰۰۰ دلار
-        val liquidity = 10_000_000.0 // ۱۰ میلیون دلار
+        // استخر ۱۰ میلیون دلاری → کف = ۱۰۰,۰۰۰ دلار
+        // p99 لیست زیر = 990 * 20 = 19,800 دلار (کمتر از کف)
+        val trades = List(1000) { (it * 20.0) } 
+        val liquidity = 10_000_000.0 
         
         val threshold = computeThreshold(trades, null, null, liquidity)
         
-        assertEquals("آستانه باید روی کف نقدینگی (۱٪ استخر = ۱۰۰,۰۰۰) قفل شود", 100_000.0, threshold, 0.1)
+        assertEquals("آستانه باید روی کف نقدینگی (۱۰۰,۰۰۰) قفل شود", 100_000.0, threshold, 0.1)
     }
 
     @Test
     fun `F8 - low liquidity pool falls back to MIN_THRESHOLD`() {
-        // سناریو: استخر کوچک (۵۰۰ هزار دلار نقدینگی)
-        // ۱٪ نقدینگی = ۵,۰۰۰ دلار که کمتر از MIN_THRESHOLD (۱۰,۰۰۰) است.
-        // کف باید روی MIN_THRESHOLD (۱۰,۰۰۰) قفل شود.
-        
+        // استخر ۵۰۰ هزار دلاری → ۱٪ = ۵,۰۰۰ دلار. اما MIN_THRESHOLD = ۱۰,۰۰۰ دلار.
         val trades = List(1000) { (it * 5.0) } 
         val liquidity = 500_000.0 
         
@@ -73,12 +67,14 @@ class WhaleFlowEngineF8Test {
 
     @Test
     fun `F8 - null liquidity falls back to default behavior`() {
-        // سناریو: نقدینگی در دسترس نیست. باید مانند قبل MIN_THRESHOLD (۱۰,۰۰۰) اعمال شود.
+        // نقدینگی null → کف = MIN_THRESHOLD (۱۰,۰۰۰)
+        // p99 لیست = 990 * 20 = 19,800 دلار (بیشتر از کف)
         val trades = List(1000) { (it * 20.0) } 
         
         val threshold = computeThreshold(trades, null, null, null)
         
-        assertEquals("آستانه باید روی صدک ۹۹ (۲۰,۰۰۰) بماند چون نقدینگی null است", 20_000.0, threshold, 0.1)
+        // 🚀 اصلاح دقیق ریاضی: مقدار واقعی ۱۹,۸۰۰ است، نه ۲۰,۰۰۰
+        assertEquals("آستانه باید دقیقاً روی صدک ۹۹ (۱۹,۸۰۰) بماند", 19_800.0, threshold, 0.1)
     }
 
     @Test
