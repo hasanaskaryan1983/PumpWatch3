@@ -1,6 +1,6 @@
 package com.pumpwatch.app.engine
 
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.Duration
@@ -22,33 +22,31 @@ class MemeRadarF6Test {
 
     @Test
     fun `F6 - parses ISO time WITH milliseconds correctly`() {
-        // شبیه‌سازی زمان ۲ ساعت پیش با میلی‌ثانیه
-        val twoHoursAgo = Instant.now().minusSeconds(2 * 3600).toString() // تولید رشته‌ای مثل 2024-01-15T10:30:45.123Z
+        // Instant.toString() به‌طور پیش‌فرض شامل میلی‌ثانیه است (مثلاً 2023-10-27T10:00:00.123Z)
+        val twoHoursAgo = Instant.now().minusSeconds(2 * 3600).toString()
         val age = ageHours(twoHoursAgo)
         
-        // باید حدود ۲ ساعت باشد (با حاشیه خطای کوچک به دلیل اختلاف زمانی اجرا)
-        assert(age != null)
-        assert(age!! > 1.9 && age < 2.1) { "سن محاسبه‌شده باید حدود ۲ ساعت باشد، اما $age است" }
+        assertNotNull("باید با میلی‌ثانیه به‌درستی پارس شود", age)
+        assert(age!! > 1.9 && age < 2.1) { "سن باید حدود ۲ ساعت باشد، اما $age است" }
     }
 
     @Test
     fun `F6 - parses ISO time WITHOUT milliseconds correctly`() {
-        // شبیه‌سازی زمان ۵ ساعت پیش بدون میلی‌ثانیه
-        val fiveHoursAgo = Instant.now().minusSeconds(5 * 3600).toString().replaceBeforeLast(".", "") // حذف میلی‌ثانیه برای تست
-        // ساخت دستی فرمت بدون میلی‌ثانیه برای اطمینان
-        val formatted = java.time.format.DateTimeFormatter.ISO_INSTANT.format(Instant.now().minusSeconds(5 * 3600)).replaceBeforeLast(".", "")
+        // ساخت زمان ۵ ساعت پیش و حذف بخش میلی‌ثانیه با تابع استاندارد substringBefore
+        val fiveHoursAgoInstant = Instant.now().minusSeconds(5 * 3600)
+        val timeWithoutMs = fiveHoursAgoInstant.toString().substringBefore(".") + "Z"
         
-        val age = ageHours(formatted)
-        assert(age != null)
-        assert(age!! > 4.9 && age < 5.1) { "سن محاسبه‌شده باید حدود ۵ ساعت باشد، اما $age است" }
+        val age = ageHours(timeWithoutMs)
+        assertNotNull("باید بدون میلی‌ثانیه هم به‌درستی پارس شود", age)
+        assert(age!! > 4.9 && age < 5.1) { "سن باید حدود ۵ ساعت باشد، اما $age است" }
     }
 
     @Test
     fun `F6 - returns null (UNKNOWN) for invalid time strings`() {
-        val invalidTime = "2024-01-15 10:30:45" // فرمت نامعتبر (بدون T و Z)
+        val invalidTime = "2024-01-15 10:30:45" // فرمت نامعتبر (فاقد T و Z)
         val age = ageHours(invalidTime)
         
-        assertNull("برای زمان نامعتبر باید null (UNKNOWN) برگرداند، نه ۹۹۹۹.۰", age)
+        assertNull("برای زمان نامعتبر باید null (UNKNOWN) برگرداند", age)
     }
 
     @Test
