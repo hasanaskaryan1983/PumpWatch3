@@ -427,17 +427,21 @@ object BacktestEngine {
     private fun fundingCostForHold(
         notionalUsd: Double,
         fundingRate: Double,
-        holdHours: Int,
+        entryTimeMs: Long,
+        exitTimeMs: Long,
         side: String
     ): Double {
-        // فاندینگ هر ۸ ساعت پرداخت/دریافت می‌شود
-        val fundingPeriods = holdHours / 8
-        if (fundingPeriods == 0) return 0.0
+        // 🚀 F4b: محاسبه بر اساس عبور از مرزهای زمانی ۸ ساعته UTC (00:00, 08:00, 16:00)
+        val intervalMs = 8L * 60 * 60 * 1000 // ۸ ساعت به میلی‌ثانیه
+        val periodsCrossed = ((exitTimeMs / intervalMs) - (entryTimeMs / intervalMs)).toInt()
         
-        // لانگ با فاندینگ مثبت هزینه می‌دهد؛ شورت با فاندینگ مثبت دریافت می‌کند
-        val pays = if (side == "BUY") fundingRate >= 0 else fundingRate < 0
-        val costPerPeriod = notionalUsd * abs(fundingRate)
-        val totalCost = costPerPeriod * fundingPeriods
+        if (periodsCrossed <= 0) return 0.0
+        
+        val isLong = side == "BUY" || side == "PUMP"
+        val pays = if (isLong) fundingRate >= 0 else fundingRate < 0
+        
+        val costPerPeriod = notionalUsd * kotlin.math.abs(fundingRate)
+        val totalCost = costPerPeriod * periodsCrossed
         
         return if (pays) totalCost else -totalCost
     }
@@ -535,13 +539,15 @@ object BacktestEngine {
                     }
                     
                     // 🚀 F4b: کسر فاندینگ بر اساس عبور واقعی از مرزهای زمانی ۸ ساعته UTC
-                    // دیگر وابسته به تعداد کندل یا فرض ۱ ساعته نیست
-                    val entryTimeMs = entryTime // زمان ورود (باید در اسکوپ موجود باشد)
-                    val exitTimeMs = ev.exitTime // زمان خروج
-                    val notionalUsd = 100.0 * leverage  // فرض margin = 100$
+                    // استفاده از timestamp واقعی کندل ورود و خروج از آرایه klines
+                    val entryTimeMs = klines[entryIdx].time.toLong()
+                    val exitTimeMs = klines[i].time.toLong()
+                    val marginUsd = 100.0  // فرض مارجین پایه ۱۰۰ دلار
+                    val notionalUsd = marginUsd * leverage
                     
                     val fundingCost = fundingCostForHold(notionalUsd, fundingRate, entryTimeMs, exitTimeMs, side)
-                    val fundingCostPct = (fundingCost / notionalUsd) * 100.0
+                    // تبدیل هزینه دلاری به درصدِ مارجین (برای جمع شدن با pnlRaw که درصد مارجین است)
+                    val fundingCostPct = (fundingCost / marginUsd) * 100.0
                     
                     // 🚀 Commit 106: PnL نهایی = خام - کارمزد - فاندینگ
                     val pnl = if (ev.liquidated) {
