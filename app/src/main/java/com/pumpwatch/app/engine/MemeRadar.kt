@@ -187,7 +187,11 @@ object MemeRadar {
         )
 
         val seen = mutableSetOf<String>()
-        val unique = pools.filter { p -> seen.add(p.id ?: "") }
+        val unique = pools.filter { p ->
+            // 🚀 L8: کلید ترکیبی برای جلوگیری از حذف استخرهای بدون id
+            val compositeKey = p.id ?: "${p.relationships?.network?.data?.id}_${p.relationships?.base_token?.data?.id}_${p.relationships?.dex?.data?.id}"
+            seen.add(compositeKey)
+        }
 
         // 🚀 Commit 97: شمارش دقیق قیف
         var rejectedLiq = 0
