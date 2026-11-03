@@ -76,6 +76,7 @@ object WhaleFlowEngine {
     private const val MIN_THRESHOLD = 10_000.0
     private const val MAX_THRESHOLD = 500_000.0
     private const val VOLUME_RATIO = 0.001  // ۰.۱٪ از حجم ۲۴ ساعته
+    private const val LIQUIDITY_FLOOR_RATIO = 0.01 // 🚀 F8: کف آستانه نهنگ = ۱٪ نقدینگی استخر
     private const val MIN_TRADES_FOR_PERCENTILE = 100
 
     /** ثابت‌های pressure برای اجتناب از typo و سازگاری با UI */
@@ -123,12 +124,13 @@ object WhaleFlowEngine {
         source: String,
         trades: List<AggTradeNormalized>,
         whaleThresholdUsd: Double? = null,
-        volume24h: Double? = null
+        volume24h: Double? = null,
+        liquidityUsd: Double? = null // 🚀 F8: نقدینگی استخر برای جلوگیری از برچسب نهنگ به ترید خرد
     ): WhaleFlowResult? {
         if (trades.isEmpty()) return null
 
         // 🚀 Commit 87 (W8): محاسبهٔ آستانهٔ نسبی
-        val threshold = computeAdaptiveThreshold(trades, volume24h, whaleThresholdUsd)
+        val threshold = computeAdaptiveThreshold(trades, volume24h, whaleThresholdUsd, liquidityUsd)
 
         var buy = 0.0
         var sell = 0.0
