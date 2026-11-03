@@ -540,8 +540,8 @@ object BacktestEngine {
                     
                     // 🚀 F4b: کسر فاندینگ بر اساس عبور واقعی از مرزهای زمانی ۸ ساعته UTC
                     // استفاده از timestamp واقعی کندل ورود و خروج از آرایه klines
-                    val entryTimeMs = klines[entryIdx].time.toLong()
-                    val exitTimeMs = klines[i].time.toLong()
+                    val entryTimeMs = klines[entryIdx][0].toLong()
+                    val exitTimeMs = klines[i][0].toLong()
                     val marginUsd = 100.0  // فرض مارجین پایه ۱۰۰ دلار
                     val notionalUsd = marginUsd * leverage
                     
