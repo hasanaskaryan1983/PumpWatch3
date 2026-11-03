@@ -101,18 +101,36 @@ fun normalizeSymbol(symbol: String, exchange: String): String {
     val cleaned = symbol.uppercase(Locale.US).trim()
     if (cleaned.isEmpty()) return cleaned
 
-    val quotes = listOf("USDT", "USDC", "USD", "EUR", "GBP", "BUSD", "FDUSD",
-        "TUSD", "DAI", "ETH", "BTC", "BNB", "SOL")
+    val quotes = listOf("USDT", "USDC", "USD", "EUR", "GBP", "BUSD", "FDUSD", "TUSD", "DAI", "ETH", "BTC", "BNB", "SOL")
+    
+    // 🚀 F7: مجموعه نمادهای محافظت‌شده که نباید به‌صورت کور شکسته شوند (جلوگیری از شکستن stETH, JITOSOL, USDC)
+    val protectedSymbols = setOf(
+        "USDC", "USDT", "DAI", "FRAX", "STETH", "WSTETH", "RETH", "CBETH", 
+        "JITOSOL", "SOL", "ETH", "BTC", "BNB", "JUP", "PYTH"
+    )
+
+    // اگر نماد دقیقاً یکی از موارد محافظت‌شده است، آن را نشکن
+    if (cleaned in protectedSymbols) {
+        return when (exchange) {
+            "OKX" -> if (cleaned in quotes) cleaned else "$cleaned-USDT"
+            "GATE" -> if (cleaned in quotes) cleaned else "${cleaned}_USDT"
+            else -> cleaned
+        }
+    }
 
     var base = cleaned
     var quote = "USDT"
-
     for (q in quotes) {
         if (cleaned.endsWith(q)) {
-            val potentialBase = cleaned.substring(0, cleaned.length - q.length)
-            val trimmedBase = potentialBase.trimEnd('-', '_')
-            if (trimmedBase.isNotEmpty()) {
-                base = trimmedBase
+            val potentialBase = cleaned.substring(0, cleaned.length - q.length).trimEnd('-', '_')
+            if (potentialBase.isNotEmpty()) {
+                // 🚀 F7: بررسی کن که آیا با چسباندن دوباره، یک نماد محافظت‌شده ساخته می‌شود؟
+                // مثال: cleaned="STETH", q="ETH" -> potentialBase="ST" -> reconstructed="STETH"
+                val reconstructed = "$potentialBase$q"
+                if (reconstructed in protectedSymbols) {
+                    continue // از این کات رد شو تا نماد اصلی دست‌نخورده باقی بماند
+                }
+                base = potentialBase
                 quote = q
                 break
             }
@@ -123,8 +141,8 @@ fun normalizeSymbol(symbol: String, exchange: String): String {
         "BINANCE" -> "$base$quote"
         "BYBIT" -> "$base$quote"
         "OKX" -> "$base-$quote"
-        "GATE" -> "${base}_$quote"
-        else -> cleaned
+        "GATE" -> "${base}_${quote}"
+        else -> "$base$quote"
     }
 }
 
