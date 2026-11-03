@@ -312,6 +312,9 @@ private fun MemeList(items: List<MemeSignal>, lastUpdate: Long, context: Context
                     if (m.isHighRisk) {
                         Text("🚨 ریسک بالا: وضعیت امنیتی نامشخص است — داده در دسترس نیست، با احتیاط معامله کنید.",
                              fontSize = 9.sp, color = PumpWatchPalette.Negative, fontWeight = FontWeight.Bold)
+                    } else {
+                        val warningText = when (m.securityStatus) {
+                            "UNKNOWN" -> "⚠️ وضعیت امنیتی نامشخص است — داده در دسترس نیست، با احتیاط معامله کنید."
                             "EMPTY" -> "❓ GoPlus این توکن را شناسایی نکرد — ایمن فرض نمی‌شود."
                             "FAILED" -> "❓ بررسی امنیتی انجام نشد — ایمن فرض نمی‌شود."
                             else -> "❓ وضعیت امنیتی نامشخص — ایمن فرض نمی‌شود."
