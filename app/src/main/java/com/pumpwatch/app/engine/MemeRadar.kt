@@ -249,7 +249,7 @@ object MemeRadar {
         val h24 = a.priceChange?.h24 ?: 0.0
         val age = ageHours(a.createdAt)
         if (age == null) {
-            Log.w(TAG, "⚠️ ${a.symbol}: سن توکن نامعتبر (UNKNOWN) — رد شد")
+            Log.w(TAG, "⚠️ Token (createdAt=${a.createdAt}): سن توکن نامعتبر (UNKNOWN) — رد شد")
             return AnalyzeResult.Rejected("age_UNKNOWN")
         }
         val fdv = a.fdvUsd ?: 0.0
