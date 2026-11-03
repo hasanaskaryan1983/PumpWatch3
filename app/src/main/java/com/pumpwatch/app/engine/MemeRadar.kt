@@ -34,6 +34,7 @@ data class MemeSignal(
     val rugScore: Int? = null,
     val rugWarnings: List<String> = emptyList(),
     val securityStatus: String = "UNKNOWN",
+    val isHighRisk: Boolean = false, // 🚀 L1: پرچم صریح ریسک بالا برای UI
     val contract: String? = null,
     val poolAddress: String? = null
 )
@@ -334,6 +335,7 @@ object MemeRadar {
                 fdv = fdv,
                 reasons = reasons,
                 rugScore = rugScore,
+                isHighRisk = (rugScore == null), // 🚀 L1: اگر امتیاز امنیت null باشد، ریسک بالا است
                 rugWarnings = rugWarnings,
                 securityStatus = securityStatus,
                 contract = contractAddress,
