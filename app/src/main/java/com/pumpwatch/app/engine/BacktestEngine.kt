@@ -199,7 +199,7 @@ object BacktestEngine {
         timedOut: Boolean,
         liqPrice: Double? = null
     ): ExitEval {
-        val open = cur[0]; val high = cur[1]; val low = cur[2]; val close = cur[3]
+        val open = cur[1]; val high = cur[2]; val low = cur[3]; val close = cur[4] // 🚀 F9: شیفت به دلیل openTime در ایندکس ۰
         
         // 🚀 Commit 106: چک لیکوئیدیشن اول (بدترین سناریو)
         if (liqPrice != null) {
@@ -311,7 +311,7 @@ object BacktestEngine {
 
             // 🚀 Sprint 14 (M7): پر شدن در open کندل بعد از سیگنال
             if (pendingEntry) {
-                entryPrice = cur[0]
+                entryPrice = cur[1] // 🚀 F9: open اکنون در ایندکس ۱ است
                 entryDay = i
                 inTrade = true
                 pendingEntry = false
@@ -471,7 +471,7 @@ object BacktestEngine {
 
             // 🚀 Sprint 14 (M7): پر شدن در open کندل بعد از سیگنال
             if (pendingEntry) {
-                entryPrice = cur[0]
+                entryPrice = cur[1] // 🚀 F9: open اکنون در ایندکس ۱ است
                 entryIdx = i
                 inTrade = true
                 pendingEntry = false
