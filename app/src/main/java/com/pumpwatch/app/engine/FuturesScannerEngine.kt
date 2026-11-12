@@ -99,10 +99,25 @@ object FuturesScannerEngine {
 
     /** Trigger روی 5M: سه کندل هم‌جهت با جهت سیگنال */
     fun triggerOf(candles5m: List<FuturesCandle>, direction: String): Boolean {
-        if (candles5m.size < 3) return false
-        val last3 = candles5m.takeLast(3)
-        return if (direction == "LONG") last3.all { it.close >= it.open }
-        else last3.all { it.close <= it.open }
+        val now = System.currentTimeMillis()
+        val intervalMs = 5L * 60 * 1000 // 5 minutes
+        // 🚀 H-DOJI: حذف کندل باز (کندلی که هنوز بسته نشده)
+        val closedCandles = candles5m.filter { it.openTime + intervalMs <= now }
+        if (closedCandles.size < 3) return false
+        val last3 = closedCandles.takeLast(3)
+        
+        // 🚀 H-DOJI: حداقل بدنه برای جلوگیری از دوجی جهت‌دار (۰.۰۵٪)
+        val minBodyRatio = 0.0005 
+        
+        return if (direction == "LONG") {
+            last3.all { 
+                it.open > 0 && it.close > it.open && ((it.close - it.open) / it.open) >= minBodyRatio 
+            }
+        } else {
+            last3.all { 
+                it.open > 0 && it.close < it.open && ((it.open - it.close) / it.open) >= minBodyRatio 
+            }
+        }
     }
 
     /** ATR ساده (میانگین TR های اخیر) */
