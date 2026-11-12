@@ -52,7 +52,7 @@ object ScoringEngine {
         if (candles.size < 200) return 0 to 12.0
         val closes = candles.map { it[4].asDouble }
         val vols = candles.map { it[5].asDouble }
-        val weekly = closes.chunked(7).map { it.last() }
+        val weekly = weeklyClosesAligned(candles) // 🚀 F9: هفتهٔ تقویمی ISO، مستقل از شروع پنجره
 
         val price = closes.last()
         val e50 = emaL(closes, 50)
@@ -87,39 +87,70 @@ object ScoringEngine {
                 else -> -8
             }
         }
-        if (closes.size >= 30) {
-            var obv = 0.0
-            val ser = mutableListOf<Double>()
-            for (i in 1 until closes.size) {
-                obv += when {
-                    closes[i] > closes[i - 1] -> vols[i]
-                    closes[i] < closes[i - 1] -> -vols[i]
-                    else -> 0.0
-                }
-                ser.add(obv)
-            }
-            if (ser.size >= 21) {
-                val now = ser.last()
-                val past = ser[ser.size - 21]
-                s += when {
-                    now > past * 1.05 -> 10
-                    now > past -> 5
-                    now < past * 0.95 -> -10
-                    else -> -5
-                }
-            }
-        }
+        s += obvDeltaScore(closes, vols) // 🚀 F9: OBV تفاضلی نرمال‌شده (ضد باگ مقایسهٔ ضربی روی مقدار منفی)
         s = s.coerceIn(-100, 100)
 
-        var atr = 0.0
-        if (closes.size >= 15) {
-            for (i in closes.size - 14 until closes.size) {
-                atr += abs(closes[i] - closes[i - 1])
-            }
-            atr /= 14
-        }
-        val atrPct = if (price > 0) atr / price * 100 else 12.0
+        val atrPct = atrPctTrueRange(candles, price) // 🚀 F9: True Range کامل (high/low/gap)
         return s to atrPct
+    }
+
+    // 🚀 F9: هفتهٔ تقویمی ISO (دوشنبه→یکشنبه، UTC)؛ کلید هفته از openTime ساخته می‌شود نه از اندیس آرایه
+    internal fun weeklyClosesAligned(candles: List<com.google.gson.JsonArray>): List<Double> {
+        if (candles.isEmpty()) return emptyList()
+        val dayMs = 86_400_000L
+        val weekMs = 7 * dayMs
+        val out = mutableListOf<Double>()
+        var currentKey = Long.MIN_VALUE
+        var lastClose = 0.0
+        for (c in candles) {
+            val key = Math.floorDiv(c[0].asLong + 3 * dayMs, weekMs) // epoch=پنجشنبه؛ +3 روز → مرز دوشنبه
+            val close = c[4].asDouble
+            if (key != currentKey) {
+                if (currentKey != Long.MIN_VALUE) out.add(lastClose)
+                currentKey = key
+            }
+            lastClose = close
+        }
+        out.add(lastClose)
+        return out
+    }
+
+    // 🚀 F9: OBV تفاضلی در پنجرهٔ ۲۰ روزه، نرمال‌شده به حجم همان پنجره (علامت‌دار و ایمن)
+    internal fun obvDeltaScore(closes: List<Double>, vols: List<Double>): Int {
+        if (closes.size < 30 || vols.size != closes.size) return 0
+        var obv = 0.0
+        val ser = mutableListOf<Double>()
+        for (i in 1 until closes.size) {
+            obv += when {
+                closes[i] > closes[i - 1] -> vols[i]
+                closes[i] < closes[i - 1] -> -vols[i]
+                else -> 0.0
+            }
+            ser.add(obv)
+        }
+        if (ser.size < 21) return 0
+        val delta = ser.last() - ser[ser.size - 21]
+        val volScale = vols.takeLast(20).sum().coerceAtLeast(1e-9)
+        val rel = delta / volScale
+        return when {
+            rel > 0.05 -> 10
+            rel > 0.0 -> 5
+            rel < -0.05 -> -10
+            else -> -5
+        }
+    }
+
+    // 🚀 F9: ATR = میانگین True Range کامل روی ۱۴ کندل آخر (شامل gap و high/low)
+    internal fun atrPctTrueRange(candles: List<com.google.gson.JsonArray>, price: Double): Double {
+        if (candles.size < 15 || price <= 0) return 12.0
+        var sum = 0.0
+        for (i in candles.size - 14 until candles.size) {
+            val high = candles[i][2].asDouble
+            val low = candles[i][3].asDouble
+            val prevClose = candles[i - 1][4].asDouble
+            sum += maxOf(high - low, abs(high - prevClose), abs(low - prevClose))
+        }
+        return (sum / 14) / price * 100
     }
 
     // ---------- helpers pure (منتقل‌شده از TradesScreen) ----------
