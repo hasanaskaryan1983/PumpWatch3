@@ -55,8 +55,8 @@ object BacktestEngine {
     // =========================  HELPERS  ============================
     // ================================================================
 
-    private fun closes(klines: List<List<Double>>): List<Double> = klines.map { it[3] }
-    private fun volumes(klines: List<List<Double>>): List<Double> = klines.map { it[4] }
+    private fun closes(klines: List<List<Double>>): List<Double> = klines.map { it[4] } // 🚀 F9: close به ایندکس ۴ شیفت کرد
+    private fun volumes(klines: List<List<Double>>): List<Double> = klines.map { it[5] } // 🚀 F9: volume به ایندکس ۵ شیفت کرد
 
     private fun ema(values: List<Double>, p: Int): Double {
         if (values.size < p) return values.lastOrNull() ?: 0.0
@@ -93,7 +93,7 @@ object BacktestEngine {
         val trs = mutableListOf<Double>()
         for (i in 1 until klines.size) {
             val prev = klines[i - 1]; val cur = klines[i]
-            val tr = maxOf(cur[1] - cur[2], abs(cur[1] - prev[3]), abs(cur[2] - prev[3]))
+            val tr = maxOf(cur[2] - cur[3], abs(cur[2] - prev[4]), abs(cur[3] - prev[4]))
             trs.add(tr)
         }
         return trs.takeLast(period).average()
@@ -117,66 +117,16 @@ object BacktestEngine {
     }
 
     /**
-     * امتیازدهی اسپات (همان منطق ربات زنده — EMA/MACD/RSI/Volume/OBV/Weekly)
+     * 🚀 F9: هم‌تعریف‌سازی با ScoringEngine (منبع واحد حقیقت برای Gate 2)
      */
     private fun spotScore(klinesHistory: List<List<Double>>): Int {
         if (klinesHistory.size < 200) return -100
-        val c = closes(klinesHistory)
-        val v = volumes(klinesHistory)
-        val weekly = c.chunked(7).map { it.last() }
-        val price = c.last()
-
-        val e50 = ema(c, 50); val e200 = ema(c, 200)
-        var s = when {
-            price > e50 && e50 > e200 -> 50
-            price > e50 -> 25
-            price < e50 && e50 < e200 -> -50
-            else -> -25
-        }
-        s += if (macdUp(c)) 20 else -20
-        val r = rsi(c)
-        s += when {
-            r in 45.0..65.0 -> 15
-            r < 35 -> 20
-            r > 75 -> -25
-            else -> 5
-        }
-        if (v.size > 40) {
-            val rec = v.takeLast(20).average()
-            val prior = v.dropLast(20).takeLast(20).average()
-            if (prior > 0 && rec > prior * 1.2) s += 10
-        }
-        if (weekly.size >= 25) {
-            val w = weekly.last()
-            val e10 = ema(weekly, 10); val e20 = ema(weekly, 20)
-            s += when {
-                w > e10 && e10 > e20 -> 15
-                w > e10 -> 8
-                w < e10 && e10 < e20 -> -20
-                else -> -8
+        val jsonCandles = klinesHistory.map { k ->
+            com.google.gson.JsonArray().apply {
+                add(k[0].toLong()); add(k[1]); add(k[2]); add(k[3]); add(k[4]); add(k[5])
             }
         }
-        if (c.size >= 30) {
-            var obv = 0.0; val ser = mutableListOf<Double>()
-            for (i in 1 until c.size) {
-                obv += when {
-                    c[i] > c[i - 1] -> v[i]
-                    c[i] < c[i - 1] -> -v[i]
-                    else -> 0.0
-                }
-                ser.add(obv)
-            }
-            if (ser.size >= 21) {
-                val now = ser.last(); val past = ser[ser.size - 21]
-                s += when {
-                    now > past * 1.05 -> 10
-                    now > past -> 5
-                    now < past * 0.95 -> -10
-                    else -> -5
-                }
-            }
-        }
-        return s.coerceIn(-100, 100)
+        return ScoringEngine.scoreFromCandles(jsonCandles).first
     }
 
     /**
@@ -387,16 +337,22 @@ object BacktestEngine {
                 val history = klines.subList(0, i + 1)
                 val score = spotScore(history)
                 if (score >= 0) {
-                    val c = closes(history)
-                    val weekly = c.chunked(7).map { it.last() }
+                    val jsonHistory = history.map { k ->
+                        com.google.gson.JsonArray().apply {
+                            add(k[0].toLong()); add(k[1]); add(k[2]); add(k[3]); add(k[4]); add(k[5])
+                        }
+                    }
+                    val weekly = ScoringEngine.weeklyClosesAligned(jsonHistory)
                     val weeklyPos = weekly.size >= 2 && weekly.last() > weekly[weekly.size - 2]
-                    val obv = obvSeries(history)
-                    val obvPos = obv.size >= 21 && obv.last() > obv[obv.size - 21]
+
+                    val c = history.map { it[4] }
+                    val v = history.map { it[5] }
+                    val obvPos = ScoringEngine.obvDeltaScore(c, v) > 0
 
                     if (weeklyPos && obvPos) {
                         val a = atr(history)
                         if (a > 0) {
-                            val signalPrice = cur[3]
+                            val signalPrice = cur[4]
                             side = "BUY"
                             stop = signalPrice - 2 * a
                             target = signalPrice + 3 * a

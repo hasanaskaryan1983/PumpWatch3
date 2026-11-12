@@ -299,7 +299,7 @@ fun BacktestScreen() {
                                     sourcesUsed.add(klineSourceLabel(BinanceClient.api.lastSource(symbol)))
                                     if (klines.size >= 60) {
                                         analyzed++
-                                        val klinesList = klines.map { k -> listOf(k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble, k[5].asDouble) }
+                                        val klinesList = klines.map { k -> listOf(k[0].asDouble, k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble, k[5].asDouble) } // 🚀 F9: افزودن openTime برای تراز هفته
                                         val (trades, _) = BacktestEngine.runFutures(symbol, klinesList, tf.evalLast, tf.hold, feeRate = 0.0004, leverage = 10, fundingRate = 0.0001)
                                         allTrades.addAll(trades)
                                     }
@@ -309,7 +309,7 @@ fun BacktestScreen() {
                                     sourcesUsed.add(klineSourceLabel(BinanceClient.api.lastSource(symbol)))
                                     if (klines.size >= 210) {
                                         analyzed++
-                                        val klinesList = klines.map { k -> listOf(k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble, k[5].asDouble) }
+                                        val klinesList = klines.map { k -> listOf(k[0].asDouble, k[1].asDouble, k[2].asDouble, k[3].asDouble, k[4].asDouble, k[5].asDouble) } // 🚀 F9: افزودن openTime برای تراز هفته
                                         val (trades, _) = BacktestEngine.runSpot(symbol, klinesList, hold)
                                         allTrades.addAll(trades)
                                     }
