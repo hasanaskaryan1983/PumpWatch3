@@ -11,7 +11,7 @@ class BacktestFillTest {
 
     private fun candle(
         o: Double, h: Double, l: Double, c: Double, v: Double = 1_000_000.0
-    ): List<Double> = listOf(o, h, l, c, v)
+    ): List<Double> = listOf(1704067200000.0, o, h, l, c, v) // 🚀 F9
 
     private fun baseUptrend(): MutableList<List<Double>> {
         val out = mutableListOf<List<Double>>()

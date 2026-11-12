@@ -37,7 +37,7 @@ class BacktestEngineTest {
             val close = price + trendPerBar + (Math.random() - 0.5) * noise
             val high = maxOf(open, close) + Math.random() * noise * 0.5
             val low = minOf(open, close) - Math.random() * noise * 0.5
-            out.add(listOf(open, high, low, close, volume))
+            out.add(listOf(1704067200000.0, open, high, low, close, volume)) // 🚀 F9
             price = close
         }
         return out
@@ -52,7 +52,7 @@ class BacktestEngineTest {
             val close = price * 1.01
             val high = close * 1.002
             val low = open * 0.998
-            out.add(listOf(open, high, low, close, 1_000_000.0))
+            out.add(listOf(1704067200000.0, open, high, low, close, 1_000_000.0)) // 🚀 F9
             price = close
         }
         return out
@@ -67,7 +67,7 @@ class BacktestEngineTest {
             val close = price * 0.99
             val high = open * 1.002
             val low = close * 0.998
-            out.add(listOf(open, high, low, close, 1_000_000.0))
+            out.add(listOf(1704067200000.0, open, high, low, close, 1_000_000.0)) // 🚀 F9
             price = close
         }
         return out
