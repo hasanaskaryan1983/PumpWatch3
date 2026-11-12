@@ -105,10 +105,10 @@ object BacktestEngine {
         val out = mutableListOf<Double>()
         var obv = 0.0
         for (i in 1 until klines.size) {
-            val diff = klines[i][3] - klines[i - 1][3]
+            val diff = klines[i][4] - klines[i - 1][4] // 🚀 F9: close اکنون در ایندکس ۴ است
             obv += when {
-                diff > 0 -> klines[i][4]
-                diff < 0 -> -klines[i][4]
+                diff > 0 -> klines[i][5] // 🚀 F9: volume اکنون در ایندکس ۵ است
+                diff < 0 -> -klines[i][5]
                 else -> 0.0
             }
             out.add(obv)
@@ -347,7 +347,7 @@ object BacktestEngine {
 
                     val c = history.map { it[4] }
                     val v = history.map { it[5] }
-                    val obvPos = ScoringEngine.obvDeltaScore(c, v) > 0
+                    val obvPos = ScoringEngine.obvDeltaScore(c, v) >= 0 // 🚀 F9: حالت خنثی (0) هم مجاز است
 
                     if (weeklyPos && obvPos) {
                         val a = atr(history)
