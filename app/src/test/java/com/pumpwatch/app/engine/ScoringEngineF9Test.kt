@@ -70,7 +70,7 @@ class ScoringEngineF9Test {
         // تفاوت در محتواست نه تعداد: اولین هفتهٔ تقویمی به Jan7 (104) ختم می‌شود، chunked به Jan9 (106)
         assertTrue(
             "محتوای هفتهٔ تقویمی باید با chunked(7) متفاوت باشد",
-            expected != candles.chunked(7).map { it[4].asDouble }
+            expected != candles.chunked(7).map { it.last()[4].asDouble }
         )
     }
 }
