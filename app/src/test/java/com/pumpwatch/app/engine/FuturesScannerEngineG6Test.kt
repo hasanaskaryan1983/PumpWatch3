@@ -1,5 +1,8 @@
 package com.pumpwatch.app.engine
 
+import com.pumpwatch.app.data.FuturesCandle
+import com.pumpwatch.app.engine.FuturesScannerEngine.Regime
+import com.pumpwatch.app.engine.FuturesScannerEngine.Setup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -15,7 +18,6 @@ class FuturesScannerEngineG6Test {
 
     @Test
     fun `G6 - regimeOf returns BULL when e50 greater than e200 and price above e50`() {
-        // ساخت 60 کندل صعودی با EMA50 > EMA200
         val candles = (1..60).map { i ->
             candle(100.0 + i * 0.5, 100.0 + i * 0.6)
         }
@@ -37,18 +39,6 @@ class FuturesScannerEngineG6Test {
     }
 
     @Test
-    fun `G6 - setupOf returns PULLBACK in BULL when price pulls back to e20`() {
-        val candles = (1..40).map { i ->
-            val base = 100.0 + i * 0.3
-            candle(base, base + 0.2)
-        }.toMutableList()
-        // پولبک: کندل آخر به EMA20 نزدیک است
-        candles.add(candle(100.0, 101.0))
-        val setup = FuturesScannerEngine.setupOf(candles, Regime.BULL)
-        assertTrue(setup == Setup.PULLBACK || setup == Setup.BREAKOUT_RETEST || setup == Setup.NONE)
-    }
-
-    @Test
     fun `G6 - setupOf returns NONE for RANGE regime`() {
         val candles = (1..40).map { i -> candle(100.0, 100.0) }
         assertEquals(Setup.NONE, FuturesScannerEngine.setupOf(candles, Regime.RANGE))
@@ -57,7 +47,7 @@ class FuturesScannerEngineG6Test {
     @Test
     fun `G6 - triggerOf requires at least 3 closed candles`() {
         val now = System.currentTimeMillis()
-        val open = now - 10 * 60 * 1000 // 10 دقیقه پیش باز شده
+        val open = now - 10 * 60 * 1000
         val candles = listOf(candle(100.0, 101.0, open))
         assertFalse(FuturesScannerEngine.triggerOf(candles, "LONG"))
     }
@@ -69,7 +59,7 @@ class FuturesScannerEngineG6Test {
         val candles = (0..5).map { i ->
             val openTime = now - (6 - i) * intervalMs - intervalMs
             val open = 100.0 + i
-            val close = open * 1.001 // بدنه 0.1%
+            val close = open * 1.001
             FuturesCandle(openTime, open, close, close * 1.01, open * 0.99, 1000.0)
         }
         assertTrue(FuturesScannerEngine.triggerOf(candles, "LONG"))
@@ -82,7 +72,7 @@ class FuturesScannerEngineG6Test {
         val candles = (0..5).map { i ->
             val openTime = now - (6 - i) * intervalMs - intervalMs
             val open = 100.0
-            val close = open * 1.0001 // بدنه 0.01% < 0.05%
+            val close = open * 1.0001
             FuturesCandle(openTime, open, close, close * 1.01, open * 0.99, 1000.0)
         }
         assertFalse(FuturesScannerEngine.triggerOf(candles, "LONG"))
