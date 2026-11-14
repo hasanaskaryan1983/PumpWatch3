@@ -161,3 +161,48 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         )
     )
 }
+
+// 🚀 G6: JaCoCo coverage verification با threshold 80% روی engine/
+tasks.register<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+    dependsOn("jacocoTestReport")
+    group = "verification"
+    description = "Verify JaCoCo coverage meets minimum threshold"
+
+    val fileFilter = listOf(
+        "**/R.class",
+        "**/R$*.class",
+        "**/BuildConfig.*",
+        "**/Manifest*.*",
+        "**/*Test*.*",
+        "android/**/*.*",
+        "**/*_Factory*.*",
+        "**/*_HiltModules*.*"
+    )
+
+    val debugTree = fileTree(layout.buildDirectory.dir("tmp/kotlin-classes/debug")) {
+        exclude(fileFilter)
+    }
+    classDirectories.setFrom(files(debugTree))
+    sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
+    executionData.setFrom(
+        fileTree(layout.buildDirectory).include(
+            "jacoco/testDebugUnitTest.exec",
+            "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec"
+        )
+    )
+
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.80".toBigDecimal()
+            }
+            includes = listOf("com.pumpwatch.app.engine.*")
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn("jacocoTestCoverageVerification")
+}

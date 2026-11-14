@@ -30,6 +30,12 @@ jobs:
       - name: Run tests
         run: gradle testDebugUnitTest
 
+      - name: Generate JaCoCo report
+        run: gradle jacocoTestReport
+
+      - name: Verify JaCoCo coverage (G6)
+        run: gradle jacocoTestCoverageVerification
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
@@ -43,4 +49,12 @@ jobs:
         with:
           name: test-reports
           path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: app/build/reports/jacoco/jacocoTestReport/
           retention-days: 7
