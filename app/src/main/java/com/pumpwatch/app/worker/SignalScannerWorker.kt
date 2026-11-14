@@ -54,23 +54,23 @@ class SignalScannerWorker(
             SignalNavigator.markPending(applicationContext)
             // 🚀 Commit 8: dedup — گزارش یکسان داخل پنجره تکرار نمی‌شود
             val key = "scan_${mode}_${report.signalCount}"
-            if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+            // 🚀 H-DEDUP: مصرف فقط پس از تحویل موفق
+            NotificationGuard.deliverOnce(applicationContext, key, DEDUP_WINDOW_MS) {
                 sendSignalNotification(report.signalCount, mode)
-                NotificationGuard.recordDelivered(applicationContext, key)
             }
         }
 
         Result.success()
     }
 
-    private fun sendSignalNotification(count: Int, mode: String) {
+    private fun sendSignalNotification(count: Int, mode: String): Boolean {
         val context = applicationContext
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) return
+            if (!granted) return false
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -113,9 +113,11 @@ class SignalScannerWorker(
             }
             .build()
 
-        try {
+        return try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            true
         } catch (_: SecurityException) {
+            false
         }
     }
 }

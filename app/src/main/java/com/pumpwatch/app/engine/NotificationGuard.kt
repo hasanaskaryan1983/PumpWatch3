@@ -56,6 +56,14 @@ object NotificationGuard {
         } else true
     }
 
+    // 🚀 H-DEDUP: تحویل مطمئن — کلید dedup فقط پس از تحویل موفق مصرف می‌شود
+    fun deliverOnce(ctx: Context, key: String, windowMs: Long, deliver: () -> Boolean): Boolean {
+        if (!shouldDeliver(ctx, key, windowMs)) return false
+        val ok = try { deliver() } catch (e: Exception) { false }
+        if (ok) recordDelivered(ctx, key)
+        return ok
+    }
+
     fun recordDelivered(ctx: Context, key: String, nowMs: Long = System.currentTimeMillis()) {
         val map = loadMap(ctx)
         map[key] = nowMs
