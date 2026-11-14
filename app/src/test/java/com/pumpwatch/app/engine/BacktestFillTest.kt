@@ -10,15 +10,15 @@ import org.junit.Test
 class BacktestFillTest {
 
     private fun candle(
-        o: Double, h: Double, l: Double, c: Double, v: Double = 1_000_000.0
-    ): List<Double> = listOf(1704067200000.0, o, h, l, c, v) // 🚀 F9
+        o: Double, h: Double, l: Double, c: Double, v: Double = 1_000_000.0, day: Int = 0
+    ): List<Double> = listOf(1704067200000.0 + day * 86400000.0, o, h, l, c, v) // 🚀 F9
 
     private fun baseUptrend(): MutableList<List<Double>> {
         val out = mutableListOf<List<Double>>()
         var prevClose = 100.0 / 1.005
         for (i in 0 until 260) {
             val c = prevClose * 1.005
-            out.add(candle(prevClose, c * 1.001, prevClose * 0.999, c))
+            out.add(candle(prevClose, c * 1.001, prevClose * 0.999, c, day = i))
             prevClose = c
         }
         return out
@@ -28,12 +28,12 @@ class BacktestFillTest {
 
     private fun setEntryBarGap(k: MutableList<List<Double>>) {
         val c210 = closeAt(210)
-        k[211] = candle(c210 * 1.002, c210 * 1.004 * 1.001, c210 * 1.002 * 0.999, c210 * 1.004)
+        k[211] = candle(c210 * 1.002, c210 * 1.004 * 1.001, c210 * 1.002 * 0.999, c210 * 1.004, day = 211)
     }
 
     private fun setEntryBarNoGap(k: MutableList<List<Double>>) {
         val c210 = closeAt(210)
-        k[211] = candle(c210, c210 * 1.004 * 1.001, c210 * 0.999, c210 * 1.004)
+        k[211] = candle(c210, c210 * 1.004 * 1.001, c210 * 0.999, c210 * 1.004, day = 211)
     }
 
     @Test
@@ -41,7 +41,7 @@ class BacktestFillTest {
         val k = baseUptrend()
         setEntryBarGap(k)
         val c210 = closeAt(210)
-        k[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.97, c210 * 1.01)
+        k[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.97, c210 * 1.01, day = 212)
 
         val (trades, _) = BacktestEngine.runSpot("TEST", k, 30)
         assertTrue("expected at least one trade", trades.isNotEmpty())
@@ -56,7 +56,7 @@ class BacktestFillTest {
         val k = baseUptrend()
         setEntryBarGap(k)
         val c210 = closeAt(210)
-        k[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01)
+        k[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01, day = 212)
 
         val (trades, _) = BacktestEngine.runSpot("TEST", k, 30)
         val t = trades.first()
@@ -71,11 +71,11 @@ class BacktestFillTest {
 
         val kB = baseUptrend()
         setEntryBarGap(kB)
-        kB[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01)
+        kB[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01, day = 212)
 
         val kC = baseUptrend()
         setEntryBarGap(kC)
-        kC[212] = candle(c210 * 1.03, c210 * 1.05, c210 * 1.02, c210 * 1.04)
+        kC[212] = candle(c210 * 1.03, c210 * 1.05, c210 * 1.02, c210 * 1.04, day = 212)
 
         val tB = BacktestEngine.runSpot("TEST", kB, 30).first.first()
         val tC = BacktestEngine.runSpot("TEST", kC, 30).first.first()
@@ -91,11 +91,11 @@ class BacktestFillTest {
 
         val kGap = baseUptrend()
         setEntryBarGap(kGap)
-        kGap[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01)
+        kGap[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01, day = 212)
 
         val kNoGap = baseUptrend()
         setEntryBarNoGap(kNoGap)
-        kNoGap[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01)
+        kNoGap[212] = candle(c210 * 1.004, c210 * 1.05, c210 * 0.99, c210 * 1.01, day = 212)
 
         val tGap = BacktestEngine.runSpot("TEST", kGap, 30).first.first()
         val tNoGap = BacktestEngine.runSpot("TEST", kNoGap, 30).first.first()
