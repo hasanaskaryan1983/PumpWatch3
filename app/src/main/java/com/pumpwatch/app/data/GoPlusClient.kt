@@ -164,6 +164,7 @@ internal fun anyToBool(v: Any?): Boolean? = when (v) {
         "0", "false", "no", "n", "" -> false
         else -> null
     }
+    is Map<*, *> -> anyToBool(v["status"])  // Solana authority flags: {"authority":[...],"status":"1"}
     else -> null
 }
 
