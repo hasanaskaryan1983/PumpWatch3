@@ -58,12 +58,14 @@ class TraderMonitorWorker(
             for (t in tracked) {
                 val act = TraderStore.checkNewActivity(ctx, t)
                 if (act != null) {
-                    TraderStore.markSeen(ctx, t.addr, act.ts, act.txId)
-                    // 🚀 Commit 8: dedup بر اساس txId + شمارش پوشش
                     val key = "trader_${t.addr}_${act.txId}"
-                    if (NotificationGuard.shouldDeliver(ctx, key, DEDUP_WINDOW_MS)) {
+                    NotificationGuard.deliverOnce(ctx, key, DEDUP_WINDOW_MS) {
+                        if (!androidx.core.app.NotificationManagerCompat.from(ctx).areNotificationsEnabled()) {
+                            return@deliverOnce false
+                        }
                         TraderStore.notify(ctx, t, act)
-                        NotificationGuard.recordDelivered(ctx, key)
+                        TraderStore.markSeen(ctx, t.addr, act.ts, act.txId)
+                        true
                     }
                 }
                 delay(300)

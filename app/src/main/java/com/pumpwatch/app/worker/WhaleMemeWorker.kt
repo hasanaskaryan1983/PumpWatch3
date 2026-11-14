@@ -115,21 +115,21 @@ class WhaleMemeWorker(
         }
     }
 
-    private fun sendWhaleNotification(symbol: String, result: WhaleFlowResult) {
+    private fun sendWhaleNotification(symbol: String, result: WhaleFlowResult): Boolean {
         val pressureText = when (result.pressure) {
             WhaleFlowEngine.PRESSURE_ACCUMULATION -> "🐳 فشار خرید نهنگ‌ها: $symbol"
             WhaleFlowEngine.PRESSURE_DISTRIBUTION -> "📉 فشار فروش نهنگ‌ها: $symbol"
-            else -> return
+            else -> return false
         }
 
         val body = "نسبت خرید: ${(result.buyRatio * 100).toInt()}% • " +
                 "${result.whaleTrades} معاملهٔ نهنگی • منبع: ${result.source}"
 
-        sendNotification(NOTIFICATION_ID_WHALE, pressureText, body)
+        return sendNotification(NOTIFICATION_ID_WHALE, pressureText, body)
     }
 
-    private fun sendMemeNotification(signals: List<MemeSignal>) {
-        if (signals.isEmpty()) return
+    private fun sendMemeNotification(signals: List<MemeSignal>): Boolean {
+        if (signals.isEmpty()) return false
         val first = signals.first()
         val title = "🚀 سیگنال میم جدید: ${first.symbol}"
         val body = buildString {
@@ -138,23 +138,24 @@ class WhaleMemeWorker(
             append("تغییر ۱س: ${String.format(Locale.US, "%.1f", first.changeH1)}%")
             if (signals.size > 1) append("\nو ${signals.size - 1} سیگنال دیگر")
         }
-        sendNotification(NOTIFICATION_ID_MEME, title, body)
+        return sendNotification(NOTIFICATION_ID_MEME, title, body)
     }
 
     private fun sendFollowedWhaleNotification(
         whale: com.pumpwatch.app.data.FollowedWhale,
         result: WhaleFlowResult
-    ) {
+    ): Boolean {
         val title = "🐳 فعالیت نهنگی در نماد دنبال‌شده: ${whale.symbol}"
         val body = buildString {
             append("تعداد معاملات نهنگی: ${result.whaleTrades}\n")
             append("بزرگ‌ترین معامله: $${String.format(Locale.US, "%,.0f", result.largestTrade)}\n")
             append("نسبت خرید: ${(result.buyRatio * 100).toInt()}%")
         }
-        sendNotification(NOTIFICATION_ID_FOLLOWED, title, body)
+        return sendNotification(NOTIFICATION_ID_FOLLOWED, title, body)
     }
 
-    private fun sendNotification(notificationId: Int, title: String, body: String) {
+    private fun sendNotification(notificationId: Int, title: String, body: String): Boolean {
+        if (!androidx.core.app.NotificationManagerCompat.from(applicationContext).areNotificationsEnabled()) return false
         val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -181,6 +182,11 @@ class WhaleMemeWorker(
             .setContentIntent(pendingIntent)
             .build()
 
-        notificationManager.notify(notificationId, notification)
+        return try {
+            notificationManager.notify(notificationId, notification)
+            true
+        } catch (e: SecurityException) {
+            false
+        }
     }
 }
