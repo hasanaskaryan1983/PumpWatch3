@@ -40,6 +40,7 @@ object WatchlistMigration {
     private const val FLAG_MIGRATED = "watchlist_migrated_v2"
     private const val LEGACY_PREFS = "pumpwatch_prefs"
     private const val LEGACY_KEY = "watchlist_v1"
+    private const val QUARANTINE_KEY = "watchlist_v1_quarantine" // 🚀 S8: نسخهٔ قابل بازیابی
     private const val LEGACY_GROUP_NAME = "واردشده (Legacy)"
     private const val TAG = "WatchlistMigration"
 
@@ -53,7 +54,13 @@ object WatchlistMigration {
      *
      * @return true اگر مهاجرت انجام شد، false در غیر این صورت
      */
-    fun migrateIfNeeded(ctx: Context): Boolean {
+    private val MIGRATION_LOCK = Any() // 🚀 S8: جلوگیری از اجرای هم‌زمان
+
+    fun migrateIfNeeded(ctx: Context): Boolean = synchronized(MIGRATION_LOCK) {
+        migrateLocked(ctx)
+    }
+
+    private fun migrateLocked(ctx: Context): Boolean {
         val prefs = ctx.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE)
 
         // ۱) قبلاً مهاجرت شده؟
@@ -98,6 +105,7 @@ object WatchlistMigration {
         // ۶) تبدیل WatchlistEntry → WatchCoin و افزودن به گروه
         var imported = 0
         var skipped = 0
+        val attempted = mutableListOf<String>() // 🚀 S8
         val existingSymbols = legacyGroup.coins
             .map { it.symbol.uppercase(Locale.US) }
             .toSet()
@@ -124,6 +132,7 @@ object WatchlistMigration {
                 alerts = emptyList()
             )
 
+            attempted.add(upperSym)
             val added = com.pumpwatch.app.store.WatchlistStore.addCoin(
                 ctx, legacyGroup.id, coin
             )
@@ -135,16 +144,36 @@ object WatchlistMigration {
             "Migration complete: $imported imported, $skipped skipped (duplicate/empty) / ${legacyEntries.size} total"
         )
 
-        // ۷) پاک کردن کلید legacy (مستقیم، نه از طریق bridge)
-        try {
-            prefs.edit().remove(LEGACY_KEY).apply()
+        // 🚀 S8: تأیید پس از نوشتن — همهٔ attempted باید واقعاً persist شده باشند
+        val verifiedGroups = try {
+            com.pumpwatch.app.store.WatchlistStore.loadGroups(ctx)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to clear legacy key (non-critical)", e)
+            Log.e(TAG, "Post-import verification read failed; legacy preserved", e)
+            return false
+        }
+        val persisted = verifiedGroups.firstOrNull { it.name == LEGACY_GROUP_NAME }
+            ?.coins?.map { it.symbol.uppercase(Locale.US) }?.toSet() ?: emptySet()
+        val missing = attempted.filter { it !in persisted }
+        if (missing.isNotEmpty() || imported != attempted.size) {
+            Log.e(TAG, "Migration incomplete (${missing.size} missing); legacy preserved for retry")
+            return false // 🚀 S8: بدون حذف، بدون flag
         }
 
-        // ۸) flag را set کن تا مهاجرت دوباره اجرا نشود
-        prefs.edit().putBoolean(FLAG_MIGRATED, true).apply()
+        // 🚀 S8: قرنطینه + حذف + flag در یک edit اتمیک و durable
+        val rawJson = prefs.getString(LEGACY_KEY, null)
+        val ok = try {
+            prefs.edit()
+                .putString(QUARANTINE_KEY, rawJson)
+                .remove(LEGACY_KEY)
+                .putBoolean(FLAG_MIGRATED, true)
+                .commit()
+        } catch (e: Exception) {
+            Log.e(TAG, "Atomic quarantine+flag write failed; legacy preserved", e)
+            false
+        }
+        if (!ok) return false
 
+        Log.i(TAG, "Migration verified: $imported imported; legacy moved to quarantine")
         return true
     }
 
