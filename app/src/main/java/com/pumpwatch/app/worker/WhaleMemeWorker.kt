@@ -64,9 +64,8 @@ class WhaleMemeWorker(
                 ) {
                     // 🚀 Commit 8: dedup در سطح تحویل
                     val key = "whale_${coin.symbol}_${result.pressure}"
-                    if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                    NotificationGuard.deliverOnce(applicationContext, key, DEDUP_WINDOW_MS) {
                         sendWhaleNotification(coin.symbol, result)
-                        NotificationGuard.recordDelivered(applicationContext, key)
                     }
                 }
             } catch (_: Exception) {
@@ -82,9 +81,8 @@ class WhaleMemeWorker(
             if (highScoreSignals.isNotEmpty()) {
                 // 🚀 Commit 8: dedup بر اساس مجموعهٔ نمادها
                 val key = "meme_" + highScoreSignals.joinToString("_") { it.symbol }
-                if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                NotificationGuard.deliverOnce(applicationContext, key, DEDUP_WINDOW_MS) {
                     sendMemeNotification(highScoreSignals.take(3))
-                    NotificationGuard.recordDelivered(applicationContext, key)
                 }
             }
         } catch (_: Exception) {
@@ -105,9 +103,8 @@ class WhaleMemeWorker(
                 if (result.whaleTrades > 0 && result.largestTrade >= whale.alertThreshold) {
                     // 🚀 Commit 8: dedup برای هر نماد دنبال‌شده
                     val key = "fwhale_${whale.symbol}"
-                    if (NotificationGuard.shouldDeliver(applicationContext, key, DEDUP_WINDOW_MS)) {
+                    NotificationGuard.deliverOnce(applicationContext, key, DEDUP_WINDOW_MS) {
                         sendFollowedWhaleNotification(whale, result)
-                        NotificationGuard.recordDelivered(applicationContext, key)
                     }
                 }
             } catch (_: Exception) {
