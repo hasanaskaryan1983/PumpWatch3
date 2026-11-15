@@ -12,23 +12,28 @@ import org.junit.Test
 
 class FuturesScannerEngineG6Test {
 
+    // 🚀 G6 fix: استفاده از named arguments برای جلوگیری از خطای ترتیب پارامترها
     private fun candle(open: Double, close: Double, time: Long = 0L): FuturesCandle {
-        return FuturesCandle(time, open, close, close * 1.01, open * 0.99, 1000.0)
+        return FuturesCandle(
+            openTime = time,
+            open = open,
+            high = maxOf(open, close) * 1.001,
+            low = minOf(open, close) * 0.999,
+            close = close,
+            volume = 1000.0
+        )
     }
 
     @Test
     fun `G6 - regimeOf returns BULL when e50 greater than e200 and price above e50`() {
-        val candles = (1..60).map { i ->
-            candle(100.0 + i * 0.5, 100.0 + i * 0.6)
-        }
+        // 🚀 G6 fix: حداقل 250 کندل برای محاسبه صحیح EMA200
+        val candles = (1..250).map { i -> candle(100.0 + i * 0.5, 100.0 + i * 0.6) }
         assertEquals(Regime.BULL, FuturesScannerEngine.regimeOf(candles))
     }
 
     @Test
     fun `G6 - regimeOf returns BEAR when e50 less than e200 and price below e50`() {
-        val candles = (1..60).map { i ->
-            candle(100.0 - i * 0.5, 100.0 - i * 0.6)
-        }
+        val candles = (1..250).map { i -> candle(100.0 - i * 0.5, 100.0 - i * 0.6) }
         assertEquals(Regime.BEAR, FuturesScannerEngine.regimeOf(candles))
     }
 
@@ -59,8 +64,8 @@ class FuturesScannerEngineG6Test {
         val candles = (0..5).map { i ->
             val openTime = now - (6 - i) * intervalMs - intervalMs
             val open = 100.0 + i
-            val close = open * 1.001
-            FuturesCandle(openTime, open, close, close * 1.01, open * 0.99, 1000.0)
+            val close = open * 1.002 // بدنه 0.2% (بالاتر از آستانه 0.05%)
+            candle(open, close, openTime)
         }
         assertTrue(FuturesScannerEngine.triggerOf(candles, "LONG"))
     }
@@ -72,8 +77,8 @@ class FuturesScannerEngineG6Test {
         val candles = (0..5).map { i ->
             val openTime = now - (6 - i) * intervalMs - intervalMs
             val open = 100.0
-            val close = open * 1.0001
-            FuturesCandle(openTime, open, close, close * 1.01, open * 0.99, 1000.0)
+            val close = open * 1.0001 // بدنه 0.01% (کمتر از آستانه 0.05%)
+            candle(open, close, openTime)
         }
         assertFalse(FuturesScannerEngine.triggerOf(candles, "LONG"))
     }
@@ -88,13 +93,10 @@ class FuturesScannerEngineG6Test {
 
     @Test
     fun `G6 - analyze returns ScanResult for BULL regime with valid setup`() {
-        val candles4h = (1..60).map { i ->
-            candle(100.0 + i * 0.5, 100.0 + i * 0.6)
-        }
+        // 🚀 G6 fix: 250 کندل برای 4H
+        val candles4h = (1..250).map { i -> candle(100.0 + i * 0.5, 100.0 + i * 0.6) }
         val candles1h = candles4h
-        val candles15m = (1..40).map { i ->
-            candle(100.0 + i * 0.3, 100.0 + i * 0.4)
-        }
+        val candles15m = (1..40).map { i -> candle(100.0 + i * 0.3, 100.0 + i * 0.4) }
         val result = FuturesScannerEngine.analyze("BTC", "USDT", candles4h, candles1h, candles15m, 0.01)
         assertNotNull(result)
         assertEquals(Regime.BULL, result?.regime4h)
@@ -103,9 +105,7 @@ class FuturesScannerEngineG6Test {
 
     @Test
     fun `G6 - atr returns positive value for sufficient candles`() {
-        val candles = (1..20).map { i ->
-            candle(100.0 + i * 0.5, 100.0 + i * 0.6)
-        }
+        val candles = (1..20).map { i -> candle(100.0 + i * 0.5, 100.0 + i * 0.6) }
         val atr = FuturesScannerEngine.atr(candles)
         assertTrue(atr > 0.0)
     }
