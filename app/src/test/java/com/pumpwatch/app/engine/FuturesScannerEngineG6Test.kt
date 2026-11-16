@@ -20,7 +20,7 @@ class FuturesScannerEngineG6Test {
             high = maxOf(open, close) * 1.001,
             low = minOf(open, close) * 0.999,
             close = close,
-            volume = 1000.0
+            quoteVolume = 1000.0
         )
     }
 
