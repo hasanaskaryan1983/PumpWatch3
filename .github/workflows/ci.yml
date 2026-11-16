@@ -50,6 +50,21 @@ jobs:
           PW_KEY_PASS: ${{ secrets.KEY_PASS }}
         run: gradle assembleRelease
 
+      - name: Verify release signature (Gate 2 evidence)
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          echo "APK: $APK"
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          APKSIGNER=$(find "$SDK/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "$APK"
+
+      - name: Upload signed release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumpwatch-release-signed
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 7
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
