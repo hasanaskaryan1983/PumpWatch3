@@ -36,7 +36,18 @@ jobs:
       - name: Verify JaCoCo coverage (G6)
         run: gradle jacocoTestCoverageVerification
 
-      - name: Build Release (S7 R8/minify check)
+      - name: Decode release keystore (S7 signing)
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"; fi
+
+      - name: Build Release (S7 R8/minify + signing)
+        env:
+          PW_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          PW_KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          PW_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          PW_KEY_PASS: ${{ secrets.KEY_PASS }}
         run: gradle assembleRelease
 
       - name: Upload APK artifact
