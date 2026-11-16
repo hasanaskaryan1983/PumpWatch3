@@ -93,10 +93,17 @@ class FuturesScannerEngineG6Test {
 
     @Test
     fun `G6 - analyze returns ScanResult for BULL regime with valid setup`() {
-        // 🚀 G6 fix: 250 کندل برای 4H
         val candles4h = (1..250).map { i -> candle(100.0 + i * 0.5, 100.0 + i * 0.6) }
         val candles1h = candles4h
-        val candles15m = (1..40).map { i -> candle(100.0 + i * 0.3, 100.0 + i * 0.4) }
+        // 🚀 G6 fix: consolidation then breakout → BREAKOUT_RETEST setup
+        val candles15m = (1..40).map { i ->
+            when {
+                i <= 37 -> candle(100.0, 100.0 + (i % 3) * 0.1)
+                i == 38 -> candle(100.0, 100.2)
+                i == 39 -> candle(100.0, 100.3)
+                else -> candle(100.0, 103.0)
+            }
+        }
         val result = FuturesScannerEngine.analyze("BTC", "USDT", candles4h, candles1h, candles15m, 0.01)
         assertNotNull(result)
         assertEquals(Regime.BULL, result?.regime4h)
