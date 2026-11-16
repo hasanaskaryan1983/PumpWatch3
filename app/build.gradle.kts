@@ -24,13 +24,31 @@ android {
         }
     }
 
+    // 🚀 S7: امضای release فقط اگر keystore از env/properties فراهم باشد (بدون secret در repo)
+    val ksPath = (System.getenv("PW_KEYSTORE_PATH") ?: project.findProperty("PW_KEYSTORE_PATH") as String?)
+    if (ksPath != null && file(ksPath).exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(ksPath)
+                storePassword = (System.getenv("PW_KEYSTORE_PASS") ?: project.findProperty("PW_KEYSTORE_PASS") as String?)
+                keyAlias = (System.getenv("PW_KEY_ALIAS") ?: project.findProperty("PW_KEY_ALIAS") as String?)
+                keyPassword = (System.getenv("PW_KEY_PASS") ?: project.findProperty("PW_KEY_PASS") as String?)
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 🚀 S7: فعال‌سازی minify + shrink با rules امن
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (ksPath != null && file(ksPath).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         // 🚀 Commit 136: فعال‌سازی coverage برای unit tests در buildType دیباگ
         debug {
@@ -69,6 +87,9 @@ android {
         }
     }
 }
+
+// 🚀 S7: نام‌گذاری نسخه‌دار خروجی APK
+base { archivesName.set("PumpWatch-v${android.defaultConfig.versionName}") }
 
 dependencies {
     // AndroidX Core
