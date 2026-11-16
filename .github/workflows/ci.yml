@@ -36,6 +36,9 @@ jobs:
       - name: Verify JaCoCo coverage (G6)
         run: gradle jacocoTestCoverageVerification
 
+      - name: Build Release (S7 R8/minify check)
+        run: gradle assembleRelease
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
