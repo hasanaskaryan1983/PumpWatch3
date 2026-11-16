@@ -40,6 +40,7 @@ android {
     buildTypes {
         release {
             // 🚀 S7: فعال‌سازی minify + shrink با rules امن
+            isCrunchPngs = false // 🚀 S7: جلوگیری از شکست AAPT2 crunch روی PNGهای لانچر
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
