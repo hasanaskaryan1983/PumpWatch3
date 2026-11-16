@@ -25,3 +25,9 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 -dontwarn javax.annotation.**
+
+# 🚀 S7 tink/errorprone dontwarn: annotationهای compile-only که در runtime نیستند
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn com.google.auto.value.**
+-dontwarn org.joda.time.**
+-dontwarn javax.annotation.**
