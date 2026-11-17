@@ -4,7 +4,7 @@ import com.pumpwatch.app.wallet.domain.SolanaTxSummary
 import com.pumpwatch.app.wallet.domain.SolanaTokenBalanceChange
 import com.pumpwatch.app.wallet.domain.SolanaEventDecoder
 import com.pumpwatch.app.wallet.domain.EventKind
-import com.pumpwatch.app.wallet.domain.Conidence
+import com.pumpwatch.app.wallet.domain.Confidence
 import org.junit.Test
 import org.junit.Assert.*
 import java.math.BigDecimal
