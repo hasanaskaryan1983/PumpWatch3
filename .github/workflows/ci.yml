@@ -54,7 +54,7 @@ jobs:
           echo "Keystore file size: $(wc -c < $RUNNER_TEMP/release.jks) bytes"
           echo "PW_KEY_ALIAS='${PW_KEY_ALIAS}' (length: ${#PW_KEY_ALIAS})"
           JH="${JAVA_HOME:-/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.21-9/x64}"
-          KT=$(find "$JH" -name keytool -type f | head -1)
+          KT="$JH/bin/keytool"
           "$KT" -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$PW_KEYSTORE_PASS" -storetype PKCS12 || {
             echo "❌ Cannot read keystore (wrong password or corrupted file)"
             exit 1
