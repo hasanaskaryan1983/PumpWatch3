@@ -21,11 +21,31 @@ class WalletTrackingG1Test {
     
     @Test
     fun `G1 - own wallet BUY triggers alert`() {
-        // ولت USDC داده، توکن گرفته (BUY)
+        // ولت SOL داده، توکن گرفته (BUY واقعی)
         val tx = SolanaTxSummary(
             wallet = wallet,
             timestampMs = System.currentTimeMillis(),
             txHash = "5j7s6Nzp6vAnfC6DZr8HqXw1Y2F3K4M5L6N7O8P9Q0R1S2T3U4V5W6X7Y8Z9A0B1C2D3",
+            tokenChanges = listOf(
+                SolanaTokenBalanceChange(wallet, "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnV7YaB1pump", BigDecimal("50000.0"))  // توکن گرفت
+            ),
+            nativeSolDeltaLamports = -1_000_000_000L,  // 1 SOL داد (lamports منفی)
+            programIds = listOf(SolanaEventDecoder.DEX_PROGRAMS.first())  // Raydium
+        )
+        
+        val event = SolanaEventDecoder.decode(tx)
+        assertNotNull("Event should not be null for own wallet transaction", event)
+        assertEquals("Should be BUY", EventKind.BUY, event?.kind)
+        assertEquals("Should be HIGH confidence", Confidence.HIGH, event?.confidence)
+    }
+    
+    @Test
+    fun `G1 - own wallet SWAP triggers alert`() {
+        // ولت USDC داده، توکن گرفته (SWAP)
+        val tx = SolanaTxSummary(
+            wallet = wallet,
+            timestampMs = System.currentTimeMillis(),
+            txHash = "6j7s6Nzp6vAnfC6DZr8HqXw1Y2F3K4M5L6N7O8P9Q0R1S2T3U4V5W6X7Y8Z9A0B1C2D3",
             tokenChanges = listOf(
                 SolanaTokenBalanceChange(wallet, usdcMint, BigDecimal("-1000.0")),  // USDC داد
                 SolanaTokenBalanceChange(wallet, "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnV7YaB1pump", BigDecimal("50000.0"))  // توکن گرفت
@@ -34,9 +54,9 @@ class WalletTrackingG1Test {
         )
         
         val event = SolanaEventDecoder.decode(tx)
-        assertNotNull("Event should not be null for own wallet transaction", event)
-        assertEquals("Should be BUY", EventKind.BUY, event?.kind)
-        assertEquals("Should be HIGH confidence", Confidence.HIGH, event?.confidence)
+        assertNotNull("Event should not be null for own wallet SWAP", event)
+        assertEquals("Should be SWAP", EventKind.SWAP, event?.kind)
+        assertEquals("Should be MEDIUM confidence", Confidence.MEDIUM, event?.confidence)
     }
     
     @Test
