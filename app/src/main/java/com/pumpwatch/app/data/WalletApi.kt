@@ -226,3 +226,73 @@ suspend fun solanaTyped(body: Map<String, @JvmSuppressWildcards Any?>, ctx: Cont
     }
     return null
 }
+
+
+// 🚀 G1: top-level Solana RPC endpoints for wallet tracking
+private val g1Gson = com.google.gson.Gson()
+
+data class SolanaSignature(val signature: String, val blockTime: Long?, val err: Any? = null)
+data class SolanaTransaction(val meta: SolanaTxMeta?, val transaction: SolanaTxData?)
+data class SolanaTxMeta(
+    val preBalances: List<Long>?, val postBalances: List<Long>?,
+    val preTokenBalances: List<SolTokenBal>?, val postTokenBalances: List<SolTokenBal>?
+)
+data class SolTokenBal(val accountIndex: Int?, val mint: String?, val owner: String?, val uiTokenAmount: SolUiAmt?)
+data class SolUiAmt(val uiAmountString: String?)
+data class SolanaTxData(val message: SolanaMsg?)
+data class SolanaMsg(val accountKeys: List<String>?, val instructions: List<SolInst>?)
+data class SolInst(val programIdIndex: Int?)
+
+suspend fun solanaSignatures(address: String, limit: Int = 5): List<SolanaSignature>? {
+    val body = mapOf("jsonrpc" to "2.0", "id" to 1,
+        "method" to "getSignaturesForAddress",
+        "params" to listOf(address, mapOf("limit" to limit)))
+    val resp = try { solanaRaw(body) } catch (e: Exception) { return null }
+    val arr = resp?.result?.asJsonArray ?: return null
+    return arr.mapNotNull { e ->
+        val o = e.asJsonObject
+        SolanaSignature(
+            signature = o.get("signature")?.asString ?: return@mapNotNull null,
+            blockTime = o.get("blockTime")?.takeIf { !it.isJsonNull }?.asLong,
+            err = o.get("err")?.takeIf { !it.isJsonNull }
+        )
+    }
+}
+
+suspend fun solanaTransaction(signature: String): SolanaTransaction? {
+    val body = mapOf("jsonrpc" to "2.0", "id" to 1,
+        "method" to "getTransaction",
+        "params" to listOf(signature, mapOf("encoding" to "jsonParsed",
+            "maxSupportedTransactionVersion" to 0)))
+    val resp = try { solanaRaw(body) } catch (e: Exception) { return null }
+    return try { g1Gson.fromJson(resp?.result, SolanaTransaction::class.java) } catch (e: Exception) { null }
+}
+
+fun buildTxSummary(wallet: String, tx: SolanaTransaction, sig: String, blockTime: Long?): com.pumpwatch.app.wallet.domain.SolanaTxSummary? {
+    val meta = tx.meta ?: return null
+    val msg = tx.transaction?.message ?: return null
+    val keys = msg.accountKeys ?: return null
+    val programs = msg.instructions?.mapNotNull { keys.getOrNull(it.programIdIndex ?: -1) } ?: emptyList()
+    val wi = keys.indexOf(wallet)
+    val nativeDelta = if (wi >= 0 && meta.preBalances != null && meta.postBalances != null)
+        (meta.postBalances.getOrNull(wi) ?: 0L) - (meta.preBalances.getOrNull(wi) ?: 0L) else null
+    val changes = mutableListOf<com.pumpwatch.app.wallet.domain.SolanaTokenBalanceChange>()
+    val preMap = meta.preTokenBalances?.associateBy { "${it.accountIndex}_${it.mint}" } ?: emptyMap()
+    val postMap = meta.postTokenBalances?.associateBy { "${it.accountIndex}_${it.mint}" } ?: emptyMap()
+    (preMap.keys + postMap.keys).forEach { k ->
+        val pre = preMap[k]; val post = postMap[k]
+        val mint = pre?.mint ?: post?.mint ?: return@forEach
+        val owner = pre?.owner ?: post?.owner ?: return@forEach
+        if (owner != wallet) return@forEach
+        val preAmt = pre?.uiTokenAmount?.uiAmountString?.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO
+        val postAmt = post?.uiTokenAmount?.uiAmountString?.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO
+        val delta = postAmt - preAmt
+        if (delta.compareTo(java.math.BigDecimal.ZERO) != 0) {
+            changes.add(com.pumpwatch.app.wallet.domain.SolanaTokenBalanceChange(owner, mint, delta))
+        }
+    }
+    return com.pumpwatch.app.wallet.domain.SolanaTxSummary(
+        wallet = wallet, timestampMs = (blockTime ?: 0L) * 1000L, txHash = sig,
+        tokenChanges = changes, nativeSolDeltaLamports = nativeDelta, programIds = programs
+    )
+}

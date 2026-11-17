@@ -90,27 +90,55 @@ class WhaleMemeWorker(
     }
 
     private suspend fun checkFollowedWhalesAlerts() {
-        val followedWhales = FollowedWhalesStore.load(applicationContext)
-        if (followedWhales.isEmpty()) return
-
-        for (whale in followedWhales) {
+        // 🚀 G1: رهگیری واقعی ولت + رمزگشای swap + هشدار BUY/SELL
+        val whales = com.pumpwatch.app.data.FollowedWhalesStore.load(applicationContext)
+        if (whales.isEmpty()) return
+        whales.forEach { whale ->
             try {
-                val result = WhaleFlowEngine.analyze(
-                    symbol = whale.symbol + "USDT",
-                    limit = 1000
-                ) ?: continue
-
-                if (result.whaleTrades > 0 && result.largestTrade >= whale.alertThreshold) {
-                    // 🚀 Commit 8: dedup برای هر نماد دنبال‌شده
-                    val key = "fwhale_${whale.symbol}"
-                    NotificationGuard.deliverOnce(applicationContext, key, DEDUP_WINDOW_MS) {
-                        sendFollowedWhaleNotification(whale, result)
+                val sigs = com.pumpwatch.app.data.solanaSignatures(whale.address, 5) ?: return@forEach
+                sigs.forEach { sig ->
+                    if (sig.err != null) return@forEach
+                    val tx = com.pumpwatch.app.data.solanaTransaction(sig.signature) ?: return@forEach
+                    val summary = com.pumpwatch.app.data.buildTxSummary(whale.address, tx, sig.signature, sig.blockTime) ?: return@forEach
+                    val event = com.pumpwatch.app.wallet.domain.SolanaEventDecoder.decode(summary) ?: return@forEach
+                    val ok = event.kind in listOf(
+                        com.pumpwatch.app.wallet.domain.EventKind.BUY,
+                        com.pumpwatch.app.wallet.domain.EventKind.SELL,
+                        com.pumpwatch.app.wallet.domain.EventKind.SWAP
+                    ) && event.confidence != com.pumpwatch.app.wallet.domain.Confidence.LOW
+                    if (!ok) return@forEach
+                    val key = "wallet_solana_${sig.signature}"
+                    com.pumpwatch.app.engine.NotificationGuard.deliverOnce(applicationContext, key, DEDUP_WINDOW_MS) {
+                        sendWalletNotification(whale, event, sig.signature)
                     }
                 }
-            } catch (_: Exception) {
-            }
+            } catch (e: Exception) { /* fail-closed */ }
         }
     }
+
+    private fun sendWalletNotification(whale: com.pumpwatch.app.data.FollowedWhale,
+                                       event: com.pumpwatch.app.wallet.domain.WalletEvent,
+                                       txHash: String) {
+        val label = when (event.kind) {
+            com.pumpwatch.app.wallet.domain.EventKind.BUY -> "خرید"
+            com.pumpwatch.app.wallet.domain.EventKind.SELL -> "فروش"
+            com.pumpwatch.app.wallet.domain.EventKind.SWAP -> "تعویض"
+            else -> "تراکنش"
+        }
+        val nm = applicationContext.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(android.app.NotificationChannel(
+                "pw_wallet_g1", "Wallet Alerts", android.app.NotificationManager.IMPORTANCE_HIGH))
+        }
+        val b = androidx.core.app.NotificationCompat.Builder(applicationContext, "pw_wallet_g1")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("🐋 ${whale.symbol} - $label")
+            .setContentText("ولت: ${whale.address.take(8)}… | Hash: ${txHash.take(12)}…")
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+        nm.notify(NOTIFICATION_ID_FOLLOWED + Math.abs(whale.address.hashCode()) % 100, b.build())
+    }
+
 
     private fun sendWhaleNotification(symbol: String, result: WhaleFlowResult): Boolean {
         val pressureText = when (result.pressure) {
