@@ -33,6 +33,7 @@ android {
                 storePassword = (System.getenv("PW_KEYSTORE_PASS") ?: project.findProperty("PW_KEYSTORE_PASS") as String?)
                 keyAlias = (System.getenv("PW_KEY_ALIAS") ?: project.findProperty("PW_KEY_ALIAS") as String?)
                 keyPassword = (System.getenv("PW_KEY_PASS") ?: project.findProperty("PW_KEY_PASS") as String?)
+                storeType = "PKCS12" // 🚀 S7 fix: openssl keystore is PKCS12, not JKS
             }
         }
     }
