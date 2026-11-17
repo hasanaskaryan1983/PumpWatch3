@@ -109,7 +109,7 @@ class WhaleMemeWorker(
                     if (!ok) return@forEach
                     val key = "wallet_solana_${sig.signature}"
                     com.pumpwatch.app.engine.NotificationGuard.deliverOnce(applicationContext, key, DEDUP_WINDOW_MS) {
-                        sendWalletNotification(whale, event, sig.signature)
+                        sendWalletNotification(whale, event, sig.signature); true
                     }
                 }
             } catch (e: Exception) { /* fail-closed */ }
