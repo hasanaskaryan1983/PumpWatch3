@@ -202,7 +202,7 @@ internal suspend fun runWalletScan(addr: String, cfg: ChainCfg): WalletScanResul
                                 async(Dispatchers.IO) {
                                     try {
                                         val c = h.contract!!
-                                        val resp = DexScreenerClient.api.tokens(c)
+                                        val resp = DexScreenerClient.fetchToken(c)
                                         val px = bestPriceUsd(resp.pairs, "sui", c)
                                         if (px != null) h to px else null
                                     } catch (_: Exception) { null }
@@ -321,7 +321,7 @@ internal suspend fun runWalletScan(addr: String, cfg: ChainCfg): WalletScanResul
                                 async(Dispatchers.IO) {
                                     try {
                                         val c = h.contract!!
-                                        val resp = DexScreenerClient.api.tokens(c)
+                                        val resp = DexScreenerClient.fetchToken(c)
                                         val px = bestPriceUsd(resp.pairs, "ton", c)
                                         if (px != null) h to px else null
                                     } catch (_: Exception) { null }
@@ -413,7 +413,7 @@ internal suspend fun runWalletScan(addr: String, cfg: ChainCfg): WalletScanResul
                             async(Dispatchers.IO) {
                                 try {
                                     val c = h.contract!!
-                                    val resp = DexScreenerClient.api.tokens(c)
+                                    val resp = DexScreenerClient.fetchToken(c)
                                     val px = bestPriceUsd(resp.pairs, "solana", c)
                                     if (px != null) h to px else null
                                 } catch (_: Exception) { null }
@@ -548,7 +548,7 @@ internal suspend fun runWalletScan(addr: String, cfg: ChainCfg): WalletScanResul
                             async(Dispatchers.IO) {
                                 try {
                                     val c = h.contract!!
-                                    val resp = DexScreenerClient.api.tokens(c)
+                                    val resp = DexScreenerClient.fetchToken(c)
                                     val px = bestPriceUsd(resp.pairs, h.dexChainId!!, c)
                                     if (px != null) h to px else null
                                 } catch (_: Exception) { null }

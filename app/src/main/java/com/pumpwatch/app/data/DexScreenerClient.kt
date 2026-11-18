@@ -1,6 +1,7 @@
 package com.pumpwatch.app.data
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -92,4 +93,20 @@ internal fun bestPriceUsd(pairs: List<DexPair>?, chainId: String, address: Strin
     } ?: return null
     val best = candidates.maxByOrNull { it.liquidity?.usd ?: 0.0 } ?: return null
     return best.priceUsd?.toDoubleOrNull()?.takeIf { it > 0.0 }
+
+    // 🚀 P1..P6: Throttled & Cached fetchToken
+    private val tokenCache = ConcurrentHashMap<String, Pair<Long, DexResponse>>()
+    private const val CACHE_TTL_MS = 60_000L
+
+    suspend fun fetchToken(addr: String): DexResponse {
+        val now = System.currentTimeMillis()
+        tokenCache[addr]?.let { (time, resp) ->
+            if (now - time < CACHE_TTL_MS) return resp
+        }
+        GlobalHostLimiter.acquire("api.dexscreener.com")
+        val resp = api.tokens(addr)
+        tokenCache[addr] = now to resp
+        return resp
+    }
+
 }

@@ -61,7 +61,10 @@ interface GateApi {
 
 // ========== کش سراسری — thread-safe با سقف اندازه + Mutex per key ==========
 private object GlobalKlineCache {
-    private val map = mutableMapOf<String, Pair<Long, List<BinanceCandle>>>()
+    // 🚀 P1..P6: True LRU Cache (accessOrder = true)
+    private val map = object : LinkedHashMap<String, Pair<Long, List<BinanceCandle>>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Long, List<BinanceCandle>>>): Boolean = size > MAX_SIZE
+    }
     private val lock = Any()
     // 🚀 Commit 117 (M5): Mutex per key برای جلوگیری از fetch موازی duplicate (coroutine-safe)
     private val fetchLocks = ConcurrentHashMap<String, Mutex>()
@@ -81,10 +84,7 @@ private object GlobalKlineCache {
 
     fun put(key: String, v: List<BinanceCandle>) {
         synchronized(lock) {
-            if (map.size >= MAX_SIZE) {
-                val oldestKey = map.entries.minByOrNull { it.value.first }?.key
-                if (oldestKey != null) map.remove(oldestKey)
-            }
+            // LinkedHashMap handles LRU eviction automatically
             map[key] = System.currentTimeMillis() to v
         }
     }

@@ -538,7 +538,7 @@ fun WalletHistorySection() {
                                     async(Dispatchers.IO) {
                                         try {
                                             val best = triples.maxByOrNull { it.third } ?: return@async null
-                                            val resp = DexScreenerClient.api.tokens(best.first)
+                                            val resp = DexScreenerClient.fetchToken(best.first)
                                             val px = bestPriceUsd(resp.pairs, best.second, best.first)
                                             if (px != null) (sym to px) else null
                                         } catch (_: Exception) { null }

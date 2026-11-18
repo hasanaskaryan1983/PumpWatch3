@@ -116,6 +116,7 @@ val GlobalHostLimiter = HostLimiter(
         "api.coingecko.com" to 1500L,
         "api.geckoterminal.com" to 2000L,
         "api.gopluslabs.io" to 1000L,
+        "api.dexscreener.com" to 500L,
         "api.bybit.com" to 200L,
         "www.okx.com" to 200L,
         "api.gateio.ws" to 200L,
