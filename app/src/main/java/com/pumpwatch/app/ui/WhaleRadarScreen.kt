@@ -146,7 +146,7 @@ private fun WhaleAnalysisTab(context: Context, scope: kotlinx.coroutines.Corouti
                 
                 envelope = DataEnvelope(
                     data = res,
-                    source = "DEX Aggregator / On-chain",
+                    source = res?.source ?: "Unknown Source",
                     observedAtMs = System.currentTimeMillis(),
                     servedFrom = ServedFrom.NETWORK,
                     status = status
@@ -160,7 +160,7 @@ private fun WhaleAnalysisTab(context: Context, scope: kotlinx.coroutines.Corouti
             } catch (e: Exception) {
                 envelope = DataEnvelope(
                     data = null,
-                    source = "DEX Aggregator / On-chain",
+                    source = "Network Error / Unknown",
                     observedAtMs = System.currentTimeMillis(),
                     status = DataStatus.FAILURE
                 )
