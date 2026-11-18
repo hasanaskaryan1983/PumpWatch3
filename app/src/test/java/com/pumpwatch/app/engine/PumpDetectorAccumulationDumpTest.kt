@@ -5,7 +5,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 
 class PumpDetectorAccumulationDumpTest {
-    private val detector = PumpDetector()
 
     @Test
     fun testDetectAccumulationAndDumpPositive() {
@@ -17,7 +16,7 @@ class PumpDetectorAccumulationDumpTest {
         val dumpCandle = Candle(time = 21L, open = 100.5, high = 101.0, low = 96.0, close = 97.0, volume = 30.0)
         
         val candles = history + listOf(dumpCandle)
-        assertTrue("Should detect accumulation and dump", detector.detectAccumulationAndDump(candles))
+        assertTrue("Should detect accumulation and dump", PumpDetector.detectAccumulationAndDump(candles))
     }
 
     @Test
@@ -29,7 +28,7 @@ class PumpDetectorAccumulationDumpTest {
         val dumpCandle = Candle(time = 21L, open = 100.0, high = 101.0, low = 90.0, close = 90.0, volume = 30.0)
         
         val candles = history + listOf(dumpCandle)
-        assertFalse("Should not detect if history volatility is high", detector.detectAccumulationAndDump(candles))
+        assertFalse("Should not detect if history volatility is high", PumpDetector.detectAccumulationAndDump(candles))
     }
 
     @Test
@@ -41,6 +40,6 @@ class PumpDetectorAccumulationDumpTest {
         val greenCandle = Candle(time = 21L, open = 100.0, high = 105.0, low = 100.0, close = 104.0, volume = 30.0)
         
         val candles = history + listOf(greenCandle)
-        assertFalse("Should not detect if last candle is green", detector.detectAccumulationAndDump(candles))
+        assertFalse("Should not detect if last candle is green", PumpDetector.detectAccumulationAndDump(candles))
     }
 }
