@@ -168,6 +168,37 @@ object PumpDetector {
     }
 
     /**
+     * 🚀 G1b: تشخیص الگوی تجمیع در کف و سپس دامپ (Accumulation & Dump)
+     * شرایط: ۱. نوسان کم در تاریخچه (تجمیع) ۲. کندل آخر قرمز با حجم انفجاری و شکست قیمت
+     */
+    fun detectAccumulationAndDump(candles: List<Candle>, lookback: Int = 20): Boolean {
+        if (candles.size < lookback + 1) return false
+        
+        val history = candles.take(candles.size - 1) // فاز تجمیع
+        val lastCandle = candles.last()              // کندل مشکوک به دامپ
+        
+        // ۱. بررسی تجمیع: نوسان قیمت در تاریخچه باید کم باشد (مثلاً کمتر از ۳٪)
+        val maxHigh = history.maxOf { it.high }
+        val minLow = history.minOf { it.low }
+        val rangePercent = if (minLow > 0) (maxHigh - minLow) / minLow else 0.0
+        if (rangePercent > 0.03) return false // اگر نوسان زیاد باشد، تجمیع در کف نیست
+        
+        // ۲. بررسی دامپ: کندل آخر باید قرمز باشد
+        val isRedCandle = lastCandle.close < lastCandle.open
+        
+        // ۳. بررسی حجم انفجاری: حجم کندل آخر حداقل ۲.۵ برابر میانگین تاریخچه
+        val avgVol = history.map { it.volume }.average()
+        val volSpike = avgVol > 0 && lastCandle.volume > (avgVol * 2.5)
+        
+        // ۴. بررسی شکست قیمت: قیمت بسته‌شدن آخر زیر ۹۸٪ میانگین قیمت‌های بسته‌شدن قبلی
+        val avgClose = history.map { it.close }.average()
+        val priceBreakdown = lastCandle.close < (avgClose * 0.98)
+        
+        return isRedCandle && volSpike && priceBreakdown
+    }
+
+
+    /**
      * امتیاز نهایی پتانسیل پامپ (۰ تا ۱۰۰) - ترکیب EarlyPump، IsAtTop و SixtySecond
      */
     fun analyzePumpPotential(candles: List<Candle>): Int {
