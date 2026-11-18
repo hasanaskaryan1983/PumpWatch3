@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.pumpwatch.app.data.OpenPosition
 import com.pumpwatch.app.data.TraderProfile
 import com.pumpwatch.app.data.TraderStore
+import com.pumpwatch.app.engine.SignalLogger
 import com.pumpwatch.app.engine.Validators
 import com.pumpwatch.app.ui.components.GlassCard
 import kotlinx.coroutines.launch
@@ -81,8 +82,8 @@ fun TraderLeaderboardScreen() {
     fun refresh() {
         loadState = LeaderboardLoadState.Loading
         try {
-            TraderStore.load(context)
-            val traders = TraderStore.ranked(context)
+            // 🚀 G2: Load real leaderboard from SignalLogger (n >= 20)
+            val traders = com.pumpwatch.app.engine.SignalLogger.getLeaderboard(context, minSignals = 20)
             loadState = LeaderboardLoadState.Loaded(traders)
         } catch (e: Exception) {
             loadState = LeaderboardLoadState.Unreadable

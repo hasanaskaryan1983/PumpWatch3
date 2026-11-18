@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 data class LoggedSignal(
+    val wallet: String = "", // 🚀 G2: Wallet address for leaderboard aggregation
     val symbol: String,
     val side: String,
     val entry: Double,
@@ -186,4 +187,33 @@ object SignalLogger {
 
     fun accuracyBySide(logs: List<LoggedSignal>): Map<String, SignalAccuracyStats> =
         logs.groupBy { it.side }.mapValues { (_, list) -> accuracyStats(list) }
+
+    // 🚀 G2: Real leaderboard from SignalLogger with n >= minSignals
+    fun getLeaderboard(ctx: Context, minSignals: Int = 20): List<com.pumpwatch.app.data.TraderProfile> {
+        val logs = load(ctx)
+        return logs.filter { it.wallet.isNotBlank() }
+            .groupBy { it.wallet }
+            .filter { it.value.size >= minSignals }
+            .map { (wallet, signals) ->
+                val first = signals.first()
+                val pumps = signals.count { it.score >= 70 } // Heuristic for "pump"
+                com.pumpwatch.app.data.TraderProfile(
+                    addr = wallet,
+                    chain = "solana", 
+                    symbol = first.symbol,
+                    note = "Auto-generated (n=${signals.size})",
+                    addedAtMs = first.time,
+                    lastSeenTs = signals.maxOf { it.time },
+                    lastTxId = "N/A",
+                    boughtUsd = 0.0, 
+                    maxSingleUsd = 0.0,
+                    soldUsd = 0.0,
+                    txCount = signals.size,
+                    multiplier = 1.0,
+                    pumpsCount = pumps,
+                    alertOn = false
+                )
+            }.sortedByDescending { it.txCount }
+    }
+
 }
