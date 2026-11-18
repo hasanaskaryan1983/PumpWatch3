@@ -1,4 +1,5 @@
 package com.pumpwatch.app.engine
+import com.pumpwatch.app.wallet.domain.AddressValidator
 
 import android.util.Log
 import com.pumpwatch.app.data.GeckoPool
