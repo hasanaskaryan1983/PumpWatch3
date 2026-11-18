@@ -358,11 +358,11 @@ object MemeRadar {
 
         return when (val result = GoPlusGateway.getSecurity(chain, contractAddress)) {
             is SecurityResult.Failed -> {
-                Log.w(TAG, "GoPlus failed for $contractAddress: ${result.reason}")
+                Log.w(TAG, "GoPlus failed for ${AddressValidator.mask(contractAddress)}: ${result.reason}")
                 Triple(null, listOf("⚠️ خطا در دریافت داده امنیتی"), "FAILED")
             }
             is SecurityResult.Empty -> {
-                Log.w(TAG, "🚫 GoPlus: داده امنیتی برای $contractAddress در $chain یافت نشد")
+                Log.w(TAG, "🚫 GoPlus: داده امنیتی برای ${AddressValidator.mask(contractAddress)} در $chain یافت نشد")
                 Triple(null, listOf("⚠️ داده امنیتی در دسترس نیست"), "EMPTY")
             }
             is SecurityResult.Ready -> {

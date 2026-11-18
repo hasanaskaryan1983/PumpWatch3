@@ -17,4 +17,14 @@ object AddressValidator {
 
     /** آدرس را trim و normalize کن (حذف فضاهای اضافی) */
     fun normalize(address: String): String = address.trim()
+
+    /** ماسک کردن آدرس برای لاگ (مثال: 0x1234...5678) */
+    fun mask(address: String): String {
+        val trimmed = address.trim()
+        return if (trimmed.length >= 10) {
+            "${trimmed.take(6)}...${trimmed.takeLast(4)}"
+        } else {
+            "***"
+        }
+    }
 }
