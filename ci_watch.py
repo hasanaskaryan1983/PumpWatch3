@@ -1,19 +1,49 @@
-import os, sys, time, requests
-TOKEN = os.environ['GITHUB_TOKEN']; REPO = 'hasanaskaryan1983/PumpWatch3'
-H = {'Authorization': f'token {TOKEN}'}
+import os, time, requests
+
+REPO = "hasanaskaryan1983/PumpWatch3"
+TOK = os.environ.get("GITHUB_TOKEN", "")
+H = {"Authorization": f"token {TOK}", "Accept": "application/vnd.github+json"}
+
 def latest():
-    return requests.get(f'https://api.github.com/repos/{REPO}/actions/runs?per_page=1',
-                        headers=H, timeout=30).json()['workflow_runs'][0]
+    for _ in range(30):  # حداکثر ۵ دقیقه صبر برای شروع run
+        try:
+            r = requests.get(
+                f"https://api.github.com/repos/{REPO}/actions/runs?per_page=1",
+                headers=H, timeout=30
+            )
+            runs = r.json().get("workflow_runs", [])
+            if runs:
+                return runs[0]
+            print("... waiting for run to start", flush=True)
+        except Exception as e:
+            print(f"... retry ({e.__class__.__name__})", flush=True)
+        time.sleep(10)
+    raise RuntimeError("No workflow run appeared within 5 minutes")
+
 run = latest()
-while run['status'] in ('queued', 'in_progress'):
-    print('...', run['status'], flush=True); time.sleep(20); run = latest()
-print('run', run['id'], '->', run['conclusion'])
-if run['conclusion'] == 'success':
-    print('✅ SUCCESS'); sys.exit(0)
-for j in requests.get(run['jobs_url'], headers=H, timeout=30).json()['jobs']:
-    if j['conclusion'] == 'failure':
-        print('❌ failed job:', j['name'])
-        for s in j['steps']:
-            if s['conclusion'] == 'failure':
-                print('   failed step:', s['name'])
-sys.exit(1)
+rid = run["id"]
+print(f"run {rid} -> {run['status']}", flush=True)
+
+while run["status"] in ("queued", "in_progress"):
+    time.sleep(15)
+    r = requests.get(
+        f"https://api.github.com/repos/{REPO}/actions/runs/{rid}",
+        headers=H, timeout=30
+    )
+    run = r.json()
+    print(f"... {run['status']}", flush=True)
+
+if run["conclusion"] == "success":
+    print("✅ SUCCESS")
+else:
+    print(f"❌ {run['conclusion']}")
+    jobs = requests.get(
+        f"https://api.github.com/repos/{REPO}/actions/runs/{rid}/jobs",
+        headers=H, timeout=30
+    ).json().get("jobs", [])
+    for j in jobs:
+        if j.get("conclusion") == "failure":
+            print(f"   failed job: {j['name']}")
+            for s in j.get("steps", []):
+                if s.get("conclusion") == "failure":
+                    print(f"   failed step: {s['name']}")
