@@ -422,6 +422,13 @@ object MemeRadar {
                     warnings.add("⚠️ Liquidity فقط $lockDays روز قفل است")
                 }
             }
+            
+            // 🚀 M-LP: بررسی درصد نقدینگی قفل‌شده نسبت به کل LP
+            val lockedLpPercent = lpHolders?.filter { it.is_locked == "1" }?.sumOf { it.percent ?: 0.0 } ?: 0.0
+            if (lockedLpPercent > 0.0 && lockedLpPercent < 80.0) {
+                score -= 15
+                warnings.add("⚠️ تنها ${String.format(java.util.Locale.US, "%.1f", lockedLpPercent)}٪ از LP قفل است")
+            }
         }
 
         if (security.is_open_source != "1") {
