@@ -58,3 +58,16 @@
 -keepclassmembers class * {
     @com.google.gson.annotations.SerializedName <fields>;
 }
+
+
+# ==========================================
+# 🚀 P0 FIX v3: Gson/Retrofit + R8 (نسخه رسمی Gson team)
+# ==========================================
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keep class * extends com.google.gson.reflect.TypeToken
+-keepattributes Signature, *Annotation*, InnerClasses, EnclosingMethod
+-keepclassmembers,allowobfuscation interface * {
+    @retrofit2.http.* <methods>;
+}
+-keep interface retrofit2.** { *; }
+-keep class retrofit2.** { *; }
