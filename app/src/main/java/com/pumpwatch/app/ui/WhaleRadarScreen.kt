@@ -243,7 +243,7 @@ private fun WhaleAnalysisTab(context: Context, scope: kotlinx.coroutines.Corouti
                             // 🚀 P0 Tab 03: نمایش شفاف متادیتا (Source, Window, Age)
                             Surface(color = PumpWatchPalette.Info.copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
                                 Text(
-                                    "منبع: ${envelope!!.source} • بازه: 1000 تراکنش • سن: ${ageSec}ث",
+                                    "منبع: ${envelope!!.source} • بازه: ${res.windowTrades} تراکنش • سن: ${ageSec}ث",
                                     fontSize = 8.sp, color = PumpWatchPalette.Info, fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
@@ -256,6 +256,7 @@ private fun WhaleAnalysisTab(context: Context, scope: kotlinx.coroutines.Corouti
                                 when (res.pressure) {
                                     WhaleFlowEngine.PRESSURE_ACCUMULATION -> "جریان ورودی خالص مثبت"
                                     WhaleFlowEngine.PRESSURE_DISTRIBUTION -> "جریان خروجی خالص مثبت"
+                                    WhaleFlowEngine.PRESSURE_NO_WHALE -> "بدون فعالیت نهنگ در پنجره"
                                     else -> "متعادل"
                                 },
                                 fontSize = 10.sp,
@@ -263,6 +264,7 @@ private fun WhaleAnalysisTab(context: Context, scope: kotlinx.coroutines.Corouti
                                 color = when (res.pressure) {
                                     WhaleFlowEngine.PRESSURE_ACCUMULATION -> PumpWatchPalette.Positive
                                     WhaleFlowEngine.PRESSURE_DISTRIBUTION -> PumpWatchPalette.Negative
+                                    WhaleFlowEngine.PRESSURE_NO_WHALE -> PumpWatchPalette.Muted
                                     else -> PumpWatchPalette.Warning
                                 }
                             )
@@ -273,11 +275,15 @@ private fun WhaleAnalysisTab(context: Context, scope: kotlinx.coroutines.Corouti
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("بزرگ‌ترین تراکنش نمونه:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                            Text("$${String.format(Locale.US, "%,.0f", res.largestTrade)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
+                            Text("$${String.format(Locale.US, "%,.0f", res.largestSampleTrade)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Warning)
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("نسبت حجم خرید به کل:", fontSize = 10.sp, color = PumpWatchPalette.Muted)
-                            Text("${(res.buyRatio * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Positive)
+                            Text(if (res.whaleTrades == 0) "—" else "${(res.buyRatio * 100).toInt()}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (res.whaleTrades == 0) PumpWatchPalette.Muted else PumpWatchPalette.Positive)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("آستانهٔ نهنگ (adaptive):", fontSize = 10.sp, color = PumpWatchPalette.Muted)
+                            Text("$${String.format(Locale.US, "%,.0f", res.adaptiveThresholdUsed)}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = PumpWatchPalette.Info)
                         }
 
                         Spacer(Modifier.height(8.dp))

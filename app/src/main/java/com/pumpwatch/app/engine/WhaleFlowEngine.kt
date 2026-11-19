@@ -47,7 +47,8 @@ data class WhaleFlowResult(
     val largestTrade: Double,
     val buyRatio: Double,
     val pressure: String,
-    val adaptiveThresholdUsed: Double  // 🚀 Commit 87 (W8)
+    val adaptiveThresholdUsed: Double,  // 🚀 Commit 87 (W8)
+    val largestSampleTrade: Double = 0.0 // 🚀 P1: بیشترین notional کل نمونه، مستقل از آستانهٔ نهنگ
 )
 
 /**
@@ -128,6 +129,8 @@ object WhaleFlowEngine {
         liquidityUsd: Double? = null // 🚀 F8: نقدینگی استخر برای جلوگیری از برچسب نهنگ به ترید خرد
     ): WhaleFlowResult? {
         if (trades.isEmpty()) return null
+        // 🚀 P1: fail-closed — اگر همهٔ notionalها نامعتبر/صفر باشند، داده قابل استناد نیست
+        if (trades.all { it.notional <= 0.0 }) return null
 
         // 🚀 Commit 87 (W8): محاسبهٔ آستانهٔ نسبی
         val threshold = computeAdaptiveThreshold(trades, volume24h, whaleThresholdUsd, liquidityUsd)
@@ -135,6 +138,7 @@ object WhaleFlowEngine {
         var buy = 0.0
         var sell = 0.0
         var largest = 0.0
+        var largestSample = 0.0
         var whaleCount = 0
         var total = 0
 
@@ -145,6 +149,7 @@ object WhaleFlowEngine {
         for (t in trades) {
             val notional = t.notional
             total++
+            if (notional > largestSample) largestSample = notional
             if (t.time < minTs) minTs = t.time
             if (t.time > maxTs) maxTs = t.time
 
@@ -180,6 +185,7 @@ object WhaleFlowEngine {
             whaleBuyNotional = buy,
             whaleSellNotional = sell,
             largestTrade = largest,
+            largestSampleTrade = largestSample,
             buyRatio = ratio,
             pressure = pressure,
             adaptiveThresholdUsed = threshold  // 🚀 Commit 87 (W8)
