@@ -605,7 +605,7 @@ fun MarketScreen(onCoinClick: (CoinMarket) -> Unit) {
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            "اتصال به CoinGecko برقرار نشد. لطفاً اینترنت خود را بررسی کنید و دوباره تلاش کنید.",
+                            "خطای عمومی در دریافت داده (برای جزئیات دقیق، لطفاً logcat را در ترموکس بررسی کنید).",
                             color = TextSecondary,
                             fontSize = 10.sp,
                             textAlign = TextAlign.Center

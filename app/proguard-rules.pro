@@ -31,3 +31,30 @@
 -dontwarn com.google.auto.value.**
 -dontwarn org.joda.time.**
 -dontwarn javax.annotation.**
+
+
+# ==========================================
+# 🚀 P0 FIX: Absolute protection for Gson/Retrofit against R8
+# ==========================================
+# حفظ نام فیلدهایی که با @SerializedName مشخص شده‌اند (حیاتی برای Gson)
+-keepclassmembers class com.pumpwatch.app.data.** {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
+
+# حفظ تمام کلاس‌های دیتا و مدل‌ها
+-keep class com.pumpwatch.app.data.** { *; }
+-keep class com.pumpwatch.app.engine.** { *; }
+
+# حفظ اینترفیس‌های Retrofit
+-keep interface com.pumpwatch.app.data.** { *; }
+
+# حفظ متادیتای کاتلین (برای بازتاب یا Reflection)
+-keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
+-keep class kotlin.Metadata { *; }
+
+# قوانین استاندارد Gson
+-keep class com.google.gson.** { *; }
+-keep class * implements com.google.gson.reflect.TypeToken
+-keepclassmembers class * {
+    @com.google.gson.annotations.SerializedName <fields>;
+}
