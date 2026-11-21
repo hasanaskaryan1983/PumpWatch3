@@ -216,15 +216,18 @@ object ApiClient {
     private val cache1000Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache1000TimeRef = AtomicLong(0L)
     private val cache1000ElapsedRef = AtomicLong(0L)
+    private val cache1000WallRef = AtomicLong(0L)  // 🚀 P0-1: مهر دیواری برای Provenance
 
     private val cache100Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache100TimeRef = AtomicLong(0L)
     private val cache100ElapsedRef = AtomicLong(0L)
+    private val cache100WallRef = AtomicLong(0L)  // 🚀 P0-1: مهر دیواری برای Provenance
 
     // 🚀 F1: کش جداگانه برای ۲۵۰ ارز برتر جهت جلوگیری از آلودگی کش ۱۰۰۰ تایی
     private val cache250Ref = AtomicReference<List<CoinMarket>>(emptyList())
     private val cache250TimeRef = AtomicLong(0L)
     private val cache250ElapsedRef = AtomicLong(0L)
+    private val cache250WallRef = AtomicLong(0L)  // 🚀 P0-1: مهر دیواری برای Provenance
 
     private val platformsRef = AtomicReference<Map<String, Map<String, String>>?>(null)
     private val platformsTimeRef = AtomicLong(0L)
@@ -255,17 +258,18 @@ object ApiClient {
     suspend fun getQuickCoins(): List<CoinMarket> {
         val memCache = cache250Ref.get()
         val memTime = cache250TimeRef.get()
-        if (memCache.isNotEmpty() && android.os.SystemClock.elapsedRealtime() - memTime < MEM_CACHE_TTL) {
+        if (memCache.isNotEmpty() && CacheFreshness.isMemFresh(ElapsedMs(memTime), ElapsedMs(android.os.SystemClock.elapsedRealtime()), MEM_CACHE_TTL)) {
             val elapsed = cache250ElapsedRef.get().takeIf { it > 0 }
-            setMeta(memTime, ServedFrom.MEM_CACHE, memCache.size, elapsed)
+            setMeta(cache250WallRef.get(), ServedFrom.MEM_CACHE, memCache.size, elapsed)
             return memCache
         }
 
         val diskTime = OfflineCache.time(app, "m250")
-        if (diskTime > 0 && android.os.SystemClock.elapsedRealtime() - diskTime < DISK_FRESH_MS) {
+        if (memCache.isEmpty() && CacheFreshness.isDiskFresh(WallMs(diskTime), WallMs(System.currentTimeMillis()), DISK_FRESH_MS)) {
             loadList("m250")?.let { disk ->
                 cache250Ref.set(disk)
-                cache250TimeRef.set(diskTime)
+                cache250WallRef.set(diskTime)
+                cache250TimeRef.set(CacheFreshness.backdateElapsed(ElapsedMs(android.os.SystemClock.elapsedRealtime()), System.currentTimeMillis() - diskTime).value)
                 cache250ElapsedRef.set(0L)
                 setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 return disk
@@ -274,13 +278,13 @@ object ApiClient {
 
         GlobalHostLimiter.acquire("api.coingecko.com")
         val p1 = api.getMarkets(perPage = 250, page = 1)
-        val nowMs = android.os.SystemClock.elapsedRealtime()
         val nowElapsed = SystemClock.elapsedRealtime()
 
         cache250Ref.set(p1)
-        cache250TimeRef.set(android.os.SystemClock.elapsedRealtime())
+        cache250WallRef.set(System.currentTimeMillis())
+        cache250TimeRef.set(nowElapsed)
         cache250ElapsedRef.set(nowElapsed)
-        setMeta(nowMs, ServedFrom.NETWORK, p1.size, nowElapsed)
+        setMeta(System.currentTimeMillis(), ServedFrom.NETWORK, p1.size, nowElapsed)
 
         OfflineCache.save(app, "m250", gson.toJson(p1))
         return p1
@@ -292,9 +296,9 @@ object ApiClient {
         val cachedElapsed = cache1000ElapsedRef.get().takeIf { it > 0 }
 
         if (!forceRefresh && cached.isNotEmpty() &&
-            System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
+            CacheFreshness.isMemFresh(ElapsedMs(cachedTime), ElapsedMs(android.os.SystemClock.elapsedRealtime()), MEM_CACHE_TTL)
         ) {
-            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size, cachedElapsed)
+            setMeta(cache1000WallRef.get(), ServedFrom.MEM_CACHE, cached.size, cachedElapsed)
             return cached
         }
 
@@ -302,10 +306,11 @@ object ApiClient {
             val disk = loadList("m1000")
             val diskTime = OfflineCache.time(app, "m1000")
             if (disk != null &&
-                android.os.SystemClock.elapsedRealtime() - diskTime < DISK_FRESH_MS
+                CacheFreshness.isDiskFresh(WallMs(diskTime), WallMs(System.currentTimeMillis()), DISK_FRESH_MS)
             ) {
                 cache1000Ref.set(disk)
-                cache1000TimeRef.set(diskTime)
+                cache1000WallRef.set(diskTime)
+                cache1000TimeRef.set(CacheFreshness.backdateElapsed(ElapsedMs(android.os.SystemClock.elapsedRealtime()), System.currentTimeMillis() - diskTime).value)
                 cache1000ElapsedRef.set(0L)
                 setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 return disk
@@ -321,13 +326,13 @@ object ApiClient {
                     if (page < 4) delay(2000)
                 }
                 val sorted = results.sortedBy { it.market_cap_rank ?: 9999 }
-                val nowMs = android.os.SystemClock.elapsedRealtime()
                 val nowElapsed = SystemClock.elapsedRealtime()
 
                 cache1000Ref.set(sorted)
-                cache1000TimeRef.set(android.os.SystemClock.elapsedRealtime())
+                cache1000WallRef.set(System.currentTimeMillis())
+                cache1000TimeRef.set(nowElapsed)
                 cache1000ElapsedRef.set(nowElapsed)
-                setMeta(nowMs, ServedFrom.NETWORK, sorted.size, nowElapsed)
+                setMeta(System.currentTimeMillis(), ServedFrom.NETWORK, sorted.size, nowElapsed)
 
                 OfflineCache.save(app, "m1000", gson.toJson(sorted))
                 sorted
@@ -341,7 +346,8 @@ object ApiClient {
                 if (disk != null) {
                     val diskTime = OfflineCache.time(app, diskKey)
                     cache1000Ref.set(disk)
-                    cache1000TimeRef.set(diskTime)
+                    cache1000WallRef.set(diskTime)
+                    cache1000TimeRef.set(CacheFreshness.backdateElapsed(ElapsedMs(android.os.SystemClock.elapsedRealtime()), System.currentTimeMillis() - diskTime).value)
                     cache1000ElapsedRef.set(0L)
                     setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                     disk
@@ -356,9 +362,9 @@ object ApiClient {
         val cachedElapsed = cache100ElapsedRef.get().takeIf { it > 0 }
 
         if (!forceRefresh && cached.isNotEmpty() &&
-            System.currentTimeMillis() - cachedTime < MEM_CACHE_TTL
+            CacheFreshness.isMemFresh(ElapsedMs(cachedTime), ElapsedMs(android.os.SystemClock.elapsedRealtime()), MEM_CACHE_TTL)
         ) {
-            setMeta(cachedTime, ServedFrom.MEM_CACHE, cached.size, cachedElapsed)
+            setMeta(cache100WallRef.get(), ServedFrom.MEM_CACHE, cached.size, cachedElapsed)
             return cached
         }
 
@@ -366,10 +372,11 @@ object ApiClient {
             val disk = loadList("m100")
             val diskTime = OfflineCache.time(app, "m100")
             if (disk != null &&
-                android.os.SystemClock.elapsedRealtime() - diskTime < DISK_FRESH_MS
+                CacheFreshness.isDiskFresh(WallMs(diskTime), WallMs(System.currentTimeMillis()), DISK_FRESH_MS)
             ) {
                 cache100Ref.set(disk)
-                cache100TimeRef.set(diskTime)
+                cache100WallRef.set(diskTime)
+                cache100TimeRef.set(CacheFreshness.backdateElapsed(ElapsedMs(android.os.SystemClock.elapsedRealtime()), System.currentTimeMillis() - diskTime).value)
                 cache100ElapsedRef.set(0L)
                 setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                 return disk
@@ -380,13 +387,13 @@ object ApiClient {
             try {
                 GlobalHostLimiter.acquire("api.coingecko.com")
                 val fresh = api.getMarkets(perPage = 100, page = 1)
-                val nowMs = android.os.SystemClock.elapsedRealtime()
                 val nowElapsed = SystemClock.elapsedRealtime()
 
                 cache100Ref.set(fresh)
-                cache100TimeRef.set(android.os.SystemClock.elapsedRealtime())
+                cache100WallRef.set(System.currentTimeMillis())
+                cache100TimeRef.set(nowElapsed)
                 cache100ElapsedRef.set(nowElapsed)
-                setMeta(nowMs, ServedFrom.NETWORK, fresh.size, nowElapsed)
+                setMeta(System.currentTimeMillis(), ServedFrom.NETWORK, fresh.size, nowElapsed)
 
                 OfflineCache.save(app, "m100", gson.toJson(fresh))
                 fresh
@@ -395,7 +402,8 @@ object ApiClient {
                 val diskTime = OfflineCache.time(app, "m100")
                 if (disk != null) {
                     cache100Ref.set(disk)
-                    cache100TimeRef.set(diskTime)
+                    cache100WallRef.set(diskTime)
+                    cache100TimeRef.set(CacheFreshness.backdateElapsed(ElapsedMs(android.os.SystemClock.elapsedRealtime()), System.currentTimeMillis() - diskTime).value)
                     cache100ElapsedRef.set(0L)
                     setMeta(diskTime, ServedFrom.DISK_CACHE, disk.size, null)
                     disk
