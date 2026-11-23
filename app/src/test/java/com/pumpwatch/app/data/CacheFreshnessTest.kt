@@ -1,6 +1,7 @@
 package com.pumpwatch.app.data
 
 import com.pumpwatch.app.testing.FakeClock
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -59,5 +60,24 @@ class CacheFreshnessTest {
         val clock = FakeClock()
         val savedAt = WallMs(clock.now + 60_000L)
         assertFalse(CacheFreshness.isDiskFresh(savedAt, WallMs(clock.now), diskTtl))
+    }
+
+    // 🚀 بستن شکاف پوشش: شاخه‌هایی که گزارش JaCoCo نشان داد تست نشده‌اند
+
+    @Test
+    fun memoryWithZeroTimestampIsRejected() {
+        assertFalse(CacheFreshness.isMemFresh(ElapsedMs(0L), ElapsedMs(1_000_000L), memTtl))
+    }
+
+    @Test
+    fun memoryFutureTimestampIsNeverFresh() {
+        val now = ElapsedMs(1_000_000L)
+        assertFalse(CacheFreshness.isMemFresh(ElapsedMs(now.value + 60_000L), now, memTtl))
+    }
+
+    @Test
+    fun backdateWithNegativeAgeNeverMovesForward() {
+        val now = ElapsedMs(1_000_000L)
+        assertEquals(now.value, CacheFreshness.backdateElapsed(now, -500L).value)
     }
 }
