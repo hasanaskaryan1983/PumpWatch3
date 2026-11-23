@@ -6,28 +6,25 @@ import java.io.File
 
 /**
  * 🚀 C-04: رگرسیون متد RPC در WalletForensics.
- *
- * باگ قبلی: متد "getParsedTransaction" صدا زده می‌شد که در JSON-RPC سولانا وجود ندارد
- * (تابع کمکی web3.js است). RPC خطای "Method not found" می‌داد و deltas همیشه خالی بود.
- * متد درست "getTransaction" با encoding:"jsonParsed" است.
+ * بررسی می‌کند که رشته "getParsedTransaction" حذف شده و "getTransaction" جایگزین شده است.
  */
 class WalletForensicsRpcMethodTest {
 
     @Test
     fun rpcMethodMustBeGetTransaction() {
-        val file = File("app/src/main/java/com/pumpwatch/app/ui/WalletForensics.kt")
-        val content = file.readText()
-        
-        // متد اشتباه نباید وجود داشته باشد
-        assertTrue(
-            "متد getParsedTransaction نباید در WalletForensics استفاده شود",
-            !content.contains("\"getParsedTransaction\"")
+        // تلاش برای یافتن فایل در مسیرهای مختلف (محلی و CI)
+        val possiblePaths = listOf(
+            "app/src/main/java/com/pumpwatch/app/ui/WalletForensics.kt",
+            System.getProperty("user.dir") + "/app/src/main/java/com/pumpwatch/app/ui/WalletForensics.kt",
+            "/home/runner/work/PumpWatch3/PumpWatch3/app/src/main/java/com/pumpwatch/app/ui/WalletForensics.kt"
         )
         
-        // متد درست باید وجود داشته باشد
-        assertTrue(
-            "متد getTransaction باید در WalletForensics استفاده شود",
-            content.contains("\"getTransaction\"")
-        )
+        val file = possiblePaths.firstOrNull { File(it).exists() }?.let { File(it) }
+        
+        assertTrue("فایل WalletForensics.kt در هیچ‌یک از مسیرهای انتظار یافت نشد", file != null)
+        
+        val content = file!!.readText()
+        assertTrue("رشته getParsedTransaction نباید در فایل وجود داشته باشد", !content.contains("\"getParsedTransaction\""))
+        assertTrue("رشته getTransaction باید در فایل وجود داشته باشد", content.contains("\"getTransaction\""))
     }
 }

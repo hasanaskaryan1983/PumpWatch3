@@ -542,8 +542,7 @@ internal fun ChainForensicsSection(
 
                     val coverageGap = rpcDepthFrom > fromTs
 
-                    if ((wallets.isEmpty() && sigs.isEmpty() && (rpcBlocked || coverageGap)) ||
-                        (wallets.isEmpty() && sigs.isNotEmpty() && deltas.isEmpty())) {
+                    if (wallets.isEmpty() && (rpcBlocked || coverageGap || sigs.isNotEmpty())) {
                         progress = "🌍 تغییر به منبع تریدهای GeckoTerminal..."
                         val allTrades = mutableListOf<GtTrade>()
                         var cursor: Long? = null
