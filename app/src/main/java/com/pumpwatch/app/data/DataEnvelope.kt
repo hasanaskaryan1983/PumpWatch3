@@ -111,13 +111,14 @@ object DataEnvelopeFactory {
     fun <T> success(
         data: T,
         source: String,
-        observedAtMs: Long = System.currentTimeMillis()
+        observedAtMs: Long = System.currentTimeMillis(),
+        receivedAtElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
     ): DataEnvelope<T> {
         return DataEnvelope(
             data = data,
             source = source,
             observedAtMs = observedAtMs,
-            receivedAtMs = System.currentTimeMillis(),
+            receivedAtMs = receivedAtElapsedMs,
             servedFrom = ServedFrom.NETWORK,
             status = DataStatus.SUCCESS
         )
@@ -126,13 +127,14 @@ object DataEnvelopeFactory {
     fun <T> fromMemoryCache(
         data: T,
         source: String,
-        observedAtMs: Long
+        observedAtMs: Long,
+        receivedAtElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
     ): DataEnvelope<T> {
         return DataEnvelope(
             data = data,
             source = source,
             observedAtMs = observedAtMs,
-            receivedAtMs = System.currentTimeMillis(),
+            receivedAtMs = receivedAtElapsedMs,
             servedFrom = ServedFrom.MEM_CACHE, // هماهنگ با CoinApi.kt
             status = DataStatus.SUCCESS
         )
@@ -141,24 +143,28 @@ object DataEnvelopeFactory {
     fun <T> fromDiskCache(
         data: T,
         source: String,
-        observedAtMs: Long
+        observedAtMs: Long,
+        receivedAtElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
     ): DataEnvelope<T> {
         return DataEnvelope(
             data = data,
             source = source,
             observedAtMs = observedAtMs,
-            receivedAtMs = System.currentTimeMillis(),
+            receivedAtMs = receivedAtElapsedMs,
             servedFrom = ServedFrom.DISK_CACHE,
             status = DataStatus.SUCCESS
         )
     }
     
-    fun <T> emptyValid(source: String): DataEnvelope<T> {
+    fun <T> emptyValid(
+        source: String,
+        receivedAtElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
+    ): DataEnvelope<T> {
         return DataEnvelope(
             data = null,
             source = source,
             observedAtMs = System.currentTimeMillis(),
-            receivedAtMs = System.currentTimeMillis(),
+            receivedAtMs = receivedAtElapsedMs,
             servedFrom = ServedFrom.NETWORK,
             status = DataStatus.EMPTY_VALID
         )
@@ -166,13 +172,14 @@ object DataEnvelopeFactory {
     
     fun <T> failure(
         source: String,
-        observedAtMs: Long = System.currentTimeMillis()
+        observedAtMs: Long = System.currentTimeMillis(),
+        receivedAtElapsedMs: Long = android.os.SystemClock.elapsedRealtime()
     ): DataEnvelope<T> {
         return DataEnvelope(
             data = null,
             source = source,
             observedAtMs = observedAtMs,
-            receivedAtMs = System.currentTimeMillis(),
+            receivedAtMs = receivedAtElapsedMs,
             servedFrom = ServedFrom.NETWORK,
             status = DataStatus.FAILURE
         )
