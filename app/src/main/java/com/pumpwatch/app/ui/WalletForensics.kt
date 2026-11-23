@@ -434,7 +434,7 @@ internal fun ChainForensicsSection(
                                                         mapOf(
                                                             "jsonrpc" to "2.0",
                                                             "id" to 1,
-                                                            "method" to "getParsedTransaction",
+                                                            "method" to "getTransaction",
                                                             "params" to listOf(
                                                                 sg,
                                                                 mapOf(
@@ -542,7 +542,8 @@ internal fun ChainForensicsSection(
 
                     val coverageGap = rpcDepthFrom > fromTs
 
-                    if (wallets.isEmpty() && sigs.isEmpty() && (rpcBlocked || coverageGap)) {
+                    if ((wallets.isEmpty() && sigs.isEmpty() && (rpcBlocked || coverageGap)) ||
+                        (wallets.isEmpty() && sigs.isNotEmpty() && deltas.isEmpty())) {
                         progress = "🌍 تغییر به منبع تریدهای GeckoTerminal..."
                         val allTrades = mutableListOf<GtTrade>()
                         var cursor: Long? = null
