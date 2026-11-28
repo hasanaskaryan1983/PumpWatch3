@@ -63,7 +63,30 @@ private val VCard = Color(0xFF1A2230)
 
 internal val forensicsSigsCache = mutableMapOf<String, List<Pair<String, Long>>>()
 internal val forensicsDepthCache = mutableMapOf<String, Long>()
-internal val forensicsParsedCache = mutableMapOf<String, List<Triple<String, Double, Long>>>()
+internal class ForensicsAgg {
+    var usd = 0.0
+    var tokens = 0.0
+    var first = Long.MAX_VALUE
+    var n = 0
+    var maxSingle = 0.0
+    fun avgEntry(): Double = if (tokens > 0.0) usd / tokens else 0.0
+    fun addBuy(usdAmount: Double, tokenAmount: Double, ts: Long) {
+        usd += usdAmount
+        if (tokenAmount > 0.0) tokens += tokenAmount
+        n++
+        if (usdAmount > maxSingle) maxSingle = usdAmount
+        if (ts < first) first = ts
+    }
+}
+
+internal data class ForensicsDelta(
+    val owner: String,
+    val usd: Double,
+    val tokens: Double,
+    val ts: Long
+)
+
+internal val forensicsParsedCache = mutableMapOf<String, List<ForensicsDelta>>()
 
 internal data class SusWallet(
     val addr: String,
@@ -232,12 +255,6 @@ internal fun ChainForensicsSection(
                     var currentPrice = candidates[0].attributes?.priceUsd?.toDoubleOrNull() ?: 0.0
                     poolLabel = candidates[0].attributes?.name ?: sym
 
-                    class Agg {
-                        var usd = 0.0
-                        var first = Long.MAX_VALUE
-                        var n = 0
-                        var maxSingle = 0.0
-                    }
 
                     val sigs = mutableListOf<Pair<String, Long>>()
                     var rpcBlocked = mint.isEmpty()
@@ -419,8 +436,8 @@ internal fun ChainForensicsSection(
                             val sample = if (ordered.size <= 1200) ordered else ordered.take(1200)
                             val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
 
-                            val deltas: List<Triple<String, Double, Long>> = forensicsParsedCache[cacheKey] ?: run {
-                                val outList = mutableListOf<Triple<String, Double, Long>>()
+                            val deltas: List<ForensicsDelta> = forensicsParsedCache[cacheKey] ?: run {
+                                val outList = mutableListOf<ForensicsDelta>()
                                 var parsed = 0
 
                                 sample.chunked(4).forEach { chunk ->
@@ -467,14 +484,14 @@ internal fun ChainForensicsSection(
                                                 val pre = bal("preTokenBalances")
                                                 val post = bal("postTokenBalances")
                                                 val px = priceAt(ts)
-                                                val out = mutableListOf<Triple<String, Double, Long>>()
+                                                val out = mutableListOf<ForensicsDelta>()
 
                                                 for ((k, pv) in post) {
                                                     val delta = pv.second - (pre[k]?.second ?: 0.0)
-                                                    out.add(Triple(pv.first, delta * px, ts))
+                                                    out.add(ForensicsDelta(pv.first, delta * px, delta, ts))
                                                 }
                                                 for ((k, pv) in pre) {
-                                                    if (k !in post) out.add(Triple(pv.first, -pv.second * px, ts))
+                                                    if (k !in post) out.add(ForensicsDelta(pv.first, -pv.second * px, -pv.second, ts))
                                                 }
 
                                                 out
@@ -493,13 +510,14 @@ internal fun ChainForensicsSection(
                                 outList
                             }
 
-                            val buys = mutableMapOf<String, Agg>()
+                            val buys = mutableMapOf<String, ForensicsAgg>()
                             val sells = mutableMapOf<String, Double>()
 
-                            for ((owner, usd, ts) in deltas) {
+                            for ((owner, usd, tokens, ts) in deltas) {
                                 if (usd >= thr) {
-                                    val a = buys.getOrPut(owner) { Agg() }
+                                    val a = buys.getOrPut(owner) { ForensicsAgg() }
                                     a.usd += usd
+                                    a.tokens += tokens
                                     a.n++
                                     if (usd > a.maxSingle) a.maxSingle = usd
                                     if (ts < a.first) a.first = ts
@@ -509,7 +527,7 @@ internal fun ChainForensicsSection(
                             }
 
                             val list = buys.map { (w, a) ->
-                                val avg = a.usd / a.n
+                                val avg = a.avgEntry()
                                 val sold = sells[w] ?: 0.0
                                 SusWallet(
                                     addr = w,
@@ -576,7 +594,7 @@ internal fun ChainForensicsSection(
                         }
 
                         val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.US)
-                        val buys = mutableMapOf<String, Agg>()
+                        val buys = mutableMapOf<String, ForensicsAgg>()
                         val sells = mutableMapOf<String, Double>()
                         var minPx = Double.MAX_VALUE
 
@@ -592,8 +610,9 @@ internal fun ChainForensicsSection(
 
                             if ((a.kind ?: "").equals("buy", true)) {
                                 if (vol >= thr) {
-                                    val ag = buys.getOrPut(wallet) { Agg() }
+                                    val ag = buys.getOrPut(wallet) { ForensicsAgg() }
                                     ag.usd += vol
+                                    ag.tokens += if (px > 0) vol / px else 0.0
                                     ag.n++
                                     if (vol > ag.maxSingle) ag.maxSingle = vol
                                     if (ts < ag.first) ag.first = ts
@@ -605,7 +624,7 @@ internal fun ChainForensicsSection(
 
                         val periodLowGt = if (minPx < Double.MAX_VALUE) minPx else 0.0
                         val list = buys.map { (w, a) ->
-                            val avg = a.usd / a.n
+                            val avg = a.avgEntry()
                             val sold = sells[w] ?: 0.0
                             SusWallet(
                                 addr = w,
