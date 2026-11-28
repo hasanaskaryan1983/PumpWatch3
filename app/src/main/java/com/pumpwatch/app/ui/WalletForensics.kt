@@ -456,7 +456,7 @@ internal fun ChainForensicsSection(
                                                                 sg,
                                                                 mapOf(
                                                                     "encoding" to "jsonParsed",
-                                                                    "maxSupportedTransactionVersion" to 0
+                                                                    "maxSupportedTransactionVersion" to 1
                                                                 )
                                                             )
                                                         ),
@@ -475,7 +475,7 @@ internal fun ChainForensicsSection(
                                                         if (o.get("mint")?.asString != mint) continue
                                                         val owner = o.get("owner")?.asString ?: continue
                                                         val idx = o.get("accountIndex")?.asInt ?: -1
-                                                        val amt = o.getAsJsonObject("uiTokenAmount")?.get("uiAmount")?.asDouble ?: 0.0
+                                                        val amt = o.getAsJsonObject("uiTokenAmount")?.get("uiAmountString")?.asString?.toDoubleOrNull() ?: 0.0
                                                         out["$idx|$owner"] = owner to amt
                                                     }
                                                     return out
